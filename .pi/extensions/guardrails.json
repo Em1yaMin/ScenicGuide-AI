@@ -1,0 +1,36 @@
+{
+  "$schema": "https://unpkg.com/@aliou/pi-guardrails@0.14.1/schema.json",
+  "pathAccess": {
+    "allowedPaths": [
+      {
+        "kind": "directory",
+        "path": "E:/c"
+      },
+      {
+        "kind": "directory",
+        "path": "D:/UserData/Administrator/Temp/rpiv-fetch-YdI2cm"
+      },
+      {
+        "kind": "directory",
+        "path": "E:/tmp"
+      },
+      {
+        "kind": "directory",
+        "path": "D:/UserData/Administrator/Downloads"
+      },
+      {
+        "kind": "directory",
+        "path": "E:/usr/bin"
+      },
+      {
+        "kind": "directory",
+        "path": "~/.ssh"
+      },
+      {
+        "kind": "directory",
+        "path": "E:"
+      }
+    ]
+  },
+  "version": "0.13.0-20260619"
+}

@@ -1,0 +1,10 @@
+# pi session artifacts
+.rpiv/
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
