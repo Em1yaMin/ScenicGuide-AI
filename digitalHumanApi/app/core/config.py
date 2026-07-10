@@ -28,5 +28,10 @@ class Settings(BaseModel):
     DIFY_API_URL: str = os.environ.get("DIFY_API_URL", "")
     DIFY_API_KEY: str = os.environ.get("DIFY_API_KEY", "")
 
+    SSH_HOST: str = os.environ.get("SSH_HOST", "")
+    SSH_PORT: int = int(os.environ.get("SSH_PORT", "22"))
+    SSH_USER: str = os.environ.get("SSH_USER", "root")
+    SSH_PASSWORD: str = os.environ.get("SSH_PASSWORD", "")
+
 
 settings = Settings()

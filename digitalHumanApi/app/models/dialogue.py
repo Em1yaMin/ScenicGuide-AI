@@ -21,6 +21,9 @@ class Dialogue(Base):
         ForeignKey("visitors.id"), index=True
     )
     conversation_id: Mapped[Optional[str]] = mapped_column(String(64), default=None)
+    external_message_id: Mapped[Optional[str]] = mapped_column(
+        String(64), unique=True, default=None
+    )
     content: Mapped[str] = mapped_column(Text, default="")
     role: Mapped[DialogueRole] = mapped_column(
         Enum(DialogueRole, name="dialogue_role"),
