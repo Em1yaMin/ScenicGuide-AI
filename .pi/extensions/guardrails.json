@@ -32,7 +32,15 @@
       },
       {
         "kind": "directory",
-        "path": "E:/e/project_file/digitalHuman"
+        "path": "E:/project_file/digitalHuman"
+      },
+      {
+        "kind": "directory",
+        "path": "C:/Program Files/Google/Chrome"
+      },
+      {
+        "kind": "directory",
+        "path": "C:/Program Files (x86)/Microsoft/Edge"
       }
     ]
   },
