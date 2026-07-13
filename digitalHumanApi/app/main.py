@@ -3,13 +3,15 @@ import logging
 from contextlib import asynccontextmanager, suppress
 from typing import Optional
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.database import engine
 from app.models import Base
 from app.routers import admin, analysis, dialogue, visitor
+from app.schemas.common import ErrorResponse
 from app.schemas.health import HealthResponse
 from app.tasks.analysis import analysis_loop
 from app.tasks.polling import polling_loop
@@ -32,9 +34,19 @@ def _handle_task_result(task: asyncio.Task) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _polling_task, _analysis_task
+
+    # Phase 0: configure logging early — before any tasks are spawned
+    logging.basicConfig(
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        level=logging.DEBUG if settings.DEBUG else logging.INFO,
+        force=True,
+    )
+
+    # Phase 1: create_all (IF NOT EXISTS, no destructive DROP)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
+    # Phase 2: background tasks (sync retries on its own interval)
     _polling_task = asyncio.create_task(polling_loop())
     _polling_task.add_done_callback(_handle_task_result)
     _analysis_task = asyncio.create_task(analysis_loop())
@@ -75,3 +87,13 @@ app.include_router(analysis.router)
 @app.get("/api/v1/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     return HealthResponse(status="ok")
+
+
+@app.exception_handler(Exception)
+async def _global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch-all handler: returns HTTP 200 with unified JSON error format."""
+    logger.error("Unhandled exception", exc_info=exc)
+    return JSONResponse(
+        status_code=200,
+        content=ErrorResponse(code=500, message="服务器内部错误").model_dump(),
+    )
