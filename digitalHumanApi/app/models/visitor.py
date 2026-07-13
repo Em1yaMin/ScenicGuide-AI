@@ -1,10 +1,15 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.models.dialogue import Dialogue
 
 
 class Visitor(Base):

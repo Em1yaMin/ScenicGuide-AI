@@ -16,8 +16,13 @@ logger = logging.getLogger(__name__)
 MAX_BATCH_SIZE = 50  # Limit evaluations per cycle
 
 
-def _parse_workflow_output(raw: Any) -> Dict[str, Any]:
-    """Parse Dify workflow output, stripping markdown fences if present."""
+def _parse_workflow_output(raw: Any) -> Optional[Dict[str, Any]]:
+    """Parse Dify workflow output, stripping markdown fences if present.
+
+    Returns:
+        Parsed JSON dict on success, None on parse failure (invalid JSON,
+        non-dict output, or unexpected input type).
+    """
     if isinstance(raw, str):
         text = raw.strip()
         # Remove markdown code fences
@@ -36,10 +41,25 @@ def _parse_workflow_output(raw: Any) -> Dict[str, Any]:
             logger.warning(
                 "Failed to parse workflow output as JSON: %s", text[:200]
             )
-            return {}
+            return None
     if isinstance(raw, dict):
         return raw
-    return {}
+    return None
+
+
+def _normalize_string_list(raw: Any) -> Optional[List[str]]:
+    """Strip whitespace from a list of strings; drop non-string/empty items."""
+    if not isinstance(raw, list):
+        return None
+    normalized: List[str] = []
+    seen: set = set()
+    for item in raw:
+        if isinstance(item, str):
+            stripped = item.strip()
+            if stripped and stripped not in seen:
+                normalized.append(stripped)
+                seen.add(stripped)
+    return normalized if normalized else None
 
 
 async def evaluate_dialogue(
@@ -63,8 +83,22 @@ async def evaluate_dialogue(
             "Unexpected Dify response structure for dialogue %d",
             dialogue.id,
         )
+        return None
+
+    if not raw_output:
+        logger.warning(
+            "Empty workflow output for dialogue %d, will retry next cycle",
+            dialogue.id,
+        )
+        return None
 
     parsed = _parse_workflow_output(raw_output)
+    if parsed is None:
+        logger.warning(
+            "Parse failure for dialogue %d, will retry next cycle",
+            dialogue.id,
+        )
+        return None
 
     # Map Dify output fields to Evaluation columns (flexible naming)
     sentiment_label: Optional[str] = (
@@ -81,7 +115,7 @@ async def evaluate_dialogue(
     concern_tags: Optional[List[str]] = (
         parsed.get("concern_tags") or parsed.get("concerns")
     )
-    mentioned_spots: Optional[List[str]] = (
+    mentioned_spots: Optional[List[str]] = _normalize_string_list(
         parsed.get("mentioned_spots") or parsed.get("spots")
     )
 
@@ -92,10 +126,8 @@ async def evaluate_dialogue(
         concern_tags=(
             concern_tags if isinstance(concern_tags, list) else None
         ),
-        mentioned_spots=(
-            mentioned_spots if isinstance(mentioned_spots, list) else None
-        ),
-        raw_result=parsed if parsed else result,
+        mentioned_spots=mentioned_spots,
+        raw_result=parsed,
     )
     return evaluation
 
@@ -138,10 +170,17 @@ async def batch_evaluate() -> int:
                 evaluated += 1
 
         if evaluated > 0:
-            await db.commit()
-            logger.info(
-                "Evaluated %d dialogues in batch", evaluated
-            )
+            try:
+                await db.commit()
+                logger.info(
+                    "Evaluated %d dialogues in batch", evaluated
+                )
+            except Exception:
+                await db.rollback()
+                logger.warning(
+                    "Evaluation commit rolled back, will retry next cycle"
+                )
+                return 0
 
         return evaluated
 

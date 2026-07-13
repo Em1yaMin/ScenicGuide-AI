@@ -20,8 +20,3 @@ async def report(
     db: AsyncSession = Depends(get_db),
 ) -> ReportResponse:
     return await get_report_data(db)
-
-
-@router.get("/spot-analysis")
-async def spot_analysis() -> dict:
-    return {"message": "spot analysis placeholder"}

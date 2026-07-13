@@ -1,9 +1,11 @@
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.dialogue import Dialogue
 from app.models.evaluation import Evaluation
 from app.schemas.admin import (
     ConcernRankItem,
@@ -21,32 +23,48 @@ logger = logging.getLogger(__name__)
 async def get_dashboard_stats(db: AsyncSession) -> DashboardResponse:
     """Aggregate dashboard statistics from evaluations."""
 
-    # 1. Sentiment distribution
-    sentiment_result = await db.execute(
+    # Sentiment trend: 7-day continuous sequence with daily breakdown
+    trend_result = await db.execute(
         select(
+            func.date(Dialogue.timestamp).label("day"),
             Evaluation.sentiment_label,
             func.count(Evaluation.id).label("cnt"),
         )
-        .where(Evaluation.sentiment_label.isnot(None))
-        .group_by(Evaluation.sentiment_label)
+        .join(Dialogue, Evaluation.dialogue_id == Dialogue.id)
+        .where(
+            Evaluation.sentiment_label.isnot(None),
+            func.date(Dialogue.timestamp)
+            >= (datetime.now(timezone.utc).date() - timedelta(days=6)).isoformat(),
+        )
+        .group_by(
+            func.date(Dialogue.timestamp),
+            Evaluation.sentiment_label,
+        )
+        .order_by(func.date(Dialogue.timestamp))
     )
-    sentiment_map: Dict[str, int] = {
-        "positive": 0,
-        "negative": 0,
-        "neutral": 0,
+
+    # Build 7-day continuous sequence (backfill zeros for missing days)
+    today = datetime.now(timezone.utc).date()
+    days = [
+        (today - timedelta(days=i)).isoformat() for i in range(6, -1, -1)
+    ]
+    trend_map: Dict[str, Dict[str, int]] = {
+        d: {"positive": 0, "negative": 0, "neutral": 0} for d in days
     }
-    for row in sentiment_result.all():
+    for row in trend_result.all():
+        day_str = row.day
         label = (row.sentiment_label or "").lower()
-        if label in sentiment_map:
-            sentiment_map[label] = row.cnt
+        if day_str in trend_map and label in trend_map[day_str]:
+            trend_map[day_str][label] = row.cnt
 
     sentiment_trend = [
         SentimentTrendItem(
-            date="today",
-            positive=sentiment_map.get("positive", 0),
-            negative=sentiment_map.get("negative", 0),
-            neutral=sentiment_map.get("neutral", 0),
+            date=d,
+            positive=trend_map[d]["positive"],
+            negative=trend_map[d]["negative"],
+            neutral=trend_map[d]["neutral"],
         )
+        for d in days
     ]
 
     # 2. Satisfaction distribution (by score)
@@ -56,10 +74,10 @@ async def get_dashboard_stats(db: AsyncSession) -> DashboardResponse:
         .group_by(Evaluation.satisfaction_score)
     )
     satisfaction_distribution: Dict[str, int] = {}
-    for row in score_result.all():
-        score = row.satisfaction_score
+    for score_row in score_result.all():
+        score = score_row.satisfaction_score
         if score is not None:
-            satisfaction_distribution[str(score)] = row[1]
+            satisfaction_distribution[str(score)] = score_row[1]
 
     # 3. Hot issues — aggregate concern_tags (JSON array) in Python
     all_concerns = await db.execute(
@@ -68,8 +86,8 @@ async def get_dashboard_stats(db: AsyncSession) -> DashboardResponse:
         )
     )
     concern_counter: Dict[str, int] = {}
-    for row in all_concerns.all():
-        tags = row.concern_tags
+    for concern_row in all_concerns.all():
+        tags = concern_row.concern_tags
         if isinstance(tags, list):
             for tag in tags:
                 concern_counter[tag] = concern_counter.get(tag, 0) + 1
@@ -88,8 +106,8 @@ async def get_dashboard_stats(db: AsyncSession) -> DashboardResponse:
         )
     )
     spot_counter: Dict[str, int] = {}
-    for row in all_spots.all():
-        spots = row.mentioned_spots
+    for spot_row in all_spots.all():
+        spots = spot_row.mentioned_spots
         if isinstance(spots, list):
             for spot in spots:
                 spot_counter[spot] = spot_counter.get(spot, 0) + 1
@@ -121,12 +139,19 @@ async def get_report_data(db: AsyncSession) -> ReportResponse:
         .where(Evaluation.sentiment_label.isnot(None))
         .group_by(Evaluation.sentiment_label)
     )
+    sentiment_map: Dict[str, int] = {
+        "positive": 0,
+        "negative": 0,
+        "neutral": 0,
+    }
+    for row in sentiment_result.all():
+        label = (row.sentiment_label or "").lower()
+        if label in sentiment_map:
+            sentiment_map[label] = row.cnt
+
     sentiment_stats = [
-        SentimentPieItem(
-            label=(row.sentiment_label or "").capitalize(),
-            count=row.cnt,
-        )
-        for row in sentiment_result.all()
+        SentimentPieItem(label=label.capitalize(), count=count)
+        for label, count in sentiment_map.items()
     ]
 
     # 2. Concern ranking — aggregate concern_tags (JSON array) in Python
@@ -136,8 +161,8 @@ async def get_report_data(db: AsyncSession) -> ReportResponse:
         )
     )
     concern_counter: Dict[str, int] = {}
-    for row in all_concerns.all():
-        tags = row.concern_tags
+    for concern_row in all_concerns.all():
+        tags = concern_row.concern_tags
         if isinstance(tags, list):
             for tag in tags:
                 concern_counter[tag] = concern_counter.get(tag, 0) + 1

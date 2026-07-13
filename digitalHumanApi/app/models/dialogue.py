@@ -1,11 +1,17 @@
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from enum import Enum as PyEnum
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import DateTime, Enum, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
+
+if TYPE_CHECKING:
+    from app.models.evaluation import Evaluation
+    from app.models.visitor import Visitor
 
 
 class DialogueRole(PyEnum):
