@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { RouterLink } from 'vue-router'
 import VChart from 'vue-echarts'
 import { registerECharts } from '@/composables/useECharts'
+import { API_ADMIN_REPORT } from '@/api'
 
 registerECharts()
 
@@ -24,15 +26,22 @@ interface ReportData {
 const data = ref<ReportData | null>(null)
 const isLoading = ref(true)
 const error = ref<string | null>(null)
-const hasData = computed(() => data.value !== null)
+const hasData = computed(() =>
+  data.value !== null &&
+  (data.value.concern_ranking.length > 0 || data.value.suggestions.length > 0)
+)
 
 async function fetchReport() {
   isLoading.value = true
   error.value = null
   try {
-    const response = await fetch('/api/v1/admin/report')
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    data.value = await response.json()
+    const response = await fetch(API_ADMIN_REPORT)
+    const result = await response.json()
+    if (result.code) {
+      error.value = result.message || '服务器错误'
+      return
+    }
+    data.value = result
   } catch (e) {
     error.value = e instanceof Error ? e.message : '未知错误'
   } finally {
@@ -75,7 +84,8 @@ const sentimentPieOption = computed(() => ({
     </div>
 
     <div v-else-if="!hasData && !isLoading" class="empty-state">
-      <p>暂无报告数据，等待对话评估完成后生成</p>
+      <p>暂无报告数据，请先与数字人对话以生成评估报告</p>
+      <RouterLink to="/visitor/chat" class="guide-btn">前往数字人对话</RouterLink>
     </div>
 
     <div v-else class="report-content">
@@ -136,6 +146,16 @@ h1 {
   border: none;
   border-radius: 4px;
   cursor: pointer;
+  font-size: var(--text-small);
+}
+
+.guide-btn {
+  display: inline-block;
+  padding: var(--space-xs) var(--space-md);
+  background: var(--color-accent);
+  color: #fff;
+  border-radius: 4px;
+  text-decoration: none;
   font-size: var(--text-small);
 }
 

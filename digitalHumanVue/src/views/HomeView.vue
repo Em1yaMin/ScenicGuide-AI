@@ -4,7 +4,7 @@
   <div class="page">
     <section class="hero">
       <h1>景区导览<br />AI 数字人</h1>
-      <p class="subtitle">探索景区故事，获取个性化推荐</p>
+      <p class="subtitle">探索景区故事，与 AI 数字人对话</p>
     </section>
   </div>
 </template>

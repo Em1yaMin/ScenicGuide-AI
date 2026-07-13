@@ -9,7 +9,6 @@ import { RouterLink, RouterView } from 'vue-router'
       <nav>
         <RouterLink to="/admin">数据大屏</RouterLink>
         <RouterLink to="/admin/report">感受度报告</RouterLink>
-        <RouterLink to="/admin/spot-analysis">景点分析</RouterLink>
       </nav>
     </aside>
     <main class="admin-main">

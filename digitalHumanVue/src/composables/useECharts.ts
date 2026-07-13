@@ -1,6 +1,12 @@
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
-import { BarChart, LineChart, PieChart, HeatmapChart } from 'echarts/charts'
+import {
+  BarChart,
+  GaugeChart,
+  HeatmapChart,
+  LineChart,
+  PieChart,
+} from 'echarts/charts'
 import {
   TitleComponent,
   TooltipComponent,
@@ -13,6 +19,7 @@ export function registerECharts(): void {
   use([
     CanvasRenderer,
     BarChart,
+    GaugeChart,
     LineChart,
     PieChart,
     HeatmapChart,

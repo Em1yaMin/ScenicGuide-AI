@@ -9,7 +9,6 @@ import { RouterLink, RouterView } from 'vue-router'
       <nav>
         <RouterLink to="/visitor">首页</RouterLink>
         <RouterLink to="/visitor/chat">数字人</RouterLink>
-        <RouterLink to="/visitor/recommend">推荐</RouterLink>
       </nav>
     </header>
     <main class="visitor-main">
