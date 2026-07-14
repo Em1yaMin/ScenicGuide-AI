@@ -1,38 +1,23 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { RouterLink } from 'vue-router'
+import { computed, onMounted } from 'vue'
 import VChart from 'vue-echarts'
 import { registerECharts } from '@/composables/useECharts'
+import { useApi } from '@/composables/useApi'
 import { API_ADMIN_DASHBOARD } from '@/api'
+import EmptyStateGuide from '@/components/EmptyStateGuide.vue'
 import type { DashboardResponse } from '@/types/dashboard'
 
 registerECharts()
 
-const data = ref<DashboardResponse | null>(null)
-const isLoading = ref(true)
-const error = ref<string | null>(null)
+const { data, isLoading, error, execute: fetchDashboard } = useApi<DashboardResponse>(API_ADMIN_DASHBOARD)
 const hasData = computed(() =>
-  data.value !== null &&
-  data.value.sentiment_trend.some(t => t.positive > 0 || t.negative > 0 || t.neutral > 0)
+  data.value !== null && (
+    data.value?.sentiment_trend?.some(t => t.positive > 0 || t.negative > 0 || t.neutral > 0) ||
+    Object.keys(data.value?.satisfaction_distribution ?? {}).length > 0 ||
+    (data.value?.hot_issues?.length ?? 0) > 0 ||
+    (data.value?.spot_heatmap?.length ?? 0) > 0
+  )
 )
-
-async function fetchDashboard() {
-  isLoading.value = true
-  error.value = null
-  try {
-    const response = await fetch(API_ADMIN_DASHBOARD)
-    const result = await response.json()
-    if (result.code) {
-      error.value = result.message || '服务器错误'
-      return
-    }
-    data.value = result
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '未知错误'
-  } finally {
-    isLoading.value = false
-  }
-}
 
 onMounted(() => {
   fetchDashboard()
@@ -41,15 +26,15 @@ onMounted(() => {
 const sentimentTrendOption = computed(() => {
   const trend = data.value?.sentiment_trend ?? []
   return {
-    title: { text: '情感趋势' },
+    title: { text: '情感变化趋势' },
     tooltip: { trigger: 'axis' },
     legend: { bottom: 0 },
     xAxis: { type: 'category', data: trend.map(t => t.date) },
     yAxis: { type: 'value' },
     series: [
-      { name: '正面', type: 'bar', data: trend.map(t => t.positive), itemStyle: { color: '#52c41a' } },
-      { name: '负面', type: 'bar', data: trend.map(t => t.negative), itemStyle: { color: '#ff4d4f' } },
-      { name: '中性', type: 'bar', data: trend.map(t => t.neutral), itemStyle: { color: '#faad14' } },
+      { name: '正面', type: 'bar', data: trend.map(t => t.positive ?? 0), itemStyle: { color: '#52c41a' } },
+      { name: '负面', type: 'bar', data: trend.map(t => t.negative ?? 0), itemStyle: { color: '#ff4d4f' } },
+      { name: '中性', type: 'bar', data: trend.map(t => t.neutral ?? 0), itemStyle: { color: '#faad14' } },
     ],
   }
 })
@@ -130,10 +115,11 @@ const spotHeatmapOption = computed(() => {
       <button class="refresh-btn" @click="fetchDashboard">重试</button>
     </div>
 
-    <div v-else-if="!hasData && !isLoading" class="empty-state">
-      <p>暂无数据，请先与数字人对话以生成数据</p>
-      <RouterLink to="/visitor/chat" class="guide-btn">前往数字人对话</RouterLink>
-    </div>
+    <EmptyStateGuide
+      v-else-if="!hasData && !isLoading"
+      message="暂无数据，请先与数字人对话以生成数据"
+      to="/visitor/chat"
+    />
 
     <div v-else class="charts-grid">
       <div class="chart-card">
@@ -183,18 +169,7 @@ const spotHeatmapOption = computed(() => {
   cursor: not-allowed;
 }
 
-.guide-btn {
-  display: inline-block;
-  padding: var(--space-xs) var(--space-md);
-  background: var(--color-accent);
-  color: #fff;
-  border-radius: 4px;
-  text-decoration: none;
-  font-size: var(--text-small);
-}
-
-.error-state,
-.empty-state {
+.error-state {
   display: flex;
   flex-direction: column;
   align-items: center;

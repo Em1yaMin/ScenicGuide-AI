@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { RouterLink } from 'vue-router'
+import { computed, onMounted } from 'vue'
 import VChart from 'vue-echarts'
 import { registerECharts } from '@/composables/useECharts'
+import { useApi } from '@/composables/useApi'
 import { API_ADMIN_REPORT } from '@/api'
+import EmptyStateGuide from '@/components/EmptyStateGuide.vue'
 
 registerECharts()
 
@@ -23,31 +24,14 @@ interface ReportData {
   suggestions: string[]
 }
 
-const data = ref<ReportData | null>(null)
-const isLoading = ref(true)
-const error = ref<string | null>(null)
+const { data, isLoading, error, execute: fetchReport } = useApi<ReportData>(API_ADMIN_REPORT)
 const hasData = computed(() =>
-  data.value !== null &&
-  (data.value.concern_ranking.length > 0 || data.value.suggestions.length > 0)
+  data.value !== null && (
+    (data.value?.sentiment_stats?.length ?? 0) > 0 ||
+    (data.value?.concern_ranking?.length ?? 0) > 0 ||
+    (data.value?.suggestions?.length ?? 0) > 0
+  )
 )
-
-async function fetchReport() {
-  isLoading.value = true
-  error.value = null
-  try {
-    const response = await fetch(API_ADMIN_REPORT)
-    const result = await response.json()
-    if (result.code) {
-      error.value = result.message || '服务器错误'
-      return
-    }
-    data.value = result
-  } catch (e) {
-    error.value = e instanceof Error ? e.message : '未知错误'
-  } finally {
-    isLoading.value = false
-  }
-}
 
 onMounted(() => {
   fetchReport()
@@ -83,10 +67,11 @@ const sentimentPieOption = computed(() => ({
       <button class="refresh-btn" @click="fetchReport">重试</button>
     </div>
 
-    <div v-else-if="!hasData && !isLoading" class="empty-state">
-      <p>暂无报告数据，请先与数字人对话以生成评估报告</p>
-      <RouterLink to="/visitor/chat" class="guide-btn">前往数字人对话</RouterLink>
-    </div>
+    <EmptyStateGuide
+      v-else-if="!hasData && !isLoading"
+      message="暂无报告数据，请先与数字人对话以生成评估报告"
+      to="/visitor/chat"
+    />
 
     <div v-else class="report-content">
       <section class="report-section">
@@ -149,18 +134,7 @@ h1 {
   font-size: var(--text-small);
 }
 
-.guide-btn {
-  display: inline-block;
-  padding: var(--space-xs) var(--space-md);
-  background: var(--color-accent);
-  color: #fff;
-  border-radius: 4px;
-  text-decoration: none;
-  font-size: var(--text-small);
-}
-
-.error-state,
-.empty-state {
+.error-state {
   display: flex;
   flex-direction: column;
   align-items: center;

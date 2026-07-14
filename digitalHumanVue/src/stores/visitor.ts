@@ -1,6 +1,7 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { API_VISITOR_REGISTER } from '@/api'
+import { fetchWithCodeEnvelope } from '@/utils/fetchWithCodeEnvelope'
 
 const STORAGE_KEY = 'visitor_id'
 
@@ -10,24 +11,21 @@ export const useVisitorStore = defineStore('visitor', () => {
 
   const isAuthenticated = computed(() => Boolean(visitorId.value))
 
-  async function createVisitor(): Promise<boolean> {
+  /**
+   * 将前端生成的访客 UUID 注册到后端。
+   * 注册为非关键操作——失败时静默忽略，不阻塞应用。
+   */
+  async function registerVisitor(): Promise<void> {
     try {
-      const response = await fetch(API_VISITOR_REGISTER, {
+      await fetchWithCodeEnvelope(API_VISITOR_REGISTER, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ visitor_id: visitorId.value }),
       })
-      const result = await response.json()
-      if (result.code) {
-        console.error('Failed to register visitor:', result.message)
-        return false
-      }
-      return true
-    } catch (error) {
-      console.error('Failed to register visitor:', error)
-      return false
+    } catch {
+      // Registration is non-critical — silently ignore failures
     }
   }
 
-  return { visitorId, isAuthenticated, createVisitor }
+  return { visitorId, isAuthenticated, registerVisitor }
 })

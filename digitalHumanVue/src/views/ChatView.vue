@@ -13,15 +13,46 @@ const iframeSrc = computed(() => {
   return `${base}${separator}visitor_id=${encodeURIComponent(store.visitorId)}`
 })
 
+const IFRAME_LOAD_TIMEOUT_MS = 10_000
+const MAX_RETRIES = 3
+
 // ── iframe fault tolerance state ──
 const iframeKey = ref(0)
 const isLoading = ref(true)
 const loadingError = ref(false)
+const retryCount = ref(0)
+const hasLoadedOnce = ref(false)
 let timeoutId: ReturnType<typeof setTimeout> | null = null
 
+function startLoadingTimeout() {
+  if (timeoutId) {
+    clearTimeout(timeoutId)
+  }
+  timeoutId = setTimeout(() => {
+    if (isLoading.value) {
+      isLoading.value = false
+      loadingError.value = true
+    }
+  }, IFRAME_LOAD_TIMEOUT_MS)
+}
+
 function onIframeLoad() {
+  if (loadingError.value) return
+
+  if (hasLoadedOnce.value) {
+    // Internal navigation: only clean up stale timeout
+    if (timeoutId) {
+      clearTimeout(timeoutId)
+      timeoutId = null
+    }
+    return
+  }
+
+  // First successful load
+  hasLoadedOnce.value = true
   isLoading.value = false
   loadingError.value = false
+  retryCount.value = 0
   if (timeoutId) {
     clearTimeout(timeoutId)
     timeoutId = null
@@ -38,28 +69,19 @@ function onIframeError() {
 }
 
 function reloadIframe() {
+  if (retryCount.value >= MAX_RETRIES) return
   isLoading.value = true
   loadingError.value = false
+  hasLoadedOnce.value = false
+  retryCount.value += 1
   iframeKey.value += 1
-  if (timeoutId) {
-    clearTimeout(timeoutId)
-  }
-  timeoutId = setTimeout(() => {
-    if (isLoading.value) {
-      isLoading.value = false
-      loadingError.value = true
-    }
-  }, 10_000)
+  startLoadingTimeout()
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await store.registerVisitor()
   if (iframeSrc.value) {
-    timeoutId = setTimeout(() => {
-      if (isLoading.value) {
-        isLoading.value = false
-        loadingError.value = true
-      }
-    }, 10_000)
+    startLoadingTimeout()
   }
 })
 
@@ -103,7 +125,14 @@ onUnmounted(() => {
         <!-- Error state (replaces iframe while error is displayed) -->
         <div v-if="!isLoading && loadingError" class="placeholder">
           <p>数字人服务加载失败</p>
-          <button class="retry-btn" @click="reloadIframe">重新加载</button>
+          <button
+            v-if="retryCount < MAX_RETRIES"
+            class="retry-btn"
+            @click="reloadIframe"
+          >
+            重新加载
+          </button>
+          <p v-else>已超过最大重试次数，请稍后再试</p>
         </div>
       </template>
     </div>
