@@ -225,6 +225,30 @@
 - ⚠️ 每次对话多一次LLM调用，API成本翻倍
 - ⚠️ 需设计批量处理机制控制成本
 
+### ADR-004: 回退超前实现功能，回归设计原貌
+
+**Status**: Accepted
+
+**Context**: 2026-07-12 状态审视发现，实际代码比设计文档超前实现了三项功能：
+1. 个性化推荐（Q3 原决策为「搁置」）
+2. 景区数据本地同步（scenic_spots 表 + scenic_sync 定时任务）
+3. 景点维度分析（P2 加分项）
+
+超前实现带出了未验证的假设（Dify `/documents` 返回 content 字段、iframe 透传 visitor_id）、过频的轮询（5分钟同步静态数据）、以及对 ScenicSpot 表的连锁依赖。在单人开发、赛题硬性指标未稳的前提下，这些「加分项」反而稀释了对核心链路（对话抓取→量化→大屏）的验证精力。
+
+**Decision**: 删除上述三项超前实现功能及其连锁代码，回归设计文档原貌。具体删除：
+- 后端：`scenic_spot` 模型、`scenic_sync` service/task、`recommend_spots`、`get_spot_detail`、`get_spot_analysis`、dify_client 的 datasets 方法、dialogue/analysis 占位 API 保留待处理
+- 前端：`RecommendView.vue`、`SpotDetailView.vue`、`SpotAnalysisView.vue`、`useFormatAgeRec.ts` 及对应路由和导航
+
+**Consequences**:
+- ✅ 架构与设计文档严格对齐，文档分（10分）更容易拿满
+- ✅ 消除 scenic_sync 带来的 3 个技术债（D/E/F，见 status-review.md）
+- ✅ 精力聚焦核心链路：数字人对话 → 轮询抓取 → 量化分析 → 数据大屏/感受度报告
+- ✅ 游客端业务功能简化为「首页 + 数字人对话」，景点介绍回归 Dify 知识库对话方式
+- ⚠️ 丧失个性化推荐的差异化加分，但原设计本就搁置此功能
+- ⚠️ 丧失景点维度分析看板，但数据大屏的 `spot_heatmap` 仍保留（统计对话中提及的景点，不依赖本地景点表）
+- 🔁 可逆：若核心链路稳定后有余力，可重新实现推荐功能（数据基础仍在 Dify 知识库）
+
 ## 七、下一步行动
 
 1. **确认Q1-Q7的关键问题**（尤其是Q1抓取方案、Q4景区资料）

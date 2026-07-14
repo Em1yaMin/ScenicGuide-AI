@@ -1,5 +1,5 @@
 {
-  "$schema": "https://unpkg.com/@aliou/pi-guardrails@0.14.1/schema.json",
+  "$schema": "https://unpkg.com/@aliou/pi-guardrails@0.15.0/schema.json",
   "pathAccess": {
     "allowedPaths": [
       {
@@ -41,6 +41,22 @@
       {
         "kind": "directory",
         "path": "C:/Program Files (x86)/Microsoft/Edge"
+      },
+      {
+        "kind": "directory",
+        "path": "E:/e/project_file/digitalHuman"
+      },
+      {
+        "kind": "directory",
+        "path": "~/.pi/agent/npm/node_modules/@juicesharp/rpiv-pi/skills/_shared"
+      },
+      {
+        "kind": "directory",
+        "path": "E:/project_file"
+      },
+      {
+        "kind": "directory",
+        "path": "D:/UserData/Administrator/Temp/pi-subagents-0/project_file-digitalHuman/019f5b9c-12db-7c95-b1f8-f5bed0b577c5/tasks"
       }
     ]
   },
