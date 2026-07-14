@@ -25,6 +25,9 @@ def _parse_workflow_output(raw: Any) -> Optional[Dict[str, Any]]:
     """
     if isinstance(raw, str):
         text = raw.strip()
+        # Remove <think>...</think> reasoning blocks emitted by some models
+        if "</think>" in text:
+            text = text.split("</think>", 1)[1].strip()
         # Remove markdown code fences
         if text.startswith("```"):
             lines = text.split("\n")
@@ -67,7 +70,7 @@ async def evaluate_dialogue(
 ) -> Optional[Evaluation]:
     """Evaluate a single dialogue via Dify workflow."""
     result = await dify_client.trigger_workflow(
-        {"dialogue_text": dialogue.content}
+        {"input": dialogue.content}
     )
     if result is None:
         return None
