@@ -1,0 +1,32 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./digitalHumanApi:/app
+    environment:
+      - DEBUG=false
+      - DATABASE_URL=sqlite+aiosqlite:///./digital_human.db
+      - CORS_ORIGINS=
+      - DIFY_API_URL=${DIFY_API_URL:-}
+      - DIFY_API_KEY=${DIFY_API_KEY:-}
+      - DIFY_WORKFLOW_API_KEY=${DIFY_WORKFLOW_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
