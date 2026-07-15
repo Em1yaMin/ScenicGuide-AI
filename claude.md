@@ -58,9 +58,9 @@ digitalHumanVue/          # Vue 3 + TypeScript + Vite 8 前端
 | **MiniMaxAPI** | TTS | `configs/engines/tts/minimaxTTS.yaml` | ✅ `Chinese_sweet_girl_nv1` 音色 |
 
 ### 凭证位置
-- **腾讯云 ASR**: AK/SK 来自 `D:\UserData\Administrator\Downloads\SecretKey.csv`，APPID `1341034858`，REGION `ap-guangzhou`
-- **Dify Agent**: URL `http://YOUR_DIFY_SERVER_IP/v1`，Key `app-YOUR_CHAT_AGENT_KEY`，User `EmiyaMin`
-- **MiniMax TTS**: API Key `sk-api-...`，Group ID `2038635457494917905`，Model `speech-2.8-hd`
+- **腾讯云 ASR**: AK/SK 来自从腾讯云控制台下载的 SecretKey.csv，APPID `<your-tencent-appid>`，REGION `ap-guangzhou`
+- **Dify Agent**: URL `http://<dify-server-ip>/v1`，Key `app-xxxxxxxxxxxxxxxx`，User `<your-dify-user>`
+- **MiniMax TTS**: API Key `sk-api-...`，Group ID `<your-minimax-group-id>`，Model `speech-2.8-hd`
 
 ### 启动命令
 ```bash

@@ -57,6 +57,14 @@
       {
         "kind": "directory",
         "path": "D:/UserData/Administrator/Temp/pi-subagents-0/project_file-digitalHuman/019f5b9c-12db-7c95-b1f8-f5bed0b577c5/tasks"
+      },
+      {
+        "kind": "directory",
+        "path": "E:/opt/dify"
+      },
+      {
+        "kind": "directory",
+        "path": "E:/n"
       }
     ]
   },

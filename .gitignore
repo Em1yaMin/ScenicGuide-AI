@@ -1,1 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.db
+*.db-journal
+.mypy_cache/
+.pytest_cache/
+
+# Environment (SECURITY)
+.env
+.venv/
+venv/
+
+# Node — 防御纵深（子目录 .gitignore 也覆盖）
+node_modules/
+dist/
+
+# Logs & OS artifacts
+*.log
+nul
+plugin_log.txt
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Pi tooling
+.pi/
+.rpiv/
+
+# Project tooling
 .workbuddy/
+
+# Reference projects (large external dependencies)
+参考项目/
