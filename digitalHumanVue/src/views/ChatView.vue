@@ -6,11 +6,12 @@ const store = useVisitorStore()
 
 const iframeSrc = computed(() => {
   const base = import.meta.env.VITE_LIGHT4AI_URL
-  if (!base) {
-    return ''
-  }
+  if (!base) return ''
+  const params = new URLSearchParams()
+  params.set('visitor_id', store.visitorId)
+  params.set('live2d_model', import.meta.env.VITE_LIVE2D_MODEL || 'hiyori')
   const separator = base.includes('?') ? '&' : '?'
-  return `${base}${separator}visitor_id=${encodeURIComponent(store.visitorId)}`
+  return `${base}${separator}${params.toString()}`
 })
 
 const IFRAME_LOAD_TIMEOUT_MS = 10_000
@@ -25,9 +26,7 @@ const hasLoadedOnce = ref(false)
 let timeoutId: ReturnType<typeof setTimeout> | null = null
 
 function startLoadingTimeout() {
-  if (timeoutId) {
-    clearTimeout(timeoutId)
-  }
+  if (timeoutId) clearTimeout(timeoutId)
   timeoutId = setTimeout(() => {
     if (isLoading.value) {
       isLoading.value = false
@@ -38,17 +37,13 @@ function startLoadingTimeout() {
 
 function onIframeLoad() {
   if (loadingError.value) return
-
   if (hasLoadedOnce.value) {
-    // Internal navigation: only clean up stale timeout
     if (timeoutId) {
       clearTimeout(timeoutId)
       timeoutId = null
     }
     return
   }
-
-  // First successful load
   hasLoadedOnce.value = true
   isLoading.value = false
   loadingError.value = false
@@ -91,104 +86,343 @@ onUnmounted(() => {
     timeoutId = null
   }
 })
+
+// ── Suggested Questions ──
+const suggestedQuestions = [
+  '这个景点有什么历史故事？',
+  '推荐适合亲子的游览路线',
+  '今天景区开放时间？',
+  '附近有什么特色美食？',
+]
 </script>
 
 <template>
-  <div class="chat-page">
-    <h1>数字人对话</h1>
+  <div class="chat">
+    <div class="chat-layout">
+      <!-- Left: Live2D Digital Human iframe -->
+      <div class="chat-human">
+        <div class="human-frame">
+          <!-- Config missing -->
+          <div v-if="!iframeSrc" class="placeholder-panel">
+            <div class="placeholder-icon">⚙</div>
+            <p>请在 .env 中配置 VITE_LIGHT4AI_URL</p>
+          </div>
 
-    <div class="iframe-container">
-      <!-- No config -->
-      <div v-if="!iframeSrc" class="placeholder">
-        请在 .env 中配置 VITE_LIGHT4AI_URL
+          <!-- iframe (always in DOM for @load/@error) -->
+          <template v-else>
+            <iframe
+              v-show="!loadingError"
+              :key="iframeKey"
+              :src="iframeSrc"
+              title="数字人"
+              allow="microphone"
+              class="digital-human-frame"
+              @load="onIframeLoad"
+              @error="onIframeError"
+            />
+
+            <!-- Loading overlay -->
+            <div v-if="isLoading && !loadingError" class="placeholder-panel loading-overlay">
+              <div class="loading-spinner" />
+              <p>数字人加载中，请稍候…</p>
+            </div>
+
+            <!-- Error state -->
+            <div v-if="!isLoading && loadingError" class="placeholder-panel">
+              <div class="placeholder-icon">⚠</div>
+              <p>数字人服务加载失败</p>
+              <button
+                v-if="retryCount < MAX_RETRIES"
+                class="retry-btn"
+                @click="reloadIframe"
+              >
+                重新加载
+              </button>
+              <p v-else class="retry-note">已超过最大重试次数，请稍后再试</p>
+            </div>
+          </template>
+        </div>
+
+        <!-- Status indicator -->
+        <div v-if="hasLoadedOnce && !loadingError" class="status-bar">
+          <span class="status-dot status-dot--live" />
+          <span class="status-text">数字人在线</span>
+        </div>
       </div>
 
-      <template v-else>
-        <!-- iframe — always in DOM to receive @load/@error events;
-             hidden via v-show when error state is active -->
-        <iframe
-          v-show="!loadingError"
-          :key="iframeKey"
-          :src="iframeSrc"
-          title="数字人"
-          allow="microphone"
-          class="digital-human-frame"
-          @load="onIframeLoad"
-          @error="onIframeError"
-        />
-
-        <!-- Loading overlay (positioned on top of iframe) -->
-        <div v-if="isLoading && !loadingError" class="placeholder loading-overlay">
-          数字人加载中，请稍候...
+      <!-- Right: Welcome / Guide Panel -->
+      <div class="chat-guide">
+        <div class="guide-inner">
+          <div class="guide-header">
+            <h2>您好</h2>
+            <p>我是您的景区 AI 数字人导览助手</p>
+          </div>
+          <div class="guide-divider" />
+          <div class="guide-questions">
+            <p class="guide-hint">您可以这样问我：</p>
+            <div class="question-list">
+              <div
+                v-for="q in suggestedQuestions"
+                :key="q"
+                class="question-chip"
+              >
+                {{ q }}
+              </div>
+            </div>
+          </div>
+          <div class="guide-footer">
+            <div class="mic-hint">
+              <span class="mic-icon">🎤</span>
+              <span>点击麦克风图标开始语音对话</span>
+            </div>
+          </div>
         </div>
-
-        <!-- Error state (replaces iframe while error is displayed) -->
-        <div v-if="!isLoading && loadingError" class="placeholder">
-          <p>数字人服务加载失败</p>
-          <button
-            v-if="retryCount < MAX_RETRIES"
-            class="retry-btn"
-            @click="reloadIframe"
-          >
-            重新加载
-          </button>
-          <p v-else>已超过最大重试次数，请稍后再试</p>
-        </div>
-      </template>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.chat-page {
+.chat {
   padding: var(--space-lg);
+  height: calc(100vh - 140px);
+  display: flex;
+  flex-direction: column;
 }
 
-h1 {
-  font-size: var(--text-display);
-  margin-bottom: var(--space-md);
+.chat-layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: var(--space-lg);
+  min-height: 0;
 }
 
-.iframe-container {
+/* ── Left: Digital Human Panel ── */
+.chat-human {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.human-frame {
+  flex: 1;
   position: relative;
-  width: 100%;
-  min-height: 70vh;
-}
-
-.digital-human-frame,
-.placeholder {
-  width: 100%;
-  min-height: 70vh;
   border: 1px solid var(--color-border);
+  border-radius: 12px;
+  overflow: hidden;
   background: var(--color-overlay);
 }
 
-.placeholder {
+.digital-human-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+.placeholder-panel {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: var(--color-ink-secondary);
   gap: var(--space-md);
+  color: var(--color-ink-secondary);
+  background: var(--color-paper);
 }
 
 .loading-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
+  background: var(--color-paper);
+  z-index: 5;
+}
+
+.placeholder-icon {
+  font-size: 2rem;
+  opacity: 0.4;
+}
+
+.placeholder-panel p {
+  font-size: var(--text-body);
+  color: var(--color-ink-secondary);
+  margin: 0;
+  text-align: center;
+}
+
+.loading-spinner {
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .retry-btn {
-  padding: var(--space-xs) var(--space-md);
-  background: var(--color-accent);
-  color: #fff;
+  padding: var(--space-sm) var(--space-lg);
+  background: var(--color-ink);
+  color: var(--color-paper);
   border: none;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
   font-size: var(--text-small);
+  font-weight: 500;
+  transition: background var(--duration-fast) var(--ease-out);
 }
 
 .retry-btn:hover {
-  opacity: 0.9;
+  background: var(--color-accent);
+}
+
+.retry-note {
+  font-size: var(--text-small) !important;
+  opacity: 0.6;
+}
+
+/* Status bar */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  margin-top: var(--space-sm);
+  font-size: var(--text-small);
+  color: var(--color-ink-secondary);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot--live {
+  background: #6B9E6D;
+  box-shadow: 0 0 0 3px rgba(107, 158, 109, 0.15);
+}
+
+.status-text {
+  font-size: var(--text-small);
+  color: var(--color-ink-secondary);
+}
+
+/* ── Right: Guide Panel ── */
+.chat-guide {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.guide-inner {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-xl);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: transparent;
+}
+
+.guide-header {
+  margin-bottom: var(--space-lg);
+}
+
+.guide-header h2 {
+  font-family: var(--font-display);
+  font-size: var(--text-display);
+  margin: 0 0 var(--space-sm);
+  color: var(--color-ink);
+}
+
+.guide-header p {
+  font-size: var(--text-body);
+  color: var(--color-ink-secondary);
+  margin: 0;
+  line-height: 1.6;
+}
+
+.guide-divider {
+  height: 1px;
+  background: var(--color-border);
+  margin-bottom: var(--space-lg);
+}
+
+.guide-questions {
+  flex: 1;
+}
+
+.guide-hint {
+  font-size: var(--text-small);
+  color: var(--color-ink-secondary);
+  margin: 0 0 var(--space-md);
+}
+
+.question-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.question-chip {
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  font-size: var(--text-small);
+  color: var(--color-ink);
+  cursor: default;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background var(--duration-fast) var(--ease-out);
+  user-select: none;
+}
+
+.question-chip:hover {
+  border-color: var(--color-accent);
+  background: var(--color-accent-light);
+}
+
+.guide-footer {
+  padding-top: var(--space-lg);
+  border-top: 1px solid var(--color-border);
+}
+
+.mic-hint {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--text-small);
+  color: var(--color-ink-secondary);
+}
+
+.mic-icon {
+  font-size: var(--text-body);
+}
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+  .chat {
+    height: auto;
+    min-height: calc(100vh - 140px);
+  }
+
+  .chat-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr auto;
+  }
+
+  .chat-guide {
+    max-height: none;
+  }
+
+  .guide-inner {
+    padding: var(--space-lg);
+  }
 }
 </style>
