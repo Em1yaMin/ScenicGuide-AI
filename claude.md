@@ -42,6 +42,64 @@ digitalHumanVue/          # Vue 3 + TypeScript + Vite 8 前端
 | `npm run build` | `digitalHumanVue/` | 生产构建 |
 | `docker-compose up -d` | 根目录 | Docker Compose 部署 (api + web + nginx) |
 
+# 本地数字人 (awesome-digital-human-live2d)
+
+## 概述
+参考项目 `参考项目/awesome-digital-human-live2d-2.0.0/awesome-digital-human-live2d-2.0.0/`（下称 ADH）提供 Live2D 数字人前端 + Python 后端，替代 cloud light4ai 实现本地数字人对话。
+
+**引擎架构**: Registry + Factory + Pool 三层，引擎通过 `@Register("Name")` 装饰器自动注册（详见 `.rpiv/artifacts/research/2026-07-13_19-05-29_local-digital-human-deploy.md`）。
+
+## 当前配置状态（2026-07-15）
+
+| 引擎 | 类型 | 配置 | 状态 |
+|------|------|------|------|
+| **TencentAPI** | ASR | `configs/engines/asr/tencentAPI.yaml` | ⚠️ 引擎通，麦克风录音调试中 |
+| **DifyAgent** | Agent | `configs/agents/difyAgent.yaml` | ✅ 流式对话正常（Dify 1.15.0） |
+| **MiniMaxAPI** | TTS | `configs/engines/tts/minimaxTTS.yaml` | ✅ `Chinese_sweet_girl_nv1` 音色 |
+
+### 凭证位置
+- **腾讯云 ASR**: AK/SK 来自 `D:\UserData\Administrator\Downloads\SecretKey.csv`，APPID `1341034858`，REGION `ap-guangzhou`
+- **Dify Agent**: URL `http://YOUR_DIFY_SERVER_IP/v1`，Key `app-YOUR_CHAT_AGENT_KEY`，User `EmiyaMin`
+- **MiniMax TTS**: API Key `sk-api-...`，Group ID `2038635457494917905`，Model `speech-2.8-hd`
+
+### 启动命令
+```bash
+# 后端 (端口 8000)
+cd 参考项目/.../awesome-digital-human-live2d-2.0.0/
+nohup ./venv/Scripts/python.exe main.py > backend.log 2>&1 &
+
+# 前端 (端口 3000) — 必须绕过 pnpm dev bug
+cd 参考项目/.../awesome-digital-human-live2d-2.0.0/web/
+nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
+```
+
+### 关键修改文件（相对于 ADH 根目录）
+- `configs/config_template.yaml` — SUPPORT_LIST 精简为仅目标引擎
+- `configs/engines/asr/tencentAPI.yaml` — 腾讯云 ASR 凭证
+- `configs/engines/tts/minimaxTTS.yaml` — MiniMax TTS 凭证（**新建**，替代 difyTTSWorkflow）
+- `configs/agents/difyAgent.yaml` — Dify Agent 凭证
+- `digitalHuman/engine/tts/minimaxTTS.py` — MiniMax TTS 引擎（**新建**）
+- `digitalHuman/engine/tts/__init__.py` — 注册 MiniMaxAPI
+- `digitalHuman/engine/asr/tencentASR.py:44` — **已移除** `req.AppId` 行（SDK 3.1.x 不支持该字段）
+- `digitalHuman/agent/core/difyAgent.py` — 新增 `ThinkFilter` 类，流式过滤 `<think>` 标签
+- `digitalHuman/server/asrApi.py` — 新增 DEBUG 音频保存到 `debug_audio/` 目录
+- `web/app/ui/home/chatbot.tsx` — 录音方案从 `js-audio-recorder` 替换为原生 `MediaRecorder` + 客户端 webm→WAV 转换（16kHz 重采样）
+
+### ASR 已知问题
+- `tencentcloud-sdk-python-asr` v3.1.130 中 `SentenceRecognitionRequest` 无 `AppId` 字段，设置会序列化为 `PpId` 导致 `UnknownParameter` 错误 → 已移除该行
+- 浏览器麦克风录音链路待验证：旧方案 `js-audio-recorder`（ScriptProcessorNode）在新 Chrome 录音全部为静音；新方案（MediaRecorder）已替换但麦克风输入设备选择仍需调试
+- 验证通过的测试：`test/src/audio/zh.wav` 文件 ASR 识别正常，证明后端引擎代码正确
+
+<important if="you are working on the ADH local digital human">
+## ADH 注意事项
+- **Python 环境**: 使用 ADH 自带的 `venv/`（Python 3.8.6），不污染主项目环境
+- **嵌套 git**: ADH 为独立 git 仓库，改动不影响主仓库 `git status`
+- **前端启动**: 不要用 `pnpm dev`（会触发失败的依赖检查），直接用 `node node_modules/next/dist/bin/next dev -p 3000`
+- **Live2D 默认模型**: 已改为 Hiyori，首次访问需清 localStorage `character-storage`
+- **Agent think 过滤**: `difyAgent.py` 中的 `ThinkFilter` 实时过滤 `<think>...</think>`，TTS 不会读思考内容
+- **重启后端**: 改 yaml 或 Python 代码后必须重启后端；改前端代码 Next HMR 自动热更
+</important>
+
 # Business Context
 - **Visitor 端**: 访客通过数字人 iframe 对话（Dify Chat Agent），系统后台轮询抓取对话内容
 - **Admin 端**: 管理后台展示情感趋势、满意度、热点关注和景点热度（数据来自 Dify Workflow 量化分析）
