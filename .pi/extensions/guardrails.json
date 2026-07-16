@@ -65,6 +65,10 @@
       {
         "kind": "directory",
         "path": "E:/n"
+      },
+      {
+        "kind": "directory",
+        "path": "~/.pi/agent/npm/node_modules/@juicesharp/rpiv-workflow/docs"
       }
     ]
   },

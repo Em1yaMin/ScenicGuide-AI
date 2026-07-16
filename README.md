@@ -26,18 +26,7 @@
 - **TTS**: MiniMax API (`speech-2.8-hd` + `Chinese_sweet_girl_nv1` 音色)
 - **Agent**: Dify Chat Agent（与主项目共用 Dify 实例 `YOUR_DIFY_SERVER_IP`）
 
-**启动命令**（开发环境）:
-```bash
-# 后端
-cd 参考项目/awesome-digital-human-live2d-2.0.0/awesome-digital-human-live2d-2.0.0/
-nohup ./venv/Scripts/python.exe main.py > backend.log 2>&1 &
-
-# 前端（必须绕过 pnpm dev bug）
-cd 参考项目/awesome-digital-human-live2d-2.0.0/awesome-digital-human-live2d-2.0.0/web/
-nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
-```
-
-> 详细部署步骤与故障排查见 `CLAUDE.md` 或 `doc/local-digital-human-deploy-plan.md`。
+启动步骤见上方「**4. 启动本地数字人服务**」。详细部署步骤与故障排查见 `CLAUDE.md` 或 `doc/local-digital-human-deploy-plan.md`。
 
 ## 目录结构
 
@@ -102,6 +91,7 @@ cp .env.example .env
 | `DIFY_API_URL` | Dify API 基础地址，如 `https://your-dify.example.com/v1` |
 | `DIFY_API_KEY` | Chat Agent 应用 Key（拉取对话） |
 | `DIFY_WORKFLOW_API_KEY` | Workflow 应用 Key（触发量化评估） |
+| `DIFY_RECOMMEND_WORKFLOW_API_KEY` | 推荐问句 Workflow 应用 Key（需在 Dify 平台单独创建） |
 | `DIFY_LIGHT4AI_USER` | light4ai 调 Dify 时固定的 user 字段 |
 | `SSH_HOST` / `SSH_PORT` / `SSH_USER` / `SSH_PASSWORD` | 部署 Dify 的远程服务器（可选） |
 
@@ -114,15 +104,39 @@ cp .env.example .env
 
 | 变量 | 说明 |
 |------|------|
-| `VITE_LIGHT4AI_URL` | light4ai 数字人 iframe 服务地址 |
+| `VITE_LIGHT4AI_URL` | light4ai 数字人 iframe 服务地址（如 `http://localhost:3000`） |
 | `VITE_API_BASE` | 后端 API 基础地址，开发默认 `http://localhost:8000`（Vite 代理目标） |
+| `VITE_ADH_IFRAME_ORIGIN` | 数字人 iframe 的 origin，用于 postMessage 安全校验（可选，默认 `*`） |
 
-### 2. 启动后端
+### 2. 快速启动（一键后台）
+
+以下命令在 PowerShell 中执行，将所有服务以后台窗口启动：
+
+```powershell
+# 主后端 (8000)
+Start-Process -WindowStyle Hidden -WorkingDirectory "$PWD/digitalHumanApi" -FilePath python -ArgumentList '-m', 'uvicorn', 'app.main:app', '--reload'
+
+# 主前端 (5173)
+Start-Process -WindowStyle Hidden -WorkingDirectory "$PWD/digitalHumanVue" -FilePath npm -ArgumentList 'run', 'dev'
+
+# 数字人后端 (8001) — 注意端口已从默认 8000 改为 8001，避免冲突
+Start-Process -WindowStyle Hidden -FilePath "$PWD/参考项目/awesome-digital-human-live2d-2.0.0/awesome-digital-human-live2d-2.0.0/venv/Scripts/python.exe" -ArgumentList "$PWD/参考项目/awesome-digital-human-live2d-2.0.0/awesome-digital-human-live2d-2.0.0/main.py"
+
+# 数字人前端 (3000) — 必须绕过 pnpm dev bug
+Start-Process -WindowStyle Hidden -WorkingDirectory "$PWD/参考项目/awesome-digital-human-live2d-2.0.0/awesome-digital-human-live2d-2.0.0/web" -FilePath node -ArgumentList 'node_modules/next/dist/bin/next', 'dev', '-p', '3000'
+```
+
+> **注意**：
+> - 命令中的 `$PWD` 需替换为项目根目录绝对路径（如 `E:/project_file/digitalHuman`），或将终端 cd 到项目根目录后执行。
+> - 数字人后端端口已在 `config_template.yaml` 中改为 **8001**（原 8000 被主后端占用）。
+> - 数字人前端需在 `web/.env` 中设置 `NEXT_PUBLIC_ADH_SERVER_PORT=8001`，否则心跳连错端口导致 "Soul is death!"。
+
+### 3. 启动后端（手动）
 
 ```bash
 cd digitalHumanApi
 pip install -r requirements.txt          # 首次运行安装依赖
-uvicorn app.main:app --reload            # 启动开发服务器，端口 8000
+python -m uvicorn app.main:app --reload   # 启动开发服务器，端口 8000
 ```
 
 启动成功标志：
@@ -131,7 +145,7 @@ uvicorn app.main:app --reload            # 启动开发服务器，端口 8000
 - API 文档 http://localhost:8000/docs 可打开
 - 后台轮询任务自动运行，连接 Dify 拉取对话
 
-### 3. 启动前端
+### 4. 启动前端
 
 ```bash
 cd digitalHumanVue
@@ -143,7 +157,25 @@ npm run dev                              # 启动开发服务器，端口 5173
 - 控制台显示 `VITE ready` 与 `Local: http://localhost:5173/`
 - 浏览器访问 http://localhost:5173/ 可正常加载页面
 
-### 4. 访问应用
+### 5. 启动本地数字人服务（参考项目）
+
+数字人对话依赖参考项目 [awesome-digital-human-live2d](https://github.com/Kedreamix/awesome-digital-human-live2d)，需独立启动其后端和前端。
+
+```powershell
+# 数字人后端（FastAPI，端口 8001，注意与主项目 8000 区分）
+cd 参考项目\awesome-digital-human-live2d-2.0.0\awesome-digital-human-live2d-2.0.0
+.\venv\Scripts\python.exe main.py
+
+# 数字人前端（Next.js，端口 3000，必须绕过 pnpm dev bug）
+cd 参考项目\awesome-digital-human-live2d-2.0.0\awesome-digital-human-live2d-2.0.0\web
+node node_modules\next\dist\bin\next dev -p 3000
+```
+
+> **两个命令需分别在各自的终端窗口中运行**（不要关掉）。首次启动前端可能需要清 localStorage `character-storage` 键以加载默认 Hiyori 模型。
+>
+> 引擎配置详见 `CLAUDE.md` 或 `doc/local-digital-human-deploy-plan.md`。当前已配置：腾讯云 ASR + Dify Agent + MiniMax TTS（`Chinese_sweet_girl_nv1` 音色）。
+
+### 6. 访问应用
 
 | 入口 | 地址 |
 |------|------|
@@ -151,9 +183,12 @@ npm run dev                              # 启动开发服务器，端口 5173
 | 访客端数字人对话 | http://localhost:5173/visitor/chat |
 | 管理后台数据大屏 | http://localhost:5173/admin |
 | 管理后台报告 | http://localhost:5173/admin/report |
+| 数字人前端（调试） | http://localhost:3000 |
 | 后端 API 文档 | http://localhost:8000/docs |
 
 > 前端 `/api/*` 请求由 Vite 代理转发至 `http://localhost:8000`（见 `vite.config.ts`），开发时无需关心跨域。
+>
+> 访客端数字人对话页面通过 iframe 嵌入数字人前端（`localhost:3000`），需确保两个服务同时运行。
 
 ## Docker Compose 部署
 
@@ -178,6 +213,7 @@ docker-compose up -d --build
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/health` | 健康检查 |
+| GET | `/visitor/recommended-questions` | 获取动态推荐问句（后台每 5 分钟从 Dify 刷新） |
 | POST | `/visitor/register` | 游客注册 |
 | POST | `/dialogue/sync-now` | 手动触发对话抓取 |
 | POST | `/analysis/run-now` | 手动触发量化分析 |
@@ -204,10 +240,17 @@ pytest -v
 | Dify Workflow 量化分析 | ✅ 正常（16 条对话全部评估完成，大屏/报告有真实数据） |
 | 数据大屏 | ✅ 正常（sentiment_trend 7 日连续查询 / satisfaction / hot_issues 均有数据） |
 | 手动触发端点 | ✅ 正常（`POST /sync-now` + `/run-now` 手动触发后台逻辑） |
-| 本地数字人部署 | ✅ 已部署（TencentAPI ASR + DifyAgent + MiniMax TTS，麦克风方案调试中） |
+| 本地数字人部署 | ✅ 已部署（TencentAPI ASR + DifyAgent + MiniMax TTS） |
+| 动态推荐问句 | ✅ 正常（每 5 分钟从 Dify 刷新，缓存 stale-while-revalidate） |
 | Docker Compose | 已配置，未在本次验收中实际构建 |
 
 ## 常见问题
+
+**Q: 数字人页面显示 "Soul is death!"？**
+A: 这是 ADH 前端 WebSocket 心跳连不上后端的提示。检查：
+1. 数字人后端是否启动（`curl http://localhost:8001/adh/agent/v0/list` 应返回 200）
+2. 数字人前端 `web/.env` 中是否设置了 `NEXT_PUBLIC_ADH_SERVER_PORT=8001`（默认 8000 会连到主后端）
+3. 改完 `.env` 后需重启数字人前端才能生效
 
 **Q: 后端启动后日志出现 `Dify trigger_workflow failed`？**
 A: Workflow 量化分析触发失败的可能原因：
