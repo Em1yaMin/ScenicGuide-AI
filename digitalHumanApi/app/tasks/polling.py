@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional
 
 from sqlalchemy import select
 
@@ -14,18 +14,8 @@ from app.services.dify_client import dify_client
 logger = logging.getLogger(__name__)
 
 
-async def poll_once() -> int:
-    """Execute one polling cycle. Returns number of new messages inserted.
-
-    Strategy: light4ai passes a fixed user (DIFY_LIGHT4AI_USER) to Dify for
-    all conversations. We query /conversations?user=xxx with that fixed user,
-    then /messages?conversation_id=xxx for each conversation.
-
-    All dialogues are attributed to a virtual visitor with id = that user.
-    Individual visitor-level correlation is lost (light4ai limitation), but
-    aggregate stats (sentiment, satisfaction, concerns, spot heatmap) work fine.
-    """
-    user = settings.DIFY_LIGHT4AI_USER
+async def poll_user(user: str) -> int:
+    """Poll a single Dify user for new messages. Returns number inserted."""
     new_count = 0
     async with async_session_factory() as db:
         # Upsert virtual visitor for the light4ai user
@@ -103,17 +93,39 @@ async def poll_once() -> int:
             except Exception:
                 await db.rollback()
                 logger.warning(
-                    "Polling commit rolled back, will retry next cycle"
+                    "Polling commit rolled back for user=%s, will retry next cycle",
+                    user,
                 )
                 return 0
 
     return new_count
 
 
+async def poll_once(user_filter: Optional[str] = None) -> int:
+    """Execute one polling cycle.
+
+    Args:
+        user_filter: If provided, only poll this specific user.
+                     If None (default), poll all configured users.
+
+    Returns:
+        Total number of new messages inserted.
+    """
+    total = 0
+    users = [user_filter] if user_filter else settings.DIFY_LIGHT4AI_USER
+    for user in users:
+        try:
+            total += await poll_user(user)
+        except Exception:
+            logger.exception("poll_user failed for user=%s", user)
+    return total
+
+
 async def polling_loop() -> None:
     """Run the polling loop every 30 seconds until cancelled."""
     logger.info(
-        "Polling task started (interval: 30s, user=%s)", settings.DIFY_LIGHT4AI_USER
+        "Polling task started (interval: 30s, users=%s)",
+        settings.DIFY_LIGHT4AI_USER,
     )
     try:
         while True:
