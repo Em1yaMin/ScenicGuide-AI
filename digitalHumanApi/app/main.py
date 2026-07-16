@@ -14,12 +14,14 @@ from app.routers import admin, analysis, dialogue, visitor
 from app.schemas.common import ErrorResponse
 from app.schemas.health import HealthResponse
 from app.tasks.analysis import analysis_loop
+from app.tasks.recommend_questions import recommend_loop
 from app.tasks.polling import polling_loop
 
 logger = logging.getLogger(__name__)
 
 _polling_task: Optional[asyncio.Task] = None
 _analysis_task: Optional[asyncio.Task] = None
+_recommend_task: Optional[asyncio.Task] = None
 
 
 def _handle_task_result(task: asyncio.Task) -> None:
@@ -33,7 +35,7 @@ def _handle_task_result(task: asyncio.Task) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _polling_task, _analysis_task
+    global _polling_task, _analysis_task, _recommend_task
 
     # Phase 0: configure logging early — before any tasks are spawned
     logging.basicConfig(
@@ -51,6 +53,8 @@ async def lifespan(app: FastAPI):
     _polling_task.add_done_callback(_handle_task_result)
     _analysis_task = asyncio.create_task(analysis_loop())
     _analysis_task.add_done_callback(_handle_task_result)
+    _recommend_task = asyncio.create_task(recommend_loop())
+    _recommend_task.add_done_callback(_handle_task_result)
 
     yield
 
@@ -60,6 +64,9 @@ async def lifespan(app: FastAPI):
     _analysis_task.cancel()
     with suppress(asyncio.CancelledError):
         await _analysis_task
+    _recommend_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await _recommend_task
     await engine.dispose()
 
 

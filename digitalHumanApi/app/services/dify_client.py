@@ -76,6 +76,10 @@ class DifyClient:
             "Authorization": f"Bearer {settings.DIFY_WORKFLOW_API_KEY}",
             "Content-Type": "application/json",
         }
+        self.recommend_workflow_headers: Dict[str, str] = {
+            "Authorization": f"Bearer {settings.DIFY_RECOMMEND_WORKFLOW_API_KEY}",
+            "Content-Type": "application/json",
+        }
 
     async def get_conversations(
         self, user: str, limit: int = 100
@@ -165,6 +169,52 @@ class DifyClient:
             return None
         except Exception as e:
             logger.warning("Dify trigger_workflow unexpected error: %s", e)
+            return None
+    # NOTE: No method-level retry — the 300s recommend_loop interval provides
+    # natural retry cadence. If call-site requirements change (e.g. on-demand
+    # sync without a background loop), add _retry_silent similar to
+    # DifyClient._retry_silent pattern.
+
+
+    async def trigger_recommend_workflow(
+        self, inputs: Dict[str, Any], user: str = "system"
+    ) -> Optional[Dict[str, Any]]:
+        """Trigger the recommend-questions Dify Workflow application.
+
+        Uses DIFY_RECOMMEND_WORKFLOW_API_KEY (separate from quantitative workflow).
+        Dify API: POST /workflows/run
+        Returns None on failure.
+        """
+        if not settings.DIFY_RECOMMEND_WORKFLOW_API_KEY:
+            logger.warning(
+                "DIFY_RECOMMEND_WORKFLOW_API_KEY not configured, "
+                "skipping recommend workflow"
+            )
+            return None
+
+        try:
+            async with httpx.AsyncClient(
+                base_url=self.base_url,
+                headers=self.recommend_workflow_headers,
+                timeout=httpx.Timeout(60.0),
+            ) as client:
+                response = await client.post(
+                    "/workflows/run",
+                    json={
+                        "inputs": inputs,
+                        "response_mode": "blocking",
+                        "user": user,
+                    },
+                )
+                response.raise_for_status()
+                return response.json()
+        except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.ConnectError) as e:
+            logger.warning("Dify trigger_recommend_workflow failed: %s", e)
+            return None
+        except Exception as e:
+            logger.warning(
+                "Dify trigger_recommend_workflow unexpected error: %s", e
+            )
             return None
 
 

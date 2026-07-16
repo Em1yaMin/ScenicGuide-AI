@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useVisitorStore } from '@/stores/visitor'
+import { API_VISITOR_RECOMMENDED_QUESTIONS } from '@/api'
+import { fetchWithCodeEnvelope } from '@/utils/fetchWithCodeEnvelope'
 
 const store = useVisitorStore()
 
@@ -74,7 +76,7 @@ function reloadIframe() {
 }
 
 onMounted(async () => {
-  await store.registerVisitor()
+  await Promise.all([store.registerVisitor(), fetchRecommendedQuestions()])
   if (iframeSrc.value) {
     startLoadingTimeout()
   }
@@ -87,13 +89,37 @@ onUnmounted(() => {
   }
 })
 
-// ── Suggested Questions ──
-const suggestedQuestions = [
-  '这个景点有什么历史故事？',
-  '推荐适合亲子的游览路线',
-  '今天景区开放时间？',
-  '附近有什么特色美食？',
-]
+// ── Suggested Questions (dynamic, from backend recommend task) ──
+const suggestedQuestions = ref<string[]>([])
+const questionsLoading = ref(false)
+
+async function fetchRecommendedQuestions() {
+  questionsLoading.value = true
+  try {
+    const data = await fetchWithCodeEnvelope<{ questions: string[] }>(
+      API_VISITOR_RECOMMENDED_QUESTIONS
+    )
+    if (data.questions && Array.isArray(data.questions)) {
+      suggestedQuestions.value = data.questions
+    }
+  } catch {
+    // Fall back to empty — guide panel will show generic hint instead
+    suggestedQuestions.value = []
+  } finally {
+    questionsLoading.value = false
+  }
+}
+
+function onQuestionClick(text: string) {
+  const targetOrigin = import.meta.env.VITE_ADH_IFRAME_ORIGIN || '*'
+  const iframe = document.querySelector(
+    '.digital-human-frame'
+  ) as HTMLIFrameElement | null
+  iframe?.contentWindow?.postMessage(
+    { type: 'SET_INPUT', text },
+    targetOrigin
+  )
+}
 </script>
 
 <template>
@@ -159,12 +185,15 @@ const suggestedQuestions = [
           </div>
           <div class="guide-divider" />
           <div class="guide-questions">
-            <p class="guide-hint">您可以这样问我：</p>
+            <p v-if="questionsLoading" class="guide-hint">推荐问句加载中…</p>
+            <p v-else-if="suggestedQuestions.length > 0" class="guide-hint">您可以这样问我：</p>
+            <p v-else class="guide-hint">暂无推荐问句</p>
             <div class="question-list">
               <div
                 v-for="q in suggestedQuestions"
                 :key="q"
                 class="question-chip"
+                @click="onQuestionClick(q)"
               >
                 {{ q }}
               </div>
@@ -376,7 +405,7 @@ const suggestedQuestions = [
   border-radius: 8px;
   font-size: var(--text-small);
   color: var(--color-ink);
-  cursor: default;
+  cursor: pointer;
   transition:
     border-color var(--duration-fast) var(--ease-out),
     background var(--duration-fast) var(--ease-out);

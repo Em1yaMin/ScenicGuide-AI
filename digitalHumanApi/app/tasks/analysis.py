@@ -1,7 +1,6 @@
 import asyncio
-import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,38 +15,7 @@ logger = logging.getLogger(__name__)
 MAX_BATCH_SIZE = 50  # Limit evaluations per cycle
 
 
-def _parse_workflow_output(raw: Any) -> Optional[Dict[str, Any]]:
-    """Parse Dify workflow output, stripping markdown fences if present.
-
-    Returns:
-        Parsed JSON dict on success, None on parse failure (invalid JSON,
-        non-dict output, or unexpected input type).
-    """
-    if isinstance(raw, str):
-        text = raw.strip()
-        # Remove <think>...</think> reasoning blocks emitted by some models
-        if "</think>" in text:
-            text = text.split("</think>", 1)[1].strip()
-        # Remove markdown code fences
-        if text.startswith("```"):
-            lines = text.split("\n")
-            # Remove opening fence (```json or ```)
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-            # Remove closing fence
-            if lines and lines[-1].strip() == "```":
-                lines = lines[:-1]
-            text = "\n".join(lines)
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            logger.warning(
-                "Failed to parse workflow output as JSON: %s", text[:200]
-            )
-            return None
-    if isinstance(raw, dict):
-        return raw
-    return None
+from app.services.dify_helpers import parse_workflow_output as _parse_workflow_output
 
 
 def _normalize_string_list(raw: Any) -> Optional[List[str]]:
