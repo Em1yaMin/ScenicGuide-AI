@@ -26,7 +26,7 @@
 - **TTS**: MiniMax API (`speech-2.8-hd` + `Chinese_sweet_girl_nv1` 音色)
 - **Agent**: Dify Chat Agent（与主项目共用 Dify 实例 `YOUR_DIFY_SERVER_IP`）
 
-启动步骤见上方「**4. 启动本地数字人服务**」。详细部署步骤与故障排查见 `CLAUDE.md` 或 `doc/local-digital-human-deploy-plan.md`。
+启动步骤见上方「**4. 启动本地数字人服务**」。详细部署步骤与故障排查见 `claude.md` 或 `doc/local-digital-human-deploy-plan.md`。
 
 ## 目录结构
 
@@ -59,8 +59,13 @@ digitalHuman/
 │   ├── tsconfig.json / tsconfig.app.json / tsconfig.node.json
 │   ├── .editorconfig / .prettierrc.json / .oxlintrc.json / eslint.config.ts
 │   └── .env                  # 前端环境变量（需自行创建）
+├── claude.md                  # AI 辅助开发指南与上下文记忆
+├── .pi/                       # pi 编码助手配置与扩展
+├── doc/                       # 设计文档目录（Dify 工作流、部署计划等）
+├── live2d-frontend/           # 本地 Live2D 数字人（awesome-digital-human-live2d）
 ├── docker-compose.yml
-├── Dockerfile.api / Dockerfile.web
+├── Dockerfile.api             # 后端容器镜像构建
+├── Dockerfile.web             # 前端（Nginx）容器镜像构建
 ├── nginx.conf
 └── .env.example              # Docker Compose 部署用环境变量示例
 ```
@@ -106,6 +111,7 @@ cp .env.example .env
 |------|------|
 | `VITE_LIGHT4AI_URL` | light4ai 数字人 iframe 服务地址（如 `http://localhost:3000`） |
 | `VITE_API_BASE` | 后端 API 基础地址，开发默认 `http://localhost:8000`（Vite 代理目标） |
+| `VITE_LIVE2D_MODEL` | Live2D 模型名称（可选，默认 `hiyori`） |
 | `VITE_ADH_IFRAME_ORIGIN` | 数字人 iframe 的 origin，用于 postMessage 安全校验（可选，默认 `*`） |
 
 ### 2. 快速启动（一键后台）
@@ -120,9 +126,9 @@ Start-Process -WindowStyle Hidden -WorkingDirectory "$PWD/digitalHumanApi" -File
 Start-Process -WindowStyle Hidden -WorkingDirectory "$PWD/digitalHumanVue" -FilePath npm -ArgumentList 'run', 'dev'
 
 # 数字人后端 (8001) — 注意端口已从默认 8000 改为 8001，避免冲突
-Start-Process -WindowStyle Hidden -FilePath "$PWD/live2d-frontend/venv/Scripts/python.exe" -ArgumentList "$PWD/live2d-frontend/main.py"
+Start-Process -WindowStyle Hidden -WorkingDirectory "$PWD/live2d-frontend" -FilePath python -ArgumentList 'main.py'
 
-# 数字人前端 (3000) — 必须绕过 pnpm dev bug
+# 数字人前端 (3000) — 若 pnpm run dev 启动失败，可降级为直接调用
 Start-Process -WindowStyle Hidden -WorkingDirectory "$PWD/live2d-frontend/web" -FilePath node -ArgumentList 'node_modules/next/dist/bin/next', 'dev', '-p', '3000'
 ```
 
@@ -130,6 +136,7 @@ Start-Process -WindowStyle Hidden -WorkingDirectory "$PWD/live2d-frontend/web" -
 > - 命令中的 `$PWD` 需替换为项目根目录绝对路径（如 `E:/project_file/digitalHuman`），或将终端 cd 到项目根目录后执行。
 > - 数字人后端端口已在 `config_template.yaml` 中改为 **8001**（原 8000 被主后端占用）。
 > - 数字人前端需在 `web/.env` 中设置 `NEXT_PUBLIC_ADH_SERVER_PORT=8001`，否则心跳连错端口导致 "Soul is death!"。
+> - 存在两个配置文件：`config_template.yaml`（端口 8001，使用腾讯云 ASR + Dify Agent + MiniMax TTS）和 `config_all_in_dify.yaml`（端口 8000，引擎全部走 Dify API）。默认使用 `config_template.yaml`，切换配置时注意端口变化。
 
 ### 3. 启动后端（手动）
 
@@ -164,16 +171,18 @@ npm run dev                              # 启动开发服务器，端口 5173
 ```powershell
 # 数字人后端（FastAPI，端口 8001，注意与主项目 8000 区分）
 cd live2d-frontend
-.\venv\Scripts\python.exe main.py
+python -m venv venv                          # 创建虚拟环境（首次运行）
+venv\Scripts\pip install -r requirements.txt # 安装依赖（首次运行）
+venv\Scripts\python.exe main.py
 
-# 数字人前端（Next.js，端口 3000，必须绕过 pnpm dev bug）
+# 数字人前端（Next.js，端口 3000，若 pnpm run dev 启动失败，可降级为直接调用）
 cd live2d-frontend\web
-node node_modules\next\dist\bin\next dev -p 3000
+pnpm run dev    # 或 node node_modules\next\dist\bin\next dev -p 3000
 ```
 
 > **两个命令需分别在各自的终端窗口中运行**（不要关掉）。首次启动前端可能需要清 localStorage `character-storage` 键以加载默认 Hiyori 模型。
 >
-> 引擎配置详见 `CLAUDE.md` 或 `doc/local-digital-human-deploy-plan.md`。当前已配置：腾讯云 ASR + Dify Agent + MiniMax TTS（`Chinese_sweet_girl_nv1` 音色）。
+> 引擎配置详见 `claude.md` 或 `doc/local-digital-human-deploy-plan.md`。当前已配置：腾讯云 ASR + Dify Agent + MiniMax TTS（`Chinese_sweet_girl_nv1` 音色）。
 
 ### 6. 访问应用
 
@@ -206,6 +215,14 @@ docker-compose up -d --build
 - Nginx 将 `/api/` 反向代理到后端容器 `api:8000`
 - 后端健康检查端点：`/api/v1/health`
 
+> **如果 Dify 部署在宿主机而非 Docker 网络中**，容器内无法通过 `localhost` 访问宿主机 Dify。需在 `docker-compose.yml` 的 `api` 服务下添加 `extra_hosts`：
+> ```yaml
+> api:
+>   extra_hosts:
+>     - "host.docker.internal:host-gateway"
+> ```
+> 然后将 `.env` 中的 `DIFY_API_URL` 设为 `http://host.docker.internal/v1`。
+
 ## API 端点概览
 
 所有端点前缀 `/api/v1`。
@@ -215,6 +232,7 @@ docker-compose up -d --build
 | GET | `/health` | 健康检查 |
 | GET | `/visitor/recommended-questions` | 获取动态推荐问句（后台每 5 分钟从 Dify 刷新） |
 | POST | `/visitor/register` | 游客注册 |
+| POST | `/visitor/refresh-recommend` | 手动刷新推荐问句缓存 |
 | POST | `/dialogue/sync-now` | 手动触发对话抓取 |
 | POST | `/analysis/run-now` | 手动触发量化分析 |
 | GET | `/admin/dashboard` | 数据大屏聚合数据 |
@@ -254,7 +272,7 @@ A: 这是 ADH 前端 WebSocket 心跳连不上后端的提示。检查：
 
 **Q: 后端启动后日志出现 `Dify trigger_workflow failed`？**
 A: Workflow 量化分析触发失败的可能原因：
-1. `DIFY_WORKFLOW_API_KEY` 未配置或指向错误的 Workflow 应用——需在 Dify 平台确认该 Workflow 的入参变量名为 `input`、输出变量名为 `text`，且输出为结构化 JSON（见下方「Dify Workflow 规格」）。
+1. `DIFY_WORKFLOW_API_KEY` 未配置或指向错误的 Workflow 应用——需在 Dify 平台确认该 Workflow 的入参变量名为 `input`、输出变量名为 `text`，且输出为结构化 JSON（详见 doc/dify配置/workflow-spec.md）。
 2. Dify 服务器（`DIFY_API_URL`）网络不通或临时不可达——连接失败会自动重试，恢复后自动续上。
 3. 对话内容过短（如 "你好"）——Workflow 仍会正常返回 `neutral/3/空标签`，属预期行为。
 
@@ -269,51 +287,5 @@ A: 检查 `digitalHumanVue/.env` 的 `VITE_LIGHT4AI_URL` 是否指向可访问�
 
 ## Dify Workflow 量化分析规格
 
-后端通过 `DIFY_WORKFLOW_API_KEY` 调用 Dify Workflow 应用，对每条对话进行情感量化分析。该 Workflow 必须符合以下规格，否则量化分析链路无法工作。
-
-### 入参（开始节点）
-
-| 变量名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| `input` | paragraph (≤1024) | 是 | 对话文本（后端传 `dialogue.content`） |
-
-### 节点编排
-
-```
-开始节点 (input: paragraph) → LLM 节点 (结构化分析, temperature=0) → 结束节点 (text = LLM.text)
-```
-
-### LLM 节点提示词要点
-
-要求 LLM 只输出 JSON（不要 markdown 代码块），字段如下：
-
-| 字段 | 类型 | 取值 |
-|------|------|------|
-| `sentiment_label` | string | `positive` / `neutral` / `negative` / `happy` / `confused` |
-| `satisfaction_score` | int | 1-5，无法判断给 3 |
-| `concern_tags` | string[] | 关注热点，如 `["路线","门票"]`，无则 `[]` |
-| `mentioned_spots` | string[] | 提到的景点，如 `["长廊"]`，无则 `[]` |
-
-### 输出（结束节点）
-
-| 输出变量名 | 来源 |
-|-----------|------|
-| `text` | LLM 节点输出（后端从 `result.data.outputs.text` 取值） |
-
-### 后端解析容错
-
-后端 `_parse_workflow_output()`（`app/tasks/analysis.py`）会自动：
-- 剥离 `...` 推理块
-- 剥离 markdown 代码块 ```` ```json ````
-- 字段名备选：`sentiment` / `concerns` / `spots` 也可识别
-
-### 验证命令
-
-```bash
-curl -X POST "http://YOUR_DIFY_SERVER_IP/v1/workflows/run" \
-  -H "Authorization: Bearer $DIFY_WORKFLOW_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"inputs":{"input":"你好,请问长廊怎么走"},"response_mode":"blocking","user":"system"}'
-```
-
-期望 `data.status=succeeded` 且 `data.outputs.text` 为合法 JSON 字符串。
+Workflow 的入参、输出格式、节点编排、后端解析容错等完整规格请查阅：
+[`doc/dify配置/workflow-spec.md`](doc/dify配置/workflow-spec.md)。
