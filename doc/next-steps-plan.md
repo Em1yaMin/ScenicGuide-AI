@@ -51,7 +51,7 @@
 
 | 编号 | 内容 | 严重度 |
 |------|------|--------|
-| **Phase 1** | 部署live2d-frontend（8001+3000），All-in-Dify + user=EmiyaMin | 阻塞 |
+| **Phase 1** | 部署live2d-frontend（8001+3000），All-in-Dify + user=YOUR_DIFY_USER | 阻塞 |
 | **Phase 2** | polling + analysis 端到端跑通真实数据 | 阻塞 |
 | **DB** | 清理 digital_human.db 残留 scenic_spots 表 | 低 |
 | **I** | 补充架构现状文档 + 部署文档 | 低 |
@@ -121,7 +121,7 @@ Run C: P2 改进 + 清理 + 文档收尾 ─────────┘
 | B1.3 | 安装 ffmpeg（`winget install ffmpeg` 或手动下载） | `ffmpeg -version` |
 | B1.4 | 用 `config_template.yaml` 复制为 `config.yaml`，端口改 8001 | 保留多引擎模式 |
 | B1.5 | config.yaml 中 TTS DEFAULT 置为 `difyAPI.yaml`，Agent DEFAULT 置为 `difyAgent.yaml` | TTS/Agent 走 Dify |
-| B1.6 | `difyAgent.yaml` 的 `DIFY_API_USER` 改为 `EmiyaMin` | 与 polling 对齐 |
+| B1.6 | `difyAgent.yaml` 的 `DIFY_API_USER` 改为 `YOUR_DIFY_USER` | 与 polling 对齐 |
 
 ##### B1-ASR：腾讯云语音识别引擎接入（新增）
 
@@ -268,7 +268,7 @@ npm run dev        # → 5173
 | 腾讯云 ASR 签名鉴权超预期 | 中 | 高 | 优先用 `tencentcloud-sdk-python` ASR SDK；备选手写签名 |
 | 腾讯云 ASR 音频格式不匹配 | 低 | 中 | live2d-frontend 麦克风录制格式通常 16kHz mono PCM |
 | Dify Chat Agent 未开启 TTS | 中 | 高 | 登录 Dify 后台确认 TTS 开关 |
-| polling 拉不到对话 | 中 | 高 | 确认 user=EmiyaMin、Dify 有对话记录 |
+| polling 拉不到对话 | 中 | 高 | 确认 user=YOUR_DIFY_USER、Dify 有对话记录 |
 | Workflow 输出格式不匹配 | 中 | 中 | 检查 Dify Workflow 输出 JSON，对齐 analysis.py 解析 |
 | iframe CORS | 低 | 中 | live2d-frontend 已设 `allow_origins=["*"]` |
 | 演示时网络不稳定 | 低 | 高 | 本地缓存对话数据，大屏有兜底 |

@@ -62,7 +62,7 @@ DIFY_API_KEY=app-YOUR_CHAT_AGENT_KEY
 DIFY_WORKFLOW_API_KEY=app-YOUR_WORKFLOW_KEY
 
 # 轮询用户列表（逗号分隔，每个用户都会拉取对话）
-DIFY_LIGHT4AI_USER=EmiyaMin,Admin
+DIFY_LIGHT4AI_USER=YOUR_DIFY_USER,Admin
 ```
 
 > ⚠️ `DIFY_LIGHT4AI_USER` 必须与 ADH 项目 `configs/agents/difyAgent.yaml` 中的 `DIFY_API_USER` 一致。
@@ -79,7 +79,7 @@ PARAMETERS:
   - NAME: "DIFY_API_KEY"
     DEFAULT: "app-YOUR_CHAT_AGENT_KEY"  # 聊天助手应用 Key
   - NAME: "DIFY_API_USER"
-    DEFAULT: "EmiyaMin"                        # 与 .env DIFY_LIGHT4AI_USER 一致
+    DEFAULT: "YOUR_DIFY_USER"                        # 与 .env DIFY_LIGHT4AI_USER 一致
 ```
 
 ---
@@ -147,7 +147,7 @@ PARAMETERS:
 tail -f digitalHumanApi/backend.log | grep "Polled"
 
 # 预期输出（每 30 秒）：
-# Polled 2 new messages from 1 conversations (user=EmiyaMin)
+# Polled 2 new messages from 1 conversations (user=YOUR_DIFY_USER)
 ```
 
 ### 4.2 量化评估验证

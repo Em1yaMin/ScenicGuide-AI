@@ -197,7 +197,7 @@ PARAMETERS:
   - NAME: "DIFY_API_KEY"
     DEFAULT: "app-YOUR_CHAT_AGENT_KEY"  # 聊天助手应用 Key
   - NAME: "DIFY_API_USER"
-    DEFAULT: "EmiyaMin"                        # 与 .env DIFY_LIGHT4AI_USER 一致
+    DEFAULT: "YOUR_DIFY_USER"                        # 与 .env DIFY_LIGHT4AI_USER 一致
 ```
 
-> ⚠️ **关键约束**：`DIFY_API_USER` 必须与主后端 `.env` 中的 `DIFY_LIGHT4AI_USER` 保持一致。当前默认值均为 `"EmiyaMin"`。
+> ⚠️ **关键约束**：`DIFY_API_USER` 必须与主后端 `.env` 中的 `DIFY_LIGHT4AI_USER` 保持一致。当前默认值均为 `"YOUR_DIFY_USER"`。

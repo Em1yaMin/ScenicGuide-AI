@@ -4,14 +4,14 @@ VERSION: "v0.0.1"
 PARAMETERS: [
   {
     NAME: "DIFY_API_URL",
-    DEFAULT: "http://111.228.47.45/v1"
+    DEFAULT: "http://YOUR_DIFY_SERVER_IP/v1"
   },
   {
     NAME: "DIFY_API_KEY",
-    DEFAULT: "app-LnQKJGQplH2WwN8up6NnllGK"
+    DEFAULT: "app-YOUR_CHAT_AGENT_KEY"
   },
   {
     NAME: "DIFY_API_USER",
-    DEFAULT: "EmiyaMin"
+    DEFAULT: "YOUR_DIFY_USER"
   }
 ]

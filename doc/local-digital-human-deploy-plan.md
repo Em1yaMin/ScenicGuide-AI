@@ -104,7 +104,7 @@
 | P5 | 腾讯云一句话识别服务 | ✅ 已开通 | API 调用已验证通过（返回 AudioDuration=2000ms） |
 | P6 | Dify TTS Workflow Key | ✅ 已有 | `app-YOUR_TTS_WF_KEY` |
 | P7 | Dify Chat Agent API Key | ✅ 已有 | 主项目 .env 的 DIFY_API_KEY，数字人前端复用 |
-| P8 | DIFY_API_USER | ✅ EmiyaMin | 与 polling 的 DIFY_LIGHT4AI_USER 对齐 |
+| P8 | DIFY_API_USER | ✅ YOUR_DIFY_USER | 与 polling 的 DIFY_LIGHT4AI_USER 对齐 |
 
 ## 六、任务分阶段
 
@@ -127,7 +127,7 @@
 | 2.3 | ASR 默认改腾讯云 | `configs/config.yaml` | `ENGINES.ASR.SUPPORT_LIST: ["difyAPI.yaml", "tencentAPI.yaml"]`，`DEFAULT: "tencentAPI.yaml"` |
 | 2.4 | TTS 默认改 Workflow | `configs/config.yaml` | `ENGINES.TTS.SUPPORT_LIST: ["difyAPI.yaml", "difyWorkflowAPI.yaml"]`，`DEFAULT: "difyWorkflowAPI.yaml"` |
 | 2.5 | 前端连后端 8001 | `web/.env` | `NEXT_PUBLIC_ADH_SERVER_PORT="8001"` |
-| 2.6 | difyAgent user 对齐 | 前端启动后在设置页填 `DIFY_API_USER=EmiyaMin` | 见阶段 5 验证 |
+| 2.6 | difyAgent user 对齐 | 前端启动后在设置页填 `DIFY_API_USER=YOUR_DIFY_USER` | 见阶段 5 验证 |
 
 ### 阶段 3：新增腾讯云 ASR 引擎（核心开发）
 
@@ -328,7 +328,7 @@ class DifyWorkflowAPI(BaseEngine):
 |---|------|------|------|
 | 5.1 | 启动数字人后端 | `python main.py`（在live2d-frontend 根目录） | 控制台显示 `Uvicorn running on 0.0.0.0:8001` |
 | 5.2 | 启动数字人前端 | `cd web && pnpm run dev` | 控制台显示 `ready`，访问 http://localhost:3000 能打开 |
-| 5.3 | 前端配置 Dify 参数 | 打开 localhost:3000，在设置页填：DIFY_API_URL、DIFY_API_KEY、DIFY_API_USER=EmiyaMin | 设置保存成功 |
+| 5.3 | 前端配置 Dify 参数 | 打开 localhost:3000，在设置页填：DIFY_API_URL、DIFY_API_KEY、DIFY_API_USER=YOUR_DIFY_USER | 设置保存成功 |
 | 5.4 | 前端配置 ASR 参数 | ASR 选 TencentAPI，填 TENCENT_SECRET_ID、TENCENT_SECRET_KEY | 设置保存成功 |
 | 5.5 | 前端配置 TTS 参数 | TTS 选 DifyWorkflowAPI，填 DIFY_API_URL、DIFY_WORKFLOW_API_KEY=`app-YOUR_TTS_WF_KEY` | 设置保存成功 |
 
@@ -340,7 +340,7 @@ class DifyWorkflowAPI(BaseEngine):
 | 6.2 | 语音识别 | 对麦克风说话 | 腾讯云 ASR 返回文字，数字人回复 |
 | 6.3 | TTS 合成 | 数字人回复 | Dify TTS Workflow 返回音频，数字人开口说话 |
 | 6.4 | 对话抓取 | 等待 30s 或 POST /api/v1/dialogue/sync-now | 主项目后端日志显示 `Polled N new messages`，对话入库 |
-| 6.5 | user 对齐 | 查 Dify /conversations?user=EmiyaMin | 能拉到本地数字人产生的对话 |
+| 6.5 | user 对齐 | 查 Dify /conversations?user=YOUR_DIFY_USER | 能拉到本地数字人产生的对话 |
 | 6.6 | 量化分析 | POST /api/v1/analysis/run-now | 新对话被 Workflow 评估，大屏数据更新 |
 
 ## 七、风险与注意事项

@@ -31,7 +31,7 @@ class Settings(BaseModel):
     DIFY_RECOMMEND_WORKFLOW_API_KEY: str = os.environ.get("DIFY_RECOMMEND_WORKFLOW_API_KEY", "")
     DIFY_LIGHT4AI_USER: List[str] = [
         u.strip()
-        for u in os.environ.get("DIFY_LIGHT4AI_USER", "EmiyaMin").split(",")
+        for u in os.environ.get("DIFY_LIGHT4AI_USER", "YOUR_DIFY_USER").split(",")
         if u.strip()
     ]
 

@@ -75,7 +75,7 @@ P1 加固 (5项) ─────────────────────
                                         │
 P2 改进 (4项) ──→ 与 Phase 1 并行 ──────┤
                                         ↓
-                    Phase 1: 部署live2d-frontend (8001+3000, All-in-Dify, user=EmiyaMin)
+                    Phase 1: 部署live2d-frontend (8001+3000, All-in-Dify, user=YOUR_DIFY_USER)
                                         │
                                         ↓
                     Phase 2: 端到端验证 (真实数据 polling→analysis→大屏)

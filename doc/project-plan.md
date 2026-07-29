@@ -35,9 +35,9 @@
 
 **Status**: Accepted
 
-**Context**: light4ai 端配置 API 遇到阻碍，且 light4ai 传给 Dify 的 user 是固定值（adh/EmiyaMin），不可控。获取了 awesome-digital-human-live2d-2.0.0 源码，该项目的 difyAgent.yaml 默认 user 正是 "adh"——light4ai 就是用了这个项目的配置。
+**Context**: light4ai 端配置 API 遇到阻碍，且 light4ai 传给 Dify 的 user 是固定值（adh/YOUR_DIFY_USER），不可控。获取了 awesome-digital-human-live2d-2.0.0 源码，该项目的 difyAgent.yaml 默认 user 正是 "adh"——light4ai 就是用了这个项目的配置。
 
-**Decision**: 采用方案 A——live2d-frontend 独立部署，Vue3 通过 iframe 嵌入。live2d-frontend 后端跑 8001 端口（避开 FastAPI 的 8000），前端跑 3000 端口。difyAgent 的 user 配置为 EmiyaMin，与 polling 的 DIFY_LIGHT4AI_USER 对齐。
+**Decision**: 采用方案 A——live2d-frontend 独立部署，Vue3 通过 iframe 嵌入。live2d-frontend 后端跑 8001 端口（避开 FastAPI 的 8000），前端跑 3000 端口。difyAgent 的 user 配置为 YOUR_DIFY_USER，与 polling 的 DIFY_LIGHT4AI_USER 对齐。
 
 **Consequences**:
 - ✅ 数字人服务完全自控，user 字段可配置
@@ -73,7 +73,7 @@
                        ▼
 ┌─ 服务器 YOUR_DIFY_SERVER_IP ──────────────────────────────────────┐
 │  Dify (Docker)                                               │
-│  ├── Chat Agent + 景区知识库 (user=EmiyaMin)                │
+│  ├── Chat Agent + 景区知识库 (user=YOUR_DIFY_USER)                │
 │  └── 量化评估 Workflow                                       │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -92,7 +92,7 @@
 | 1.3 | 安装 ffmpeg（Windows 下载放入 PATH） | `ffmpeg -version` 能执行 |
 | 1.4 | 配置 `configs/config.yaml`：用 `config_template.yaml` 复制为 `config.yaml`，端口改为 8001 | 保留多引擎模式 |
 | 1.5 | config.yaml 中：TTS DEFAULT → `difyAPI.yaml`，Agent DEFAULT → `difyAgent.yaml` | TTS/Agent 走 Dify |
-| 1.6 | 配置 `configs/agents/difyAgent.yaml`：DIFY_API_USER 改为 EmiyaMin | yaml 更新 |
+| 1.6 | 配置 `configs/agents/difyAgent.yaml`：DIFY_API_USER 改为 YOUR_DIFY_USER | yaml 更新 |
 | 1.7 | **新增** 创建 `configs/engines/asr/tencentASR.yaml`，声明 `SECRET_ID` / `SECRET_KEY` / `APP_ID` 参数 | 配置文件就位 |
 | 1.8 | **新增** 实现 `digitalHuman/engine/asr/tencentASR.py`：继承 BaseEngine，`@ASREngines.register("TencentASR")`，调腾讯云实时语音识别 WebSocket API | 引擎可加载 |
 | 1.9 | **新增** config.yaml 中 ASR 的 SUPPORT_LIST 加 `tencentASR.yaml`，DEFAULT 改为 `tencentASR.yaml` | 引擎切换生效 |
