@@ -1,0 +1,35 @@
+# IDE File
+.idea
+.vscode
+
+# log File
+logs
+*.log
+
+# Output File
+outputs
+*.wav
+*.mp3
+*.mp4
+
+# Python tmp File
+__pycache__/
+venv/
+
+# web tmp File
+node_modules/
+.next/
+dist
+package-lock.json
+
+# Environment
+.env
+
+# Debug
+debug_audio/
+
+# local Folder
+data
+volumes
+config.yaml
+.DS_Store

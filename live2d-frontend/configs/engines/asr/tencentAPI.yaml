@@ -1,0 +1,7 @@
+# 申请key地址：https://console.cloud.tencent.com/cam/capi
+NAME: "TencentAPI"
+VERSION: "v0.0.1"
+AK: "AKID_YOUR_TENCENT_ASR_SECRET_ID"
+SK: "YOUR_TENCENT_ASR_SECRET_KEY"
+APPID: 1341034858
+REGION: "ap-guangzhou"

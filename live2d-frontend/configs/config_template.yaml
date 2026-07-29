@@ -1,0 +1,20 @@
+COMMON:
+  NAME: "Awesome-Digital-Human"
+  VERSION: "v0.0.1"
+  LOG_LEVEL: "DEBUG"
+SERVER:
+  IP: "0.0.0.0"
+  PORT: 8001
+  ENGINES:
+    ASR: 
+      SUPPORT_LIST: [ "tencentAPI.yaml" ]
+      DEFAULT: "tencentAPI.yaml"
+    LLM: 
+      SUPPORT_LIST: [ "openaiAPI.yaml", "baiduAPI.yaml" ]
+      DEFAULT: "openaiAPI.yaml"
+    TTS: 
+      SUPPORT_LIST: [ "minimaxTTS.yaml" ]
+      DEFAULT: "minimaxTTS.yaml"
+  AGENTS: 
+    SUPPORT_LIST: [ "difyAgent.yaml" ]
+    DEFAULT: "difyAgent.yaml"

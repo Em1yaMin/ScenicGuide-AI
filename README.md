@@ -9,12 +9,12 @@
 | 后端 | Python 3.8+ · FastAPI · SQLAlchemy 2.0 (async) · SQLite (aiosqlite) · httpx |
 | 前端 | Vue 3 · TypeScript · Vite 8 · Pinia · Vue Router · ECharts |
 | 部署 | Docker Compose · Nginx |
-| 外部服务 | Dify AI 平台（Chat Agent 对话 + Workflow 量化分析）、本地 Live2D 数字人（参考项目） |
+| 外部服务 | Dify AI 平台（Chat Agent 对话 + Workflow 量化分析）、本地 Live2D 数字人（live2d-frontend） |
 
 ## 本地数字人依赖
 
-本项目数字人对话功能由参考项目 [awesome-digital-human-live2d](https://github.com/Kedreamix/awesome-digital-human-live2d) 提供，
-源码位于 `参考项目/awesome-digital-human-live2d-2.0.0/awesome-digital-human-live2d-2.0.0/`（已通过 `.gitignore` 排除，不在本仓库版本控制中）。
+本项目数字人对话功能由 [awesome-digital-human-live2d](https://github.com/Kedreamix/awesome-digital-human-live2d) 提供，
+源码位于 `live2d-frontend/`（已纳入本仓库版本控制）。
 
 | 服务 | 端口 | 说明 |
 |------|------|------|
@@ -120,10 +120,10 @@ Start-Process -WindowStyle Hidden -WorkingDirectory "$PWD/digitalHumanApi" -File
 Start-Process -WindowStyle Hidden -WorkingDirectory "$PWD/digitalHumanVue" -FilePath npm -ArgumentList 'run', 'dev'
 
 # 数字人后端 (8001) — 注意端口已从默认 8000 改为 8001，避免冲突
-Start-Process -WindowStyle Hidden -FilePath "$PWD/参考项目/awesome-digital-human-live2d-2.0.0/awesome-digital-human-live2d-2.0.0/venv/Scripts/python.exe" -ArgumentList "$PWD/参考项目/awesome-digital-human-live2d-2.0.0/awesome-digital-human-live2d-2.0.0/main.py"
+Start-Process -WindowStyle Hidden -FilePath "$PWD/live2d-frontend/venv/Scripts/python.exe" -ArgumentList "$PWD/live2d-frontend/main.py"
 
 # 数字人前端 (3000) — 必须绕过 pnpm dev bug
-Start-Process -WindowStyle Hidden -WorkingDirectory "$PWD/参考项目/awesome-digital-human-live2d-2.0.0/awesome-digital-human-live2d-2.0.0/web" -FilePath node -ArgumentList 'node_modules/next/dist/bin/next', 'dev', '-p', '3000'
+Start-Process -WindowStyle Hidden -WorkingDirectory "$PWD/live2d-frontend/web" -FilePath node -ArgumentList 'node_modules/next/dist/bin/next', 'dev', '-p', '3000'
 ```
 
 > **注意**：
@@ -157,17 +157,17 @@ npm run dev                              # 启动开发服务器，端口 5173
 - 控制台显示 `VITE ready` 与 `Local: http://localhost:5173/`
 - 浏览器访问 http://localhost:5173/ 可正常加载页面
 
-### 5. 启动本地数字人服务（参考项目）
+### 5. 启动本地数字人服务（live2d-frontend）
 
-数字人对话依赖参考项目 [awesome-digital-human-live2d](https://github.com/Kedreamix/awesome-digital-human-live2d)，需独立启动其后端和前端。
+数字人对话依赖 [awesome-digital-human-live2d](https://github.com/Kedreamix/awesome-digital-human-live2d)，需独立启动其后端和前端。
 
 ```powershell
 # 数字人后端（FastAPI，端口 8001，注意与主项目 8000 区分）
-cd 参考项目\awesome-digital-human-live2d-2.0.0\awesome-digital-human-live2d-2.0.0
+cd live2d-frontend
 .\venv\Scripts\python.exe main.py
 
 # 数字人前端（Next.js，端口 3000，必须绕过 pnpm dev bug）
-cd 参考项目\awesome-digital-human-live2d-2.0.0\awesome-digital-human-live2d-2.0.0\web
+cd live2d-frontend\web
 node node_modules\next\dist\bin\next dev -p 3000
 ```
 

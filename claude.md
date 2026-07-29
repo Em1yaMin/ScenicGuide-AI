@@ -45,7 +45,7 @@ digitalHumanVue/          # Vue 3 + TypeScript + Vite 8 前端
 # 本地数字人 (awesome-digital-human-live2d)
 
 ## 概述
-参考项目 `参考项目/awesome-digital-human-live2d-2.0.0/awesome-digital-human-live2d-2.0.0/`（下称 ADH）提供 Live2D 数字人前端 + Python 后端，替代 cloud light4ai 实现本地数字人对话。
+`live2d-frontend/`（下称 ADH）提供 Live2D 数字人前端 + Python 后端，替代 cloud light4ai 实现本地数字人对话。
 
 **引擎架构**: Registry + Factory + Pool 三层，引擎通过 `@Register("Name")` 装饰器自动注册（详见 `.rpiv/artifacts/research/2026-07-13_19-05-29_local-digital-human-deploy.md`）。
 
@@ -65,11 +65,11 @@ digitalHumanVue/          # Vue 3 + TypeScript + Vite 8 前端
 ### 启动命令
 ```bash
 # 后端 (端口 8000)
-cd 参考项目/.../awesome-digital-human-live2d-2.0.0/
+cd live2d-frontend/
 nohup ./venv/Scripts/python.exe main.py > backend.log 2>&1 &
 
 # 前端 (端口 3000) — 必须绕过 pnpm dev bug
-cd 参考项目/.../awesome-digital-human-live2d-2.0.0/web/
+cd live2d-frontend/web/
 nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 ```
 

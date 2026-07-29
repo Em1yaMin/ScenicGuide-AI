@@ -51,7 +51,7 @@
 
 | 编号 | 内容 | 严重度 |
 |------|------|--------|
-| **Phase 1** | 部署参考项目（8001+3000），All-in-Dify + user=EmiyaMin | 阻塞 |
+| **Phase 1** | 部署live2d-frontend（8001+3000），All-in-Dify + user=EmiyaMin | 阻塞 |
 | **Phase 2** | polling + analysis 端到端跑通真实数据 | 阻塞 |
 | **DB** | 清理 digital_human.db 残留 scenic_spots 表 | 低 |
 | **I** | 补充架构现状文档 + 部署文档 | 低 |
@@ -116,7 +116,7 @@ Run C: P2 改进 + 清理 + 文档收尾 ─────────┘
 
 | 步骤 | 内容 | 验证标准 |
 |------|------|----------|
-| B1.1 | 复制参考项目到 `digitalHumanLive2D/` | 目录结构完整 |
+| B1.1 | 复制 live2d-frontend 到 `digitalHumanLive2D/` | 目录结构完整 |
 | B1.2 | 安装后端依赖：`pip install -r requirements.txt` | 无报错 |
 | B1.3 | 安装 ffmpeg（`winget install ffmpeg` 或手动下载） | `ffmpeg -version` |
 | B1.4 | 用 `config_template.yaml` 复制为 `config.yaml`，端口改 8001 | 保留多引擎模式 |
@@ -125,7 +125,7 @@ Run C: P2 改进 + 清理 + 文档收尾 ─────────┘
 
 ##### B1-ASR：腾讯云语音识别引擎接入（新增）
 
-**引擎架构**：参考项目采用 Registry 注册 + Factory 工厂 + Pool 池化模式。新增引擎只需 3 个文件：
+**引擎架构**：live2d-frontend 采用 Registry 注册 + Factory 工厂 + Pool 池化模式。新增引擎只需 3 个文件：
 1. `configs/engines/asr/tencentASR.yaml` — 参数声明
 2. `digitalHuman/engine/asr/tencentASR.py` — 引擎实现，用 `@ASREngines.register("TencentASR")` 注册
 3. 在 `config.yaml` 的 `SERVER.ENGINES.ASR` 中注册并设为默认
@@ -181,7 +181,7 @@ class TencentASR(BaseEngine):
 
 **风险**：
 - 腾讯云 ASR WebSocket 的签名鉴权实现较复杂 → 可参考腾讯云 Python SDK 的 `tencentcloud-sdk-python` 或直接用 HMAC-SHA1 手写
-- 音频格式不匹配 → 检查参考项目麦克风录制的采样率和格式（通常 16kHz mono PCM）
+- 音频格式不匹配 → 检查live2d-frontend 麦克风录制的采样率和格式（通常 16kHz mono PCM）
 
 #### 子阶段 B2：核心数据链路验证（Phase 2）
 
@@ -227,11 +227,11 @@ class TencentASR(BaseEngine):
 ```bash
 # 1. Dify（服务器 YOUR_DIFY_SERVER_IP，已运行，无需操作）
 
-# 2. 数字人后端（参考项目）
+# 2. 数字人后端（live2d-frontend）
 cd digitalHumanLive2D
 python main.py     # → 8001
 
-# 3. 数字人前端（参考项目）
+# 3. 数字人前端（live2d-frontend）
 cd digitalHumanLive2D/web
 pnpm run dev       # → 3000
 
@@ -251,8 +251,8 @@ npm run dev        # → 5173
 | 服务 | 端口 | 说明 |
 |------|------|------|
 | Dify | 80 (远程) | YOUR_DIFY_SERVER_IP |
-| 数字人后端 | 8001 | 参考项目 FastAPI |
-| 数字人前端 | 3000 | 参考项目 Next.js |
+| 数字人后端 | 8001 | live2d-frontend FastAPI |
+| 数字人前端 | 3000 | live2d-frontend Next.js |
 | 业务后端 | 8000 | FastAPI（polling + analysis + API） |
 | 业务前端 | 5173 | Vue3（游客端 + 管理后台） |
 
@@ -266,11 +266,11 @@ npm run dev        # → 5173
 | Q5: retry_count 列需 migration | 低 | 中 | SQLite 可用 ALTER TABLE ADD COLUMN |
 | ffmpeg 安装失败（Windows） | 低 | 中 | `winget install ffmpeg` 或手动 zip |
 | 腾讯云 ASR 签名鉴权超预期 | 中 | 高 | 优先用 `tencentcloud-sdk-python` ASR SDK；备选手写签名 |
-| 腾讯云 ASR 音频格式不匹配 | 低 | 中 | 参考项目麦克风录制格式通常 16kHz mono PCM |
+| 腾讯云 ASR 音频格式不匹配 | 低 | 中 | live2d-frontend 麦克风录制格式通常 16kHz mono PCM |
 | Dify Chat Agent 未开启 TTS | 中 | 高 | 登录 Dify 后台确认 TTS 开关 |
 | polling 拉不到对话 | 中 | 高 | 确认 user=EmiyaMin、Dify 有对话记录 |
 | Workflow 输出格式不匹配 | 中 | 中 | 检查 Dify Workflow 输出 JSON，对齐 analysis.py 解析 |
-| iframe CORS | 低 | 中 | 参考项目已设 `allow_origins=["*"]` |
+| iframe CORS | 低 | 中 | live2d-frontend 已设 `allow_origins=["*"]` |
 | 演示时网络不稳定 | 低 | 高 | 本地缓存对话数据，大屏有兜底 |
 
 ## 六、关键文件索引

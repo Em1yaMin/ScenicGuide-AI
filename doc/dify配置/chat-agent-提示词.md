@@ -169,7 +169,7 @@ Dify 聊天助手中使用 `{{}}` 定义变量，在提示词中通过变量动�
 - [ ] 模型参数已配置（见 2.3 节）
 - [ ] 已发布应用并获取 API Key（即 `DIFY_API_KEY`）
 - [ ] 后端 `.env` 中 `DIFY_API_URL` 和 `DIFY_API_KEY` 已填入
-- [ ] ADH `difyAgent.yaml` 中 `DIFY_API_KEY` 已更新（参考项目）
+- [ ] ADH `difyAgent.yaml` 中 `DIFY_API_KEY` 已更新（live2d-frontend）
 
 ---
 
@@ -185,9 +185,9 @@ Dify 聊天助手中使用 `{{}}` 定义变量，在提示词中通过变量动�
                          FastAPI → 对话入库 → 量化工作流 → 数据大屏
 ```
 
-### 6.2 数字人参考项目（ADH）
+### 6.2 数字人 live2d-frontend（ADH）
 
-参考项目中的 `configs/agents/difyAgent.yaml` 配置了 Chat Agent 的连接参数：
+live2d-frontend 中的 `configs/agents/difyAgent.yaml` 配置了 Chat Agent 的连接参数：
 
 ```yaml
 NAME: "DifyAgent"

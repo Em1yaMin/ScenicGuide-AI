@@ -1,6 +1,6 @@
 # 本地数字人部署任务清单
 
-> 目标：本地部署 `awesome-digital-human-live2d` 参考项目替代云端 light4ai，Vue3 访客端通过 iframe 嵌入本地数字人。
+> 目标：本地部署 `awesome-digital-human-live2d` live2d-frontend 替代云端 light4ai，Vue3 访客端通过 iframe 嵌入本地数字人。
 > ASR（语音转文字）走腾讯云一句话识别；TTS（文字转语音）走 Dify Workflow（插件接入）；Agent 走 DifyAgent。
 > 生成时间：2026-07-13 · 更新：2026-07-13（补充腾讯云凭证 + Dify TTS Workflow Key）
 
@@ -45,8 +45,8 @@
 |------|------|------|
 | 主项目后端 FastAPI | 8000 | 已运行（digitalHumanApi） |
 | 主项目前端 Vue3 | 5173 | 已运行（digitalHumanVue） |
-| **数字人后端 FastAPI** | **8001** | 参考项目（避开 8000） |
-| **数字人前端 Next.js** | **3000** | 参考项目（Vue iframe 目标） |
+| **数字人后端 FastAPI** | **8001** | live2d-frontend（避开 8000） |
+| **数字人前端 Next.js** | **3000** | live2d-frontend（Vue iframe 目标） |
 
 ## 三、Dify 接口与 Key 清单
 
@@ -114,7 +114,7 @@
 |---|------|----------|---------|
 | 1.1 | ~~安装 ffmpeg~~ | ✅ 已完成 | `ffmpeg -version` → N-125551 |
 | 1.2 | ~~安装 pnpm~~ | ✅ 已完成 | `pnpm --version` → 11.12.0 |
-| 1.3 | 安装数字人后端依赖 | `cd 参考项目/.../awesome-digital-human-live2d-2.0.0 && pip install -r requirements.txt` | `python -c "import fastapi,uvicorn,websockets,edge_tts,pydub"` 成功 |
+| 1.3 | 安装数字人后端依赖 | `cd live2d-frontend && pip install -r requirements.txt` | `python -c "import fastapi,uvicorn,websockets,edge_tts,pydub"` 成功 |
 | 1.4 | 安装腾讯云 SDK | `pip install tencentcloud-sdk-python` | `python -c "import tencentcloud"` 成功 |
 | 1.5 | 安装数字人前端依赖 | `cd web && pnpm install` | `web/node_modules` 生成 |
 
@@ -131,7 +131,7 @@
 
 ### 阶段 3：新增腾讯云 ASR 引擎（核心开发）
 
-参考项目用 Registry + Factory + Pool 架构，新增引擎只需配置 + 实现，装饰器自动注册。
+live2d-frontend 用 Registry + Factory + Pool 架构，新增引擎只需配置 + 实现，装饰器自动注册。
 
 | # | 任务 | 文件 | 说明 |
 |---|------|------|------|
@@ -326,7 +326,7 @@ class DifyWorkflowAPI(BaseEngine):
 
 | # | 任务 | 命令 | 验证 |
 |---|------|------|------|
-| 5.1 | 启动数字人后端 | `python main.py`（在参考项目根目录） | 控制台显示 `Uvicorn running on 0.0.0.0:8001` |
+| 5.1 | 启动数字人后端 | `python main.py`（在live2d-frontend 根目录） | 控制台显示 `Uvicorn running on 0.0.0.0:8001` |
 | 5.2 | 启动数字人前端 | `cd web && pnpm run dev` | 控制台显示 `ready`，访问 http://localhost:3000 能打开 |
 | 5.3 | 前端配置 Dify 参数 | 打开 localhost:3000，在设置页填：DIFY_API_URL、DIFY_API_KEY、DIFY_API_USER=EmiyaMin | 设置保存成功 |
 | 5.4 | 前端配置 ASR 参数 | ASR 选 TencentAPI，填 TENCENT_SECRET_ID、TENCENT_SECRET_KEY | 设置保存成功 |
@@ -353,11 +353,11 @@ class DifyWorkflowAPI(BaseEngine):
 | EngSerViceType 填错 | 中 | 必须用 `16k_zh`（字符串），不是数字 `8`。已核实官方文档 |
 | TTS Workflow URL 是 localhost | 高 | 实现中已处理：`url.replace("http://localhost/", host+"/")` |
 | 前端录音采样率与腾讯云要求不匹配 | 低 | 前端 chatbot.tsx 已配 16000，腾讯云 `16k_zh` 匹配 |
-| iframe 跨域 | 低 | 参考项目 CORS 已设 `allow_origins=["*"]`（api.py:25） |
+| iframe 跨域 | 低 | live2d-frontend CORS 已设 `allow_origins=["*"]`（api.py:25） |
 | 两个前端服务并存（5173+3000） | 低 | 端口不冲突，按规划运行 |
 | Python 3.8 vs 参考 requirements 要求 3.10 | 中 | fastapi 0.105 支持 3.8，先试；若 pydantic/类型语法报错再升 3.10 |
 
-## 八、文件改动清单（仅参考项目，不改主项目代码）
+## 八、文件改动清单（仅live2d-frontend，不改主项目代码）
 
 | 文件 | 操作 |
 |------|------|
@@ -377,4 +377,4 @@ class DifyWorkflowAPI(BaseEngine):
 - 腾讯云凭证文件：`doc/腾讯云语音识别/api.txt`（SecretId）
 - 腾讯云签名参考：`doc/腾讯云语音识别/http调用模板.md`（Java 示例，本项目用 Python SDK 替代）
 - Dify 访问账户：`doc/dify访问账户和数字人调用约定格式.md`
-- 参考项目部署文档：`参考项目/awesome-digital-human-live2d-2.0.0/awesome-digital-human-live2d-2.0.0/docs/deploy_instrction.md`
+- live2d-frontend 部署文档：`live2d-frontend/docs/deploy_instrction.md`

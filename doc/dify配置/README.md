@@ -67,9 +67,9 @@ DIFY_LIGHT4AI_USER=EmiyaMin,Admin
 
 > ⚠️ `DIFY_LIGHT4AI_USER` 必须与 ADH 项目 `configs/agents/difyAgent.yaml` 中的 `DIFY_API_USER` 一致。
 
-### 参考项目（ADH）配置
+### live2d-frontend（ADH）配置
 
-`参考项目/awesome-digital-human-live2d-2.0.0/configs/agents/difyAgent.yaml`：
+`live2d-frontend/configs/agents/difyAgent.yaml`：
 
 ```yaml
 # 当前生效配置（路径：configs/agents/difyAgent.yaml）

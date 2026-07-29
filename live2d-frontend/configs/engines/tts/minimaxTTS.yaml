@@ -1,0 +1,9 @@
+# MiniMax 语音合成 HTTP API
+# 文档: https://platform.minimaxi.com/docs/api-reference/speech-t2a-http
+NAME: "MiniMaxAPI"
+VERSION: "v0.0.1"
+API_KEY: "sk-api-YOUR_MINIMAX_API_KEY"
+GROUP_ID: "2038635457494917905"
+VOICE_ID: "Chinese_sweet_girl_nv1"
+MODEL: "speech-2.8-turbo"
+SAMPLE_RATE: 32000

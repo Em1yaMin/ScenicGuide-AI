@@ -1,0 +1,13 @@
+NAME: "DifyTTSW"
+VERSION: "v0.0.1"
+# 需求参数
+PARAMETERS: [
+  {
+    NAME: "DIFY_WORKFLOW_URL",
+    DEFAULT: ""
+  },
+  {
+    NAME: "DIFY_WORKFLOW_API_KEY",
+    DEFAULT: ""
+  }
+]

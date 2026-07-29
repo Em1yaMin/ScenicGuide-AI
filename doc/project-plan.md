@@ -22,7 +22,7 @@
 
 | 编号 | 内容 | 严重度 |
 |------|------|--------|
-| **方案A** | 部署参考项目替代 light4ai | 阻塞 |
+| **方案A** | 部署live2d-frontend 替代 light4ai | 阻塞 |
 | **B** | sentiment_trend 硬编码 "today" 单点 | 高 |
 | **G** | dialogue/analysis 占位 API | 低 |
 | **I** | 补充架构现状文档 | 低 |
@@ -37,7 +37,7 @@
 
 **Context**: light4ai 端配置 API 遇到阻碍，且 light4ai 传给 Dify 的 user 是固定值（adh/EmiyaMin），不可控。获取了 awesome-digital-human-live2d-2.0.0 源码，该项目的 difyAgent.yaml 默认 user 正是 "adh"——light4ai 就是用了这个项目的配置。
 
-**Decision**: 采用方案 A——参考项目独立部署，Vue3 通过 iframe 嵌入。参考项目后端跑 8001 端口（避开 FastAPI 的 8000），前端跑 3000 端口。difyAgent 的 user 配置为 EmiyaMin，与 polling 的 DIFY_LIGHT4AI_USER 对齐。
+**Decision**: 采用方案 A——live2d-frontend 独立部署，Vue3 通过 iframe 嵌入。live2d-frontend 后端跑 8001 端口（避开 FastAPI 的 8000），前端跑 3000 端口。difyAgent 的 user 配置为 EmiyaMin，与 polling 的 DIFY_LIGHT4AI_USER 对齐。
 
 **Consequences**:
 - ✅ 数字人服务完全自控，user 字段可配置
@@ -45,7 +45,7 @@
 - ✅ FastAPI 旁路抓取逻辑不变
 - ✅ 改动最小（ChatView 只改 iframe URL）
 - ⚠️ 两个前端服务（Vue3 5173 + Next.js 3000）
-- ⚠️ iframe 跨域仍在（参考项目 CORS 已设 *）
+- ⚠️ iframe 跨域仍在（live2d-frontend CORS 已设 *）
 - ⚠️ 需要 ffmpeg 依赖
 
 ### 当前架构总览
@@ -58,7 +58,7 @@
 │  └── 数字人对话 ──iframe──→  Next.js 数字人前端 (3000)       │
 │                                │                              │
 │                                ▼                              │
-│                  参考项目后端 FastAPI (8001)                  │
+│                  live2d-frontend 后端 FastAPI (8001)                  │
 │                  ├── ASR (Dify)                               │
 │                  ├── TTS (Dify)                               │
 │                  └── Agent (Dify Chat Agent)                  │
@@ -82,12 +82,12 @@
 
 ### Phase 1：数字人服务部署（方案 A）
 
-**目标**：参考项目跑起来，数字人能对话
+**目标**：live2d-frontend 跑起来，数字人能对话
 **预计**：半天
 
 | 步骤 | 内容 | 验证标准 |
 |------|------|----------|
-| 1.1 | 复制参考项目到 `E:\project_file\digitalHuman\digitalHumanLive2D\` | 目录结构完整 |
+| 1.1 | 复制live2d-frontend到 `E:\project_file\digitalHuman\digitalHumanLive2D\` | 目录结构完整 |
 | 1.2 | 安装后端依赖：`pip install -r requirements.txt` | 无报错 |
 | 1.3 | 安装 ffmpeg（Windows 下载放入 PATH） | `ffmpeg -version` 能执行 |
 | 1.4 | 配置 `configs/config.yaml`：用 `config_template.yaml` 复制为 `config.yaml`，端口改为 8001 | 保留多引擎模式 |
@@ -116,7 +116,7 @@
 **风险**：
 - ffmpeg 在 Windows 上的安装可能遇到 PATH 问题 → 用 `winget install ffmpeg` 或手动下载
 - 腾讯云 ASR WebSocket 签名鉴权实现较复杂 → 可参考 `tencentcloud-sdk-python` 或手写 HMAC-SHA1
-- 音频格式不匹配 → 检查参考项目麦克风录制格式（通常 16kHz mono PCM）
+- 音频格式不匹配 → 检查live2d-frontend麦克风录制格式（通常 16kHz mono PCM）
 - pnpm 未安装 → `npm install -g pnpm`
 
 ### Phase 2：核心数据链路验证
@@ -137,7 +137,7 @@
 | 2.9 | 打开感受度报告 | 有数据展示 |
 
 **风险**：
-- polling 拉不到数据 → 检查 DIFY_LIGHT4AI_USER 是否和参考项目配置的 user 一致
+- polling 拉不到数据 → 检查 DIFY_LIGHT4AI_USER 是否和live2d-frontend 配置的 user 一致
 - analysis 报错 → 检查 DIFY_WORKFLOW_API_KEY 是否正确，Workflow 应用是否已发布
 - evaluations 表有记录但字段为空 → 检查 Dify Workflow 输出的 JSON 格式是否和代码解析匹配
 
@@ -179,12 +179,12 @@
 ```bash
 # 1. 启动 Dify（已在服务器 YOUR_DIFY_SERVER_IP 上跑着，无需操作）
 
-# 2. 启动数字人后端（参考项目）
+# 2. 启动数字人后端（live2d-frontend）
 cd E:\project_file\digitalHuman\digitalHumanLive2D
 python main.py
 # 监听 8001
 
-# 3. 启动数字人前端（参考项目）
+# 3. 启动数字人前端（live2d-frontend）
 cd E:\project_file\digitalHuman\digitalHumanLive2D\web
 pnpm run dev
 # 监听 3000
@@ -207,8 +207,8 @@ npm run dev
 | 服务 | 端口 | 说明 |
 |------|------|------|
 | Dify | 80 (远程) | YOUR_DIFY_SERVER_IP |
-| 数字人后端 | 8001 | 参考项目 FastAPI |
-| 数字人前端 | 3000 | 参考项目 Next.js |
+| 数字人后端 | 8001 | live2d-frontend FastAPI |
+| 数字人前端 | 3000 | live2d-frontend Next.js |
 | 业务后端 | 8000 | FastAPI（polling + analysis + API） |
 | 业务前端 | 5173 | Vue3（游客端 + 管理后台） |
 
@@ -221,7 +221,7 @@ npm run dev
 | ffmpeg 安装失败 | 低 | 中 | 用 winget 或手动下载 zip |
 | polling 拉不到对话 | 中 | 高 | 检查 user 是否一致、Dify 是否有对话记录 |
 | Workflow 输出格式不匹配 | 中 | 中 | 检查 Workflow 输出 JSON，调整 analysis.py 解析 |
-| 参考项目前端 CORS 问题 | 低 | 中 | 参考项目已设 allow_origins=["*"] |
+| live2d-frontend 前端 CORS 问题 | 低 | 中 | live2d-frontend已设 allow_origins=["*"] |
 | 演示时网络不稳定 | 低 | 高 | 提前在本地缓存对话数据，大屏有兜底数据 |
 
 ## 七、交付物清单
@@ -229,7 +229,7 @@ npm run dev
 ### 代码交付
 - `digitalHumanApi/` — FastAPI 业务后端
 - `digitalHumanVue/` — Vue3 前端
-- `digitalHumanLive2D/` — 数字人服务（参考项目，配置文件已改）
+- `digitalHumanLive2D/` — 数字人服务（live2d-frontend，配置文件已改）
 
 ### 文档交付
 - `doc/architecture-analysis.md` — 架构分析 + ADR-001~005
