@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import { fetchWithCodeEnvelope } from '@/utils/fetchWithCodeEnvelope'
 import { API_ADMIN_KNOWLEDGE, API_ADMIN_KNOWLEDGE_IMPORT } from '@/api'
 import type { KnowledgeItem, KnowledgeListResponse, KnowledgeFormData } from '@/types/knowledge'
@@ -52,7 +53,8 @@ let debounceTimer: ReturnType<typeof setTimeout> | null = null
 const totalPages = computed(() => Math.ceil(total.value / pageSize.value))
 
 const renderedPreview = computed(() => {
-  return marked.parse(form.value.content || '', { async: false }) as string
+  const raw = marked.parse(form.value.content || '', { async: false }) as string
+  return DOMPurify.sanitize(raw)
 })
 
 // ── Watchers ──

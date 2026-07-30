@@ -1,5 +1,4 @@
 import json
-import logging
 import re
 from typing import Optional
 
@@ -14,8 +13,6 @@ from app.schemas.knowledge import (
     KnowledgeListResponse,
     KnowledgeUpdateRequest,
 )
-
-logger = logging.getLogger(__name__)
 
 
 async def list_knowledge(
