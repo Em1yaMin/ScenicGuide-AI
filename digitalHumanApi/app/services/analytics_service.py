@@ -368,45 +368,54 @@ async def get_ai_overview(
 
     # 解析 AI 输出
     if ai_raw:
-        # 热门问题
-        raw_hot = ai_raw.get("hot_questions", [])
-        if isinstance(raw_hot, list):
-            for item in raw_hot:
-                if isinstance(item, dict):
-                    hot_questions.append(HotQuestionItem(
-                        question=str(item.get("question", "")),
-                        count=int(item.get("count", 0)),
-                        category=str(item.get("category", "")),
-                    ))
+        try:
+            # 热门问题
+            raw_hot = ai_raw.get("hot_questions", [])
+            if isinstance(raw_hot, list):
+                for item in raw_hot:
+                    if isinstance(item, dict):
+                        hot_questions.append(HotQuestionItem(
+                            question=str(item.get("question", "")),
+                            count=int(item.get("count", 0)),
+                            category=str(item.get("category", "")),
+                        ))
 
-        satisfaction_summary = str(ai_raw.get("satisfaction_summary", satisfaction_summary))
-        satisfaction_direction = str(ai_raw.get("satisfaction_direction", "平稳"))
+            satisfaction_summary = str(ai_raw.get("satisfaction_summary", satisfaction_summary))
+            satisfaction_direction = str(ai_raw.get("satisfaction_direction", "平稳"))
 
-        # 未回答好的问题
-        raw_unanswered = ai_raw.get("unanswered_questions", [])
-        if isinstance(raw_unanswered, list):
-            for item in raw_unanswered:
-                if isinstance(item, dict):
-                    unanswered_questions.append(UnansweredQuestionItem(
-                        question=str(item.get("question", "")),
-                        reason=str(item.get("reason", "")),
-                    ))
+            # 未回答好的问题
+            raw_unanswered = ai_raw.get("unanswered_questions", [])
+            if isinstance(raw_unanswered, list):
+                for item in raw_unanswered:
+                    if isinstance(item, dict):
+                        unanswered_questions.append(UnansweredQuestionItem(
+                            question=str(item.get("question", "")),
+                            reason=str(item.get("reason", "")),
+                        ))
 
-        # 高峰时段（AI 版本）
-        raw_peaks = ai_raw.get("peak_hours", [])
-        if isinstance(raw_peaks, list):
-            for item in raw_peaks:
-                if isinstance(item, dict):
-                    peak_hours_from_ai.append(PeakHourItem(
-                        hour=int(item.get("hour", 0)),
-                        count=int(item.get("count", 0)),
-                        label=str(item.get("label", "")),
-                    ))
+            # 高峰时段（AI 版本）
+            raw_peaks = ai_raw.get("peak_hours", [])
+            if isinstance(raw_peaks, list):
+                for item in raw_peaks:
+                    if isinstance(item, dict):
+                        peak_hours_from_ai.append(PeakHourItem(
+                            hour=int(item.get("hour", 0)),
+                            count=int(item.get("count", 0)),
+                            label=str(item.get("label", "")),
+                        ))
 
-        # 运营建议
-        raw_suggestions = ai_raw.get("suggestions", [])
-        if isinstance(raw_suggestions, list):
-            suggestions = [str(s) for s in raw_suggestions if s]
+            # 运营建议
+            raw_suggestions = ai_raw.get("suggestions", [])
+            if isinstance(raw_suggestions, list):
+                suggestions = [str(s) for s in raw_suggestions if s]
+        except (ValueError, TypeError) as e:
+            logger.warning("Failed to parse LLM output fields: %s, falling back to DB-only stats", e)
+            hot_questions.clear()
+            peak_hours_from_ai.clear()
+            unanswered_questions.clear()
+            suggestions.clear()
+            satisfaction_direction = "平稳"
+            satisfaction_summary = "AI 分析结果解析异常，已回退到数据库统计"
 
     # 如果 LLM 热门问题为空，回退到 DB 统计
     if not hot_questions:
