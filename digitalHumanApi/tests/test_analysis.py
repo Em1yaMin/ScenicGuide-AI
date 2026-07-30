@@ -5,6 +5,7 @@ import pytest
 
 from app.models.dialogue import Dialogue, DialogueRole
 from app.models.evaluation import Evaluation
+from app.models.visitor import Visitor
 from app.tasks.analysis import _normalize_string_list
 
 
@@ -70,6 +71,10 @@ async def test_analysis_overview_with_data(client, db_session):
     now = datetime.now(timezone.utc)
     visitor_id = "v-test-1"
 
+    # 创建 Visitor 记录（Dialogue 有外键约束）
+    db_session.add(Visitor(id=visitor_id))
+    await db_session.flush()
+
     # 创建对话
     d1 = Dialogue(
         visitor_id=visitor_id,
@@ -134,6 +139,10 @@ async def test_analysis_trends_with_data(client, db_session):
     """Trends 端点返回正确的每日统计。"""
     now = datetime.now(timezone.utc)
     visitor_id = "v-trend-1"
+
+    # 创建 Visitor 记录（Dialogue 有外键约束）
+    db_session.add(Visitor(id=visitor_id))
+    await db_session.flush()
 
     dialogues = []
     for i in range(3):
