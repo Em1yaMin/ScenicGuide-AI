@@ -3,7 +3,6 @@ import pytest
 from httpx import AsyncClient
 
 from app.core.config import settings
-from app.models.knowledge import KnowledgeBase
 
 
 @pytest.fixture(autouse=True)
