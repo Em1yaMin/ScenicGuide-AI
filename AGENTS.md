@@ -4,6 +4,13 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - Add durable project-specific notes here as they are discovered through real work.
 
+## Knowledge base admin
+
+- Backend: `digitalHumanApi/app/routers/knowledge.py` exposes `/api/admin/knowledge*` CRUD + import endpoints protected by `X-Admin-Token`.
+- Token source: `ADMIN_API_TOKEN` env var (`digitalHumanApi/app/core/config.py`).
+- Frontend: `digitalHumanVue/src/views/admin/KnowledgeView.vue`; token is stored in `localStorage` under `admin_api_token`.
+- Import supports `.json` arrays and `.md` files split by `# ` headings.
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.

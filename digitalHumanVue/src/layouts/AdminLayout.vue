@@ -18,6 +18,10 @@ import { RouterLink, RouterView } from 'vue-router'
           <span class="nav-icon">☷</span>
           <span>感受度报告</span>
         </RouterLink>
+        <RouterLink to="/admin/knowledge" class="nav-item">
+          <span class="nav-icon">✎</span>
+          <span>知识库</span>
+        </RouterLink>
       </nav>
       <div class="sidebar-footer">
         <span class="version">v0.2</span>
