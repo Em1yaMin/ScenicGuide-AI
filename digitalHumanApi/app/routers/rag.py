@@ -58,7 +58,7 @@ async def rag_index() -> RagIndexResponse:
     """触发全量重新索引。
 
     重新扫描 doc/ 目录，加载所有景区资料文件，
-    分块、向量化并存储到 Chroma 向量数据库。
+    分块、向量化并存储到 SimpleVectorStore（JSON 文件持久化）。
     """
     try:
         result = await index_documents()
