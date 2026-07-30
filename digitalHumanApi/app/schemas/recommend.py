@@ -1,5 +1,5 @@
 """推荐接口的 Pydantic 请求/响应模型。"""
-from typing import List, Optional
+from typing import List
 
 from pydantic import BaseModel
 

@@ -5,7 +5,6 @@
 """
 import json
 import logging
-import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -124,17 +123,6 @@ def filter_by_tags(tags: str) -> str:
     return json.dumps(results, ensure_ascii=False, indent=2)
 
 
-# ── 工具注册表 ────────────────────────────────────────────────────────────
-
-_TOOLS = {
-    "search_spots": search_spots,
-    "search_routes": search_routes,
-    "get_route_detail": get_route_detail,
-    "get_spot_detail": get_spot_detail,
-    "filter_by_tags": filter_by_tags,
-}
-
-
 # ── 偏好分析（规则引擎）───────────────────────────────────────────────────
 
 
@@ -203,7 +191,6 @@ _KEYWORD_MAP: Dict[str, Tuple[List[str], int]] = {
     "一日游": (["一日游"], 10),
     "半天": (["半日游"], 10),
     "半日游": (["半日游"], 10),
-    "半天": (["半日游"], 10),
     "周末": (["半日游", "亲子", "休闲"], 7),
     # 美食
     "美食": (["美食", "文化体验"], 9),
