@@ -125,6 +125,8 @@ async def import_knowledge(
         items = json.loads(content)
         if isinstance(items, dict):
             items = [items]
+        elif not isinstance(items, list):
+            raise ValueError("JSON 文件内容格式无效，期望数组或对象")
         for item in items:
             if not isinstance(item, dict):
                 skipped += 1

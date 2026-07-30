@@ -22,7 +22,12 @@ async def verify_admin_token(
 ) -> str:
     """简易管理员 Token 校验。"""
     expected = settings.ADMIN_API_TOKEN
-    if not expected or x_admin_token != expected:
+    if not expected:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="管理员 Token 未配置，请设置 ADMIN_API_TOKEN 环境变量",
+        )
+    if x_admin_token != expected:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="未授权访问",

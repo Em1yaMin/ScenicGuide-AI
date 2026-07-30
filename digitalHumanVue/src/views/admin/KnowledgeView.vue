@@ -201,6 +201,7 @@ async function doDelete() {
     await fetchList()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '删除失败'
+    showDelete.value = false
   }
 }
 
