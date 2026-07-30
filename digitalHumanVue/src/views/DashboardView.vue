@@ -10,7 +10,12 @@ import type { DashboardResponse, AIOverviewResponse } from '@/types/dashboard'
 
 registerECharts()
 
-const { data, isLoading, error, execute: fetchDashboard } = useApi<DashboardResponse>(API_ADMIN_DASHBOARD)
+const {
+  data,
+  isLoading,
+  error,
+  execute: fetchDashboard,
+} = useApi<DashboardResponse>(API_ADMIN_DASHBOARD)
 
 // AI 运营建议（使用动态 URL 以支持 days 参数）
 const aiData = ref<AIOverviewResponse | null>(null)
@@ -23,7 +28,7 @@ async function fetchAIOverview(): Promise<void> {
   aiError.value = null
   try {
     aiData.value = await fetchWithCodeEnvelope<AIOverviewResponse>(
-      `${API_ANALYSIS_OVERVIEW}?days=${aiDays.value}`
+      `${API_ANALYSIS_OVERVIEW}?days=${aiDays.value}`,
     )
   } catch (e) {
     aiError.value = e instanceof Error ? e.message : '未知错误'
@@ -32,13 +37,13 @@ async function fetchAIOverview(): Promise<void> {
   }
 }
 
-const hasData = computed(() =>
-  data.value !== null && (
-    data.value?.sentiment_trend?.some(t => t.positive > 0 || t.negative > 0 || t.neutral > 0) ||
-    Object.keys(data.value?.satisfaction_distribution ?? {}).length > 0 ||
-    (data.value?.hot_issues?.length ?? 0) > 0 ||
-    (data.value?.spot_heatmap?.length ?? 0) > 0
-  )
+const hasData = computed(
+  () =>
+    data.value !== null &&
+    (data.value?.sentiment_trend?.some((t) => t.positive > 0 || t.negative > 0 || t.neutral > 0) ||
+      Object.keys(data.value?.satisfaction_distribution ?? {}).length > 0 ||
+      (data.value?.hot_issues?.length ?? 0) > 0 ||
+      (data.value?.spot_heatmap?.length ?? 0) > 0),
 )
 
 onMounted(() => {
@@ -57,7 +62,10 @@ const satisfactionRate = computed(() => {
   const total = Object.values(dist).reduce((sum, v) => sum + v, 0)
   if (total === 0) return 0
   // 加权平均分（假设 key 是分数 1-5）
-  const weightedSum = Object.entries(dist).reduce((sum, [score, count]) => sum + Number(score) * count, 0)
+  const weightedSum = Object.entries(dist).reduce(
+    (sum, [score, count]) => sum + Number(score) * count,
+    0,
+  )
   return Math.round((weightedSum / total) * 10) / 10
 })
 
@@ -115,7 +123,7 @@ const sentimentTrendOption = computed(() => {
     grid: { left: '3%', right: '4%', top: '8%', bottom: '14%', containLabel: true },
     xAxis: {
       type: 'category' as const,
-      data: trend.map(t => t.date),
+      data: trend.map((t) => t.date),
       axisLine: { lineStyle: { color: BRAND_COLORS.border } },
       axisTick: { show: false },
       axisLabel: { ...chartTextStyle },
@@ -127,19 +135,25 @@ const sentimentTrendOption = computed(() => {
     },
     series: [
       {
-        name: '正面', type: 'bar', stack: 'sentiment',
-        data: trend.map(t => t.positive ?? 0),
+        name: '正面',
+        type: 'bar',
+        stack: 'sentiment',
+        data: trend.map((t) => t.positive ?? 0),
         itemStyle: { color: BRAND_COLORS.positive, borderRadius: [0, 0, 0, 0] },
         barWidth: '50%',
       },
       {
-        name: '负面', type: 'bar', stack: 'sentiment',
-        data: trend.map(t => t.negative ?? 0),
+        name: '负面',
+        type: 'bar',
+        stack: 'sentiment',
+        data: trend.map((t) => t.negative ?? 0),
         itemStyle: { color: BRAND_COLORS.negative },
       },
       {
-        name: '中性', type: 'bar', stack: 'sentiment',
-        data: trend.map(t => t.neutral ?? 0),
+        name: '中性',
+        type: 'bar',
+        stack: 'sentiment',
+        data: trend.map((t) => t.neutral ?? 0),
         itemStyle: { color: BRAND_COLORS.neutral, borderRadius: [4, 4, 0, 0] },
       },
     ],
@@ -156,31 +170,33 @@ const satisfactionOption = computed(() => {
 
   return {
     tooltip: { trigger: 'item' as const, textStyle: { fontSize: 13 } },
-    series: [{
-      type: 'pie' as const,
-      radius: ['55%', '78%'],
-      center: ['50%', '50%'],
-      avoidLabelOverlap: false,
-      itemStyle: {
-        borderRadius: 3,
-        borderColor: BRAND_COLORS.paper,
-        borderWidth: 3,
-      },
-      label: { show: false },
-      emphasis: {
-        label: {
-          show: true,
-          fontSize: 20,
-          fontWeight: 'bold',
-          fontFamily: '"Noto Serif SC", serif',
+    series: [
+      {
+        type: 'pie' as const,
+        radius: ['55%', '78%'],
+        center: ['50%', '50%'],
+        avoidLabelOverlap: false,
+        itemStyle: {
+          borderRadius: 3,
+          borderColor: BRAND_COLORS.paper,
+          borderWidth: 3,
         },
-        scaleSize: 8,
+        label: { show: false },
+        emphasis: {
+          label: {
+            show: true,
+            fontSize: 20,
+            fontWeight: 'bold',
+            fontFamily: '"Noto Serif SC", serif',
+          },
+          scaleSize: 8,
+        },
+        data: chartData.map((d, i) => ({
+          ...d,
+          itemStyle: { color: warmPalette[i % warmPalette.length] },
+        })),
       },
-      data: chartData.map((d, i) => ({
-        ...d,
-        itemStyle: { color: warmPalette[i % warmPalette.length] },
-      })),
-    }],
+    ],
   }
 })
 
@@ -200,23 +216,25 @@ const hotIssuesOption = computed(() => {
     },
     yAxis: {
       type: 'category' as const,
-      data: issues.map(i => i.concern),
+      data: issues.map((i) => i.concern),
       axisTick: { show: false },
       axisLine: { show: false },
       axisLabel: { ...chartTextStyle, fontSize: 13, width: 130, overflow: 'truncate' },
     },
-    series: [{
-      type: 'bar' as const,
-      data: issues.map((i, idx) => ({
-        value: i.count,
-        itemStyle: {
-          color: BRAND_COLORS.accent,
-          borderRadius: [0, 4, 4, 0],
-          opacity: 1 - idx * 0.08,
-        },
-      })),
-      barWidth: '55%',
-    }],
+    series: [
+      {
+        type: 'bar' as const,
+        data: issues.map((i, idx) => ({
+          value: i.count,
+          itemStyle: {
+            color: BRAND_COLORS.accent,
+            borderRadius: [0, 4, 4, 0],
+            opacity: 1 - idx * 0.08,
+          },
+        })),
+        barWidth: '55%',
+      },
+    ],
   }
 })
 
@@ -236,23 +254,25 @@ const spotHeatmapOption = computed(() => {
     },
     yAxis: {
       type: 'category' as const,
-      data: spots.map(s => s.spot_name),
+      data: spots.map((s) => s.spot_name),
       axisTick: { show: false },
       axisLine: { show: false },
       axisLabel: { ...chartTextStyle, fontSize: 13, width: 130, overflow: 'truncate' },
     },
-    series: [{
-      type: 'bar' as const,
-      data: spots.map((s, idx) => ({
-        value: s.mention_count,
-        itemStyle: {
-          color: BRAND_COLORS.ink,
-          borderRadius: [0, 4, 4, 0],
-          opacity: 0.85 - idx * 0.06,
-        },
-      })),
-      barWidth: '55%',
-    }],
+    series: [
+      {
+        type: 'bar' as const,
+        data: spots.map((s, idx) => ({
+          value: s.mention_count,
+          itemStyle: {
+            color: BRAND_COLORS.ink,
+            borderRadius: [0, 4, 4, 0],
+            opacity: 0.85 - idx * 0.06,
+          },
+        })),
+        barWidth: '55%',
+      },
+    ],
   }
 })
 
@@ -272,7 +292,7 @@ const aiSatisfactionTrendOption = computed(() => {
     grid: { left: '3%', right: '4%', top: '8%', bottom: '10%', containLabel: true },
     xAxis: {
       type: 'category' as const,
-      data: trend.map(t => t.date),
+      data: trend.map((t) => t.date),
       axisLine: { lineStyle: { color: BRAND_COLORS.border } },
       axisTick: { show: false },
       axisLabel: { ...chartTextStyle },
@@ -284,31 +304,36 @@ const aiSatisfactionTrendOption = computed(() => {
       splitLine: { lineStyle: { color: BRAND_COLORS.border, type: 'dashed' } },
       axisLabel: { ...chartTextStyle },
     },
-    series: [{
-      type: 'line' as const,
-      data: trend.map(t => t.avg_score),
-      smooth: true,
-      lineStyle: { color: BRAND_COLORS.accent, width: 2 },
-      itemStyle: { color: BRAND_COLORS.accent },
-      areaStyle: {
-        color: {
-          type: 'linear' as const,
-          x: 0, y: 0, x2: 0, y2: 1,
-          colorStops: [
-            { offset: 0, color: 'rgba(196, 92, 38, 0.15)' },
-            { offset: 1, color: 'rgba(196, 92, 38, 0.02)' },
-          ],
+    series: [
+      {
+        type: 'line' as const,
+        data: trend.map((t) => t.avg_score),
+        smooth: true,
+        lineStyle: { color: BRAND_COLORS.accent, width: 2 },
+        itemStyle: { color: BRAND_COLORS.accent },
+        areaStyle: {
+          color: {
+            type: 'linear' as const,
+            x: 0,
+            y: 0,
+            x2: 0,
+            y2: 1,
+            colorStops: [
+              { offset: 0, color: 'rgba(196, 92, 38, 0.15)' },
+              { offset: 1, color: 'rgba(196, 92, 38, 0.02)' },
+            ],
+          },
         },
       },
-    }],
+    ],
   }
 })
 
 const aiPeakHoursOption = computed(() => {
   const peaks = aiData.value?.peak_hours ?? []
   const sorted = [...peaks].sort((a, b) => a.hour - b.hour)
-  const hours = sorted.map(p => p.label || `${p.hour}:00`)
-  const values = sorted.map(p => p.count)
+  const hours = sorted.map((p) => p.label || `${p.hour}:00`)
+  const values = sorted.map((p) => p.count)
   const maxVal = Math.max(...values, 1)
 
   return {
@@ -333,28 +358,30 @@ const aiPeakHoursOption = computed(() => {
       splitLine: { lineStyle: { color: BRAND_COLORS.border, type: 'dashed' } },
       axisLabel: { ...chartTextStyle },
     },
-    series: [{
-      type: 'bar' as const,
-      data: values.map(v => ({
-        value: v,
-        itemStyle: {
-          color: v === maxVal ? BRAND_COLORS.accent : BRAND_COLORS.ink,
-          borderRadius: [4, 4, 0, 0],
-          opacity: 0.4 + (v / maxVal) * 0.6,
-        },
-      })),
-      barWidth: '60%',
-    }],
+    series: [
+      {
+        type: 'bar' as const,
+        data: values.map((v) => ({
+          value: v,
+          itemStyle: {
+            color: v === maxVal ? BRAND_COLORS.accent : BRAND_COLORS.ink,
+            borderRadius: [4, 4, 0, 0],
+            opacity: 0.4 + (v / maxVal) * 0.6,
+          },
+        })),
+        barWidth: '60%',
+      },
+    ],
   }
 })
 
-const hasAIData = computed(() =>
-  aiData.value !== null && (
-    (aiData.value?.hot_questions?.length ?? 0) > 0 ||
-    (aiData.value?.unanswered_questions?.length ?? 0) > 0 ||
-    (aiData.value?.suggestions?.length ?? 0) > 0 ||
-    aiData.value?.total_dialogues > 0
-  )
+const hasAIData = computed(
+  () =>
+    aiData.value !== null &&
+    ((aiData.value?.hot_questions?.length ?? 0) > 0 ||
+      (aiData.value?.unanswered_questions?.length ?? 0) > 0 ||
+      (aiData.value?.suggestions?.length ?? 0) > 0 ||
+      aiData.value?.total_dialogues > 0),
 )
 </script>
 
@@ -365,11 +392,7 @@ const hasAIData = computed(() =>
         <h1>数据大屏</h1>
         <p class="header-desc">景区 AI 导览运营数据概览</p>
       </div>
-      <button
-        class="refresh-btn"
-        @click="fetchDashboard"
-        :disabled="isLoading"
-      >
+      <button class="refresh-btn" @click="fetchDashboard" :disabled="isLoading">
         {{ isLoading ? '加载中…' : '刷新数据' }}
       </button>
     </div>
@@ -439,7 +462,7 @@ const hasAIData = computed(() =>
         <div class="chart-card">
           <div class="chart-header">
             <h3>热门关注点</h3>
-            <p class="chart-annotation">访客最关心的 {{ (data?.hot_issues?.length ?? 0) }} 个问题</p>
+            <p class="chart-annotation">访客最关心的 {{ data?.hot_issues?.length ?? 0 }} 个问题</p>
           </div>
           <VChart :option="hotIssuesOption" :loading="isLoading" autoresize />
         </div>
@@ -460,8 +483,7 @@ const hasAIData = computed(() =>
           <div>
             <h2>AI 运营建议</h2>
             <p class="ai-section-desc">
-              LangChain 聚合分析 · 最近 {{ aiDays }} 天 ·
-              {{ aiData?.total_dialogues ?? 0 }} 条对话
+              LangChain 聚合分析 · 最近 {{ aiDays }} 天 · {{ aiData?.total_dialogues ?? 0 }} 条对话
             </p>
           </div>
           <div class="ai-header-actions">
@@ -491,10 +513,12 @@ const hasAIData = computed(() =>
               <p class="ai-summary-body">{{ aiData?.ai_summary }}</p>
               <p class="ai-summary-direction">
                 满意度趋势判定：
-                <strong :class="{
-                  'trend-up': aiData?.satisfaction_direction === '上升',
-                  'trend-down': aiData?.satisfaction_direction === '下降',
-                }">
+                <strong
+                  :class="{
+                    'trend-up': aiData?.satisfaction_direction === '上升',
+                    'trend-down': aiData?.satisfaction_direction === '下降',
+                  }"
+                >
                   {{ aiData?.satisfaction_direction }}
                 </strong>
               </p>
@@ -507,9 +531,7 @@ const hasAIData = computed(() =>
             <div class="chart-card">
               <div class="chart-header">
                 <h3>满意度趋势</h3>
-                <p class="chart-annotation">
-                  日均分 {{ aiData?.satisfaction_direction }}
-                </p>
+                <p class="chart-annotation">日均分 {{ aiData?.satisfaction_direction }}</p>
               </div>
               <VChart :option="aiSatisfactionTrendOption" :loading="aiLoading" autoresize />
             </div>
@@ -538,7 +560,7 @@ const hasAIData = computed(() =>
                   :key="idx"
                   class="ai-list-item"
                 >
-                  <span class="ai-list-rank" :class="{ 'top3': idx < 3 }">{{ idx + 1 }}</span>
+                  <span class="ai-list-rank" :class="{ top3: idx < 3 }">{{ idx + 1 }}</span>
                   <div class="ai-list-content">
                     <span class="ai-list-question">{{ item.question }}</span>
                     <span class="ai-list-meta">
@@ -585,11 +607,7 @@ const hasAIData = computed(() =>
               <p class="chart-annotation">基于 AI 分析生成的建议</p>
             </div>
             <div class="suggestions-list">
-              <div
-                v-for="(s, idx) in aiData.suggestions"
-                :key="idx"
-                class="suggestion-item"
-              >
+              <div v-for="(s, idx) in aiData.suggestions" :key="idx" class="suggestion-item">
                 <span class="suggestion-num">{{ idx + 1 }}</span>
                 <span class="suggestion-text">{{ s }}</span>
               </div>
@@ -644,8 +662,7 @@ const hasAIData = computed(() =>
   font-size: var(--text-small);
   font-weight: 500;
   white-space: nowrap;
-  transition:
-    background var(--duration-fast) var(--ease-out);
+  transition: background var(--duration-fast) var(--ease-out);
 }
 
 .refresh-btn:hover {
@@ -874,11 +891,11 @@ const hasAIData = computed(() =>
 }
 
 .trend-up {
-  color: #6B9E6D;
+  color: #6b9e6d;
 }
 
 .trend-down {
-  color: #C45C26;
+  color: #c45c26;
 }
 
 /* ── AI 列表卡片 ── */
@@ -962,7 +979,7 @@ const hasAIData = computed(() =>
 .ai-list-category {
   padding: 1px 8px;
   background: rgba(107, 158, 109, 0.12);
-  color: #6B9E6D;
+  color: #6b9e6d;
   border-radius: 10px;
   font-size: 11px;
 }
@@ -1002,7 +1019,7 @@ const hasAIData = computed(() =>
   padding: var(--space-md);
   background: rgba(107, 158, 109, 0.04);
   border-radius: 6px;
-  border-left: 3px solid #6B9E6D;
+  border-left: 3px solid #6b9e6d;
 }
 
 .suggestion-num {
@@ -1012,7 +1029,7 @@ const hasAIData = computed(() =>
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: #6B9E6D;
+  background: #6b9e6d;
   color: var(--color-paper);
   font-size: var(--text-small);
   font-weight: 600;

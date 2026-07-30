@@ -1,11 +1,6 @@
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
-import {
-  BarChart,
-  PieChart,
-  LineChart,
-  HeatmapChart,
-} from 'echarts/charts'
+import { BarChart, PieChart, LineChart, HeatmapChart } from 'echarts/charts'
 import {
   TitleComponent,
   TooltipComponent,
