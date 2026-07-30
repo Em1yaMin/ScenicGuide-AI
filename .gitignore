@@ -33,3 +33,7 @@ Thumbs.db
 # Project tooling
 .workbuddy/
 
+# RAG local data
+rag_data/
+chroma_data/
+

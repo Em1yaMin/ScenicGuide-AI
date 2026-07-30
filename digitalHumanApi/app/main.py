@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.core.database import engine
 from app.models import Base
-from app.routers import admin, analysis, dialogue, knowledge, recommend, visitor
+from app.routers import admin, analysis, dialogue, knowledge, rag, recommend, visitor
 from app.schemas.common import ErrorResponse
 from app.schemas.health import HealthResponse
 from app.tasks.analysis import analysis_loop
@@ -91,6 +91,7 @@ app.include_router(dialogue.router)
 app.include_router(analysis.router)
 app.include_router(recommend.router)
 app.include_router(knowledge.router)
+app.include_router(rag.router)
 
 
 @app.get("/api/v1/health", response_model=HealthResponse)
