@@ -6,7 +6,7 @@
 
 | 层 | 技术 |
 |----|------|
-| 后端 | Python 3.8+ · FastAPI · SQLAlchemy 2.0 (async) · SQLite (aiosqlite) · httpx |
+| 后端 | Python 3.8+ · FastAPI · SQLAlchemy 2.0 (async) · SQLite (aiosqlite) · httpx · LangChain |
 | 前端 | Vue 3 · TypeScript · Vite 8 · Pinia · Vue Router · ECharts |
 | 部署 | Docker Compose · Nginx |
 | 外部服务 | Dify AI 平台（Chat Agent 对话 + Workflow 量化分析）、本地 Live2D 数字人（live2d-frontend） |
@@ -38,6 +38,7 @@ digitalHuman/
 │   │   ├── core/             # 配置 (config.py) + 数据库引擎 (database.py)
 │   │   ├── models/           # SQLAlchemy ORM 实体
 │   │   ├── schemas/          # Pydantic v2 请求/响应模型
+│   │   ├── data/             # 本地 JSON 数据源（景点、路线）
 │   │   ├── services/         # 业务逻辑 + Dify API 客户端
 │   │   ├── routers/          # FastAPI HTTP 端点
 │   │   └── tasks/            # 后台 asyncio 循环（polling、analysis）
@@ -233,6 +234,7 @@ docker-compose up -d --build
 | GET | `/visitor/recommended-questions` | 获取动态推荐问句（后台每 5 分钟从 Dify 刷新） |
 | POST | `/visitor/register` | 游客注册 |
 | POST | `/visitor/refresh-recommend` | 手动刷新推荐问句缓存 |
+| POST | `/recommend` | 个性化路线推荐（接收偏好描述，返回匹配路线） |
 | POST | `/dialogue/sync-now` | 手动触发对话抓取 |
 | POST | `/analysis/run-now` | 手动触发量化分析 |
 | GET | `/admin/dashboard` | 数据大屏聚合数据 |

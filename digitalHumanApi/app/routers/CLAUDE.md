@@ -20,6 +20,7 @@ routers/
   admin.py     # GET /api/v1/admin/dashboard、/report — 纯聚合委托
   dialogue.py  # POST /api/v1/dialogue/sync-now — 任务触发器（绕过服务层）
   analysis.py  # POST /api/v1/analysis/run-now — 任务触发器
+  recommend.py # POST /api/v1/recommend — 个性化路线推荐
 ```
 
 ## DB-Backed Endpoint Pattern
