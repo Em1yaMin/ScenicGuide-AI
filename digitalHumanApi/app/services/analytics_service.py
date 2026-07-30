@@ -241,13 +241,34 @@ def _extract_json(text: str) -> Optional[Dict[str, Any]]:
         except json.JSONDecodeError:
             pass
 
-    # 尝试匹配第一个 { ... } 结构
-    match = re.search(r'\{[\s\S]*?\}', text)
-    if match:
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            pass
+    # 尝试括号平衡匹配：找到第一个 { 及其匹配的 }
+    start = text.find('{')
+    if start != -1:
+        depth = 0
+        in_string = False
+        escape = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if escape:
+                escape = False
+                continue
+            if ch == '\\' and in_string:
+                escape = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[start:i + 1])
+                    except json.JSONDecodeError:
+                        break
 
     logger.warning("Failed to extract JSON from LLM output: %s", text[:500])
     return None
