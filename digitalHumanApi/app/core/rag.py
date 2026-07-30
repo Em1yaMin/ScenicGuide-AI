@@ -215,7 +215,7 @@ class SimpleVectorStore:
         persist_dir: Optional[Path] = None,
     ):
         self.collection_name = collection_name
-        self.persist_dir = persist_dir or CHROMA_DATA_DIR
+        self.persist_dir = Path(persist_dir) if persist_dir else CHROMA_DATA_DIR
         self.persist_dir.mkdir(parents=True, exist_ok=True)
 
         self.embedding = TFIDFEmbeddings()
