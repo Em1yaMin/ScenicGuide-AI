@@ -100,17 +100,26 @@ def _get_analysis_chain():
 
 # ── 数据加载 ──
 
-async def _load_dialogues_for_analysis(
-    db: AsyncSession, days: int = 30
+async def _count_dialogues(db: AsyncSession, days: int) -> int:
+    """统计指定日期范围内的对话总数（避免全量加载）。"""
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    result = await db.execute(
+        select(func.count(Dialogue.id)).where(Dialogue.timestamp >= since)
+    )
+    return result.scalar() or 0
+
+
+async def _load_dialogue_sample(
+    db: AsyncSession, days: int, limit: int = 200
 ) -> List[Dict[str, Any]]:
-    """加载最近 N 天的对话数据（含评估结果）。"""
+    """加载对话随机样本（最多 limit 条），用于 LLM 分析。"""
     since = datetime.now(timezone.utc) - timedelta(days=days)
 
-    # 加载对话（含关联的评估）
     result = await db.execute(
         select(Dialogue)
         .where(Dialogue.timestamp >= since)
-        .order_by(Dialogue.timestamp.asc())
+        .order_by(func.random())
+        .limit(limit)
     )
     dialogues = result.scalars().all()
 
@@ -119,7 +128,7 @@ async def _load_dialogues_for_analysis(
         item = {
             "id": d.id,
             "role": d.role.value if isinstance(d.role, DialogueRole) else str(d.role),
-            "content": d.content[:500],  # 截断过长内容
+            "content": d.content[:500],
             "timestamp": d.timestamp.isoformat() if d.timestamp else None,
             "hour": d.timestamp.hour if d.timestamp else None,
             "weekday": d.timestamp.weekday() if d.timestamp else None,
@@ -190,19 +199,11 @@ async def _load_evaluation_summary(
 def _build_data_summary(
     dialogues: List[Dict[str, Any]],
     eval_summary: Dict[str, Any],
+    total_dialogues: int,
 ) -> str:
     """构建发送给 LLM 的数据摘要文本。"""
-    total = len(dialogues)
-    user_msgs = [d for d in dialogues if d["role"] == "user"]
-    assistant_msgs = [d for d in dialogues if d["role"] == "assistant"]
-
-    # 采样对话（避免超过 token 限制）
-    sample_size = min(200, total)
-    step = max(1, total // sample_size) if total > sample_size else 1
-    sampled = dialogues[::step][:sample_size]
-
     lines = [
-        f"总对话条数：{total}（用户消息：{len(user_msgs)}，AI回复：{len(assistant_msgs)}）",
+        f"总对话条数：{total_dialogues}（以下为 {len(dialogues)} 条抽样数据）",
         f"评估数据覆盖：{eval_summary.get('evaluation_count', 0)} 条",
         f"评分分布：{eval_summary.get('score_distribution', {})}",
         f"情感分布：{eval_summary.get('sentiment_distribution', {})}",
@@ -211,7 +212,7 @@ def _build_data_summary(
         "--- 对话样本（用户: U, AI: A） ---",
     ]
 
-    for d in sampled:
+    for d in dialogues:
         role_tag = "U" if d["role"] == "user" else "A"
         ts = d.get("timestamp", "")[:19]
         content = d.get("content", "").replace("\n", " ")
@@ -324,7 +325,8 @@ async def get_ai_overview(
     days = max(1, min(days, 365))  # 限制 1-365 天
 
     # 加载数据
-    dialogues = await _load_dialogues_for_analysis(db, days)
+    total_dialogues = await _count_dialogues(db, days)
+    dialogues = await _load_dialogue_sample(db, days, limit=200)
     eval_summary = await _load_evaluation_summary(db, days)
 
     # 默认值
@@ -334,8 +336,6 @@ async def get_ai_overview(
     unanswered_questions: List[UnansweredQuestionItem] = []
     suggestions: List[str] = []
     peak_hours_from_ai: List[PeakHourItem] = []
-
-    total_dialogues = len(dialogues)
 
     if total_dialogues == 0:
         logger.info("No dialogues found in last %d days, returning empty overview", days)
@@ -358,7 +358,7 @@ async def get_ai_overview(
     if settings.OPENAI_API_KEY:
         try:
             chain = _get_analysis_chain()
-            data_summary = _build_data_summary(dialogues, eval_summary)
+            data_summary = _build_data_summary(dialogues, eval_summary, total_dialogues)
             llm_output = await chain.ainvoke({"days": days, "data_summary": data_summary})
             ai_raw = _extract_json(llm_output)
             if ai_raw:
