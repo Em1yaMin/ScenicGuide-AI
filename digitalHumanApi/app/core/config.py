@@ -35,6 +35,10 @@ class Settings(BaseModel):
         if u.strip()
     ]
 
+    OPENAI_API_KEY: str = os.environ.get("OPENAI_API_KEY", "")
+    OPENAI_API_BASE: str = os.environ.get("OPENAI_API_BASE", "")
+    OPENAI_MODEL: str = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+
     SSH_HOST: str = os.environ.get("SSH_HOST", "")
     SSH_PORT: int = int(os.environ.get("SSH_PORT", "22"))
     SSH_USER: str = os.environ.get("SSH_USER", "root")
