@@ -26,7 +26,11 @@ def _load_json(filename: str) -> List[Dict[str, Any]]:
         logger.warning("数据文件不存在: %s", path)
         return []
     with open(path, encoding="utf-8") as f:
-        return json.load(f)
+        try:
+            return json.load(f)
+        except json.JSONDecodeError:
+            logger.exception("数据文件 JSON 解析失败: %s", path)
+            return []
 
 
 # ── LangChain Tools ───────────────────────────────────────────────────────
@@ -323,6 +327,15 @@ async def recommend(preference: str) -> RecommendResponse:
     scored.sort(key=lambda x: x[1].get("id", ""))  # 稳定排序
     scored.sort(key=lambda x: x[0], reverse=True)
 
+    if scored and all(s[0] == 0 for s in scored):
+        logger.info("推荐完成: preference='%s', 无有效匹配路线", preference)
+        return RecommendResponse(
+            preference=preference,
+            recommendations=[],
+            summary=_generate_summary(preference, [], tag_scores),
+            total=0,
+        )
+
     # Step 4: 构建响应
     spots_data = _load_json("spots.json")
     spots_by_id = {s["id"]: s for s in spots_data}
@@ -382,7 +395,8 @@ def detect_tour_preference(text: str) -> Optional[str]:
         "推荐", "路线", "游览", "游玩", "想去", "想看",
         "喜欢", "偏好", "怎么逛", "怎么玩", "有什么", "哪些",
         "景点", "好玩", "好看", "适合", "建议", "规划",
-        "一日游", "半日游", "带", "老人", "小孩", "拍照",
+        "一日游", "半日游", "带老人", "带孩子", "带娃", "带小孩",
+        "老人", "小孩", "拍照",
     ]
     # 需要至少包含 2 个触发词才认为表达了游览偏好
     matched = [kw for kw in trigger_keywords if kw in text]
