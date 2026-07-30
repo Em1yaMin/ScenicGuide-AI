@@ -18,6 +18,7 @@ FastAPI HTTP 端点定义层。纯接线层——验证请求体、注入 DB 会
 routers/
   visitor.py   # POST /api/v1/visitor/register — DB 注入 CRUD
   admin.py     # GET /api/v1/admin/dashboard、/report — 纯聚合委托
+  knowledge.py # /api/admin/knowledge CRUD + import — X-Admin-Token 认证
   dialogue.py  # POST /api/v1/dialogue/sync-now — 任务触发器（绕过服务层）
   analysis.py  # POST /api/v1/analysis/run-now — 任务触发器
   recommend.py # POST /api/v1/recommend — 个性化路线推荐

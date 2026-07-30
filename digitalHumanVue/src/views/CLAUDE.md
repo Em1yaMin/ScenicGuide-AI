@@ -11,6 +11,7 @@
 | `ChatView.vue` | `/visitor/chat` | iframe 嵌入+容错 | import.meta.env + Pinia store |
 | `DashboardView.vue` | `/admin` | API 数据+ECharts | fetch(API_ADMIN_DASHBOARD) |
 | `ReportView.vue` | `/admin/report` | API 数据+ECharts | fetch(API_ADMIN_REPORT) |
+| `admin/KnowledgeView.vue` | `/admin/knowledge` | API 数据+CRUD 弹窗 | fetch(API_ADMIN_KNOWLEDGE) |
 
 ## Data-Fetching View Pattern (三态模板)
 

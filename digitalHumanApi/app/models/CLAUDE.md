@@ -18,6 +18,7 @@ models/
   dialogue.py         # Dialogue — 对话消息（自增 int PK，FK→visitors）
   evaluation.py       # Evaluation — AI 评估结果（FK→dialogues, UNIQUE）
   stat.py             # Stat — 聚合统计（独立表，无外键）
+  knowledge.py        # KnowledgeBase — 知识库条目（id/title/category/content/tags）
   __init__.py         # 重导出 Base + 所有模型（使 create_all 发现所有表）
 ```
 
