@@ -8,7 +8,6 @@ RAG 服务层：文档加载、分块、向量化、存储、检索。
 
 import logging
 import os
-import re
 from pathlib import Path
 from typing import List, Optional
 
@@ -118,7 +117,13 @@ def _split_documents(documents: List[Document]) -> List[Document]:
                                 page_content=current_chunk.strip(),
                                 metadata=dict(metadata),
                             ))
-                        current_chunk = sent
+                        # 块重叠：前一 chunk 末尾 CHUNK_OVERLAP 字符作为下一 chunk 前缀
+                        prev_chunk = current_chunk.strip()
+                        if CHUNK_OVERLAP > 0 and len(prev_chunk) > 0:
+                            start = max(0, len(prev_chunk) - CHUNK_OVERLAP)
+                            current_chunk = prev_chunk[start:] + sent
+                        else:
+                            current_chunk = sent
 
                 # 处理最后一段
                 if len(current_chunk.strip()) >= 10:

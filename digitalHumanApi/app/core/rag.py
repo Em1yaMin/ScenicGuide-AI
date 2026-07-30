@@ -10,7 +10,6 @@ import json
 import logging
 import math
 import os
-import pickle
 import re
 from collections import Counter
 from pathlib import Path
@@ -255,6 +254,14 @@ class SimpleVectorStore:
                 if self._documents and self.embedding.is_fitted:
                     texts = [d.page_content for d in self._documents]
                     self._vectors = self.embedding.embed_documents(texts)
+                elif self._documents and not self.embedding.is_fitted:
+                    logger.warning(
+                        "Documents loaded but vocabulary missing; "
+                        "clearing documents to avoid silent inconsistency. "
+                        "Run /index to rebuild."
+                    )
+                    self._documents = []
+                    self._vectors = []
                 logger.info(
                     "Loaded %d documents from %s",
                     len(self._documents),
@@ -375,19 +382,32 @@ class SimpleVectorStore:
 # ---------------------------------------------------------------------------
 
 _vectorstore: Optional[SimpleVectorStore] = None
+_vectorstore_collection: Optional[str] = None
+_vectorstore_dir: Optional[Path] = None
 
 
 def get_vectorstore(
     collection_name: str = "scenic_knowledge",
     persist_dir: Optional[Path] = None,
 ) -> SimpleVectorStore:
-    """获取全局向量存储单例。"""
-    global _vectorstore
-    if _vectorstore is None:
+    """获取全局向量存储单例。
+
+    当 collection_name 或 persist_dir 变化时自动重建实例，
+    以支持未来扩展多知识库场景。
+    """
+    global _vectorstore, _vectorstore_collection, _vectorstore_dir
+    effective_dir = persist_dir or CHROMA_DATA_DIR
+    if (
+        _vectorstore is None
+        or _vectorstore_collection != collection_name
+        or _vectorstore_dir != effective_dir
+    ):
         _vectorstore = SimpleVectorStore(
             collection_name=collection_name,
-            persist_dir=persist_dir or CHROMA_DATA_DIR,
+            persist_dir=effective_dir,
         )
+        _vectorstore_collection = collection_name
+        _vectorstore_dir = effective_dir
     return _vectorstore
 
 
