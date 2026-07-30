@@ -118,6 +118,7 @@ async def import_knowledge(
 ) -> KnowledgeImportResponse:
     """从 JSON 或 Markdown 文件批量导入知识库条目。"""
     imported = 0
+    skipped = 0
     lower_name = filename.lower()
 
     if lower_name.endswith(".json"):
@@ -126,10 +127,13 @@ async def import_knowledge(
             items = [items]
         for item in items:
             if not isinstance(item, dict):
+                skipped += 1
                 continue
             entry = _build_create_request(item, default_category)
             await create_knowledge(db, entry)
             imported += 1
+        if imported == 0 and skipped > 0:
+            raise ValueError("JSON 文件中未找到有效的知识库条目，所有元素均不是对象格式")
     elif lower_name.endswith((".md", ".markdown")):
         entries = _parse_markdown(content, default_category)
         for entry in entries:
@@ -138,7 +142,7 @@ async def import_knowledge(
     else:
         raise ValueError("不支持的文件格式，仅支持 .json 和 .md")
 
-    return KnowledgeImportResponse(imported_count=imported)
+    return KnowledgeImportResponse(imported_count=imported, skipped_count=skipped)
 
 
 def _build_create_request(

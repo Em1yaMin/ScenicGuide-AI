@@ -39,6 +39,7 @@ const importFile = ref<File | null>(null)
 const importCategory = ref('景点资料')
 const isImporting = ref(false)
 const importError = ref<string | null>(null)
+const importResult = ref<string | null>(null)
 
 const showToken = ref(false)
 const adminToken = ref(localStorage.getItem(TOKEN_KEY) ?? '')
@@ -218,13 +219,18 @@ async function doImport() {
   try {
     const body = new FormData()
     body.append('file', importFile.value)
-    await fetchWithCodeEnvelope(`${API_ADMIN_KNOWLEDGE_IMPORT}?default_category=${encodeURIComponent(importCategory.value)}`, {
+    const data = await fetchWithCodeEnvelope<{ imported_count: number; skipped_count: number }>(`${API_ADMIN_KNOWLEDGE_IMPORT}?default_category=${encodeURIComponent(importCategory.value)}`, {
       method: 'POST',
       headers: { 'X-Admin-Token': localStorage.getItem(TOKEN_KEY) ?? '' },
       body,
     })
     showImport.value = false
     importFile.value = null
+    let msg = `成功导入 ${data.imported_count} 条`
+    if (data.skipped_count > 0) {
+      msg += `，跳过 ${data.skipped_count} 条无效数据`
+    }
+    importResult.value = msg
     await fetchList()
   } catch (e) {
     importError.value = e instanceof Error ? e.message : '导入失败'
@@ -233,9 +239,17 @@ async function doImport() {
   }
 }
 
+function openToken() {
+  tokenInput.value = adminToken.value
+  showToken.value = true
+}
+
 function saveToken() {
-  localStorage.setItem(TOKEN_KEY, tokenInput.value.trim())
-  adminToken.value = tokenInput.value.trim()
+  const trimmed = tokenInput.value.trim()
+  if (trimmed) {
+    localStorage.setItem(TOKEN_KEY, trimmed)
+    adminToken.value = trimmed
+  }
   showToken.value = false
 }
 
@@ -263,7 +277,7 @@ onMounted(() => {
         <p class="header-desc">管理景区讲解词、FAQ 与景点资料</p>
       </div>
       <div class="header-actions">
-        <button class="secondary-btn" @click="showToken = true">
+        <button class="secondary-btn" @click="openToken">
           Token 设置
         </button>
         <button class="secondary-btn" @click="showImport = true">
@@ -287,6 +301,12 @@ onMounted(() => {
         type="text"
         placeholder="搜索标题或内容…"
       />
+    </div>
+
+    <!-- Import Result -->
+    <div v-if="importResult" class="import-result">
+      <span>{{ importResult }}</span>
+      <button class="icon-btn" @click="importResult = null">✕</button>
     </div>
 
     <!-- Error -->
@@ -595,6 +615,19 @@ onMounted(() => {
 .filter-input {
   flex: 1;
   min-width: 240px;
+}
+
+.import-result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md) var(--space-lg);
+  margin-bottom: var(--space-lg);
+  background: var(--color-accent-light);
+  border: 1px solid var(--color-accent);
+  border-radius: 8px;
+  font-size: var(--text-small);
+  color: var(--color-accent);
 }
 
 .error-state {

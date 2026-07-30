@@ -41,5 +41,6 @@ class KnowledgeListResponse(BaseModel):
 
 class KnowledgeImportResponse(BaseModel):
     imported_count: int
+    skipped_count: int = 0
 
     model_config = {"from_attributes": True}
