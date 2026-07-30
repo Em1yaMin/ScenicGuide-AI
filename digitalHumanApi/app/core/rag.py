@@ -6,11 +6,13 @@ RAG 核心配置与向量存储。
 兼容 langchain_core 的 Document 和 Embeddings 接口。
 """
 
+import fcntl
 import json
 import logging
 import math
 import os
 import re
+import threading
 from collections import Counter
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -21,7 +23,7 @@ from langchain_core.embeddings import Embeddings
 logger = logging.getLogger(__name__)
 
 # 持久化目录
-CHROMA_DATA_DIR: Path = Path(__file__).resolve().parents[2] / "rag_data"
+RAG_DATA_DIR: Path = Path(__file__).resolve().parents[2] / "rag_data"
 
 # 默认文档目录
 DEFAULT_DOC_DIR: Path = Path(__file__).resolve().parents[3] / "doc"
@@ -215,7 +217,7 @@ class SimpleVectorStore:
         persist_dir: Optional[Path] = None,
     ):
         self.collection_name = collection_name
-        self.persist_dir = Path(persist_dir) if persist_dir else CHROMA_DATA_DIR
+        self.persist_dir = Path(persist_dir) if persist_dir else RAG_DATA_DIR
         self.persist_dir.mkdir(parents=True, exist_ok=True)
 
         self.embedding = TFIDFEmbeddings()
@@ -233,61 +235,82 @@ class SimpleVectorStore:
     def _vocab_path(self) -> Path:
         return self.persist_dir / f"{self.collection_name}_vocab.json"
 
+    def _acquire_file_lock(self):
+        """获取文件锁，防止多进程并发读写。"""
+        lock_path = self.persist_dir / f"{self.collection_name}.lock"
+        f = open(lock_path, "w")
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+        return f
+
+    @staticmethod
+    def _release_file_lock(lock_file):
+        """释放文件锁。"""
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        lock_file.close()
+
     def _load(self) -> None:
         """从磁盘加载向量存储。"""
-        # 加载词汇表
-        self.embedding.load(self._vocab_path)
+        lock = self._acquire_file_lock()
+        try:
+            # 加载词汇表
+            self.embedding.load(self._vocab_path)
 
-        # 加载文档
-        if self._docs_path.exists():
-            try:
-                with open(self._docs_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                self._documents = [
-                    Document(
-                        page_content=d["page_content"],
-                        metadata=d.get("metadata", {}),
+            # 加载文档
+            if self._docs_path.exists():
+                try:
+                    with open(self._docs_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    self._documents = [
+                        Document(
+                            page_content=d["page_content"],
+                            metadata=d.get("metadata", {}),
+                        )
+                        for d in data
+                    ]
+                    # 重新向量化
+                    if self._documents and self.embedding.is_fitted:
+                        texts = [d.page_content for d in self._documents]
+                        self._vectors = self.embedding.embed_documents(texts)
+                    elif self._documents and not self.embedding.is_fitted:
+                        logger.warning(
+                            "Documents loaded but vocabulary missing; "
+                            "clearing documents to avoid silent inconsistency. "
+                            "Run /index to rebuild."
+                        )
+                        self._documents = []
+                        self._vectors = []
+                    logger.info(
+                        "Loaded %d documents from %s",
+                        len(self._documents),
+                        self._docs_path,
                     )
-                    for d in data
-                ]
-                # 重新向量化
-                if self._documents and self.embedding.is_fitted:
-                    texts = [d.page_content for d in self._documents]
-                    self._vectors = self.embedding.embed_documents(texts)
-                elif self._documents and not self.embedding.is_fitted:
-                    logger.warning(
-                        "Documents loaded but vocabulary missing; "
-                        "clearing documents to avoid silent inconsistency. "
-                        "Run /index to rebuild."
-                    )
+                except Exception as e:
+                    logger.warning("Failed to load documents: %s", e)
                     self._documents = []
                     self._vectors = []
-                logger.info(
-                    "Loaded %d documents from %s",
-                    len(self._documents),
-                    self._docs_path,
-                )
-            except Exception as e:
-                logger.warning("Failed to load documents: %s", e)
-                self._documents = []
-                self._vectors = []
+        finally:
+            self._release_file_lock(lock)
 
     def _save(self) -> None:
         """持久化到磁盘。"""
-        # 保存词汇表
-        if self.embedding.is_fitted:
-            self.embedding.save(self._vocab_path)
+        lock = self._acquire_file_lock()
+        try:
+            # 保存词汇表
+            if self.embedding.is_fitted:
+                self.embedding.save(self._vocab_path)
 
-        # 保存文档
-        data = [
-            {
-                "page_content": d.page_content,
-                "metadata": d.metadata,
-            }
-            for d in self._documents
-        ]
-        with open(self._docs_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            # 保存文档
+            data = [
+                {
+                    "page_content": d.page_content,
+                    "metadata": d.metadata,
+                }
+                for d in self._documents
+            ]
+            with open(self._docs_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        finally:
+            self._release_file_lock(lock)
 
     def add_documents(self, documents: List[Document]) -> None:
         """添加文档到向量存储并持久化。"""
@@ -368,13 +391,17 @@ class SimpleVectorStore:
 
     def clear(self) -> None:
         """清空存储。"""
-        self._documents = []
-        self._vectors = []
-        self.embedding = TFIDFEmbeddings()
-        if self._docs_path.exists():
-            self._docs_path.unlink()
-        if self._vocab_path.exists():
-            self._vocab_path.unlink()
+        lock = self._acquire_file_lock()
+        try:
+            self._documents = []
+            self._vectors = []
+            self.embedding = TFIDFEmbeddings()
+            if self._docs_path.exists():
+                self._docs_path.unlink()
+            if self._vocab_path.exists():
+                self._vocab_path.unlink()
+        finally:
+            self._release_file_lock(lock)
 
 
 # ---------------------------------------------------------------------------
@@ -384,6 +411,7 @@ class SimpleVectorStore:
 _vectorstore: Optional[SimpleVectorStore] = None
 _vectorstore_collection: Optional[str] = None
 _vectorstore_dir: Optional[Path] = None
+_vectorstore_lock = threading.Lock()
 
 
 def get_vectorstore(
@@ -396,18 +424,24 @@ def get_vectorstore(
     以支持未来扩展多知识库场景。
     """
     global _vectorstore, _vectorstore_collection, _vectorstore_dir
-    effective_dir = persist_dir or CHROMA_DATA_DIR
+    effective_dir = persist_dir or RAG_DATA_DIR
     if (
         _vectorstore is None
         or _vectorstore_collection != collection_name
         or _vectorstore_dir != effective_dir
     ):
-        _vectorstore = SimpleVectorStore(
-            collection_name=collection_name,
-            persist_dir=effective_dir,
-        )
-        _vectorstore_collection = collection_name
-        _vectorstore_dir = effective_dir
+        with _vectorstore_lock:
+            if (
+                _vectorstore is None
+                or _vectorstore_collection != collection_name
+                or _vectorstore_dir != effective_dir
+            ):
+                _vectorstore = SimpleVectorStore(
+                    collection_name=collection_name,
+                    persist_dir=effective_dir,
+                )
+                _vectorstore_collection = collection_name
+                _vectorstore_dir = effective_dir
     return _vectorstore
 
 

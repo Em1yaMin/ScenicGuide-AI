@@ -159,7 +159,10 @@ def _split_by_separators(text: str, separators: List[str]) -> List[str]:
                 parts.append(segment)
         if len(parts) <= 1:
             return _split_by_separators(text, separators[1:])
-        return parts
+        result = []
+        for part in parts:
+            result.extend(_split_by_separators(part, separators[1:]))
+        return result
 
     return _split_by_separators(text, separators[1:])
 
@@ -168,20 +171,13 @@ def _split_by_separators(text: str, separators: List[str]) -> List[str]:
 # 索引 & 检索
 # ---------------------------------------------------------------------------
 
-async def index_documents(
+def _index_documents_sync(
     doc_dir: Optional[Path] = None,
     collection_name: str = "scenic_knowledge",
 ) -> dict:
-    """执行全量文档索引。
+    """同步执行全量文档索引。
 
     流程: 加载 → 分块 → 向量化 → 存储
-
-    Args:
-        doc_dir: 文档目录，默认 doc/
-        collection_name: 集合名称
-
-    Returns:
-        {"status": str, "documents": int, "chunks": int}
     """
     doc_dir = doc_dir or DEFAULT_DOC_DIR
 
@@ -203,6 +199,27 @@ async def index_documents(
         "documents": len(documents),
         "chunks": len(chunks),
     }
+
+
+async def index_documents(
+    doc_dir: Optional[Path] = None,
+    collection_name: str = "scenic_knowledge",
+) -> dict:
+    """执行全量文档索引。
+
+    流程: 加载 → 分块 → 向量化 → 存储
+
+    Args:
+        doc_dir: 文档目录，默认 doc/
+        collection_name: 集合名称
+
+    Returns:
+        {"status": str, "documents": int, "chunks": int}
+    """
+    import asyncio
+    return await asyncio.get_running_loop().run_in_executor(
+        None, _index_documents_sync, doc_dir, collection_name
+    )
 
 
 async def search_documents(
