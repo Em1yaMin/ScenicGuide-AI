@@ -10,6 +10,7 @@ AI 运营建议模块 — LangChain 聚合分析链。
 使用 LangChain + OpenAI 构建分析链，生成结构化运营报告。
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -53,6 +54,7 @@ def _get_llm():
             openai_api_key=settings.OPENAI_API_KEY,
             openai_api_base=settings.OPENAI_API_BASE or None,
             max_tokens=2048,
+            request_timeout=60,
         )
     return _llm
 
@@ -240,7 +242,7 @@ def _extract_json(text: str) -> Optional[Dict[str, Any]]:
             pass
 
     # 尝试匹配第一个 { ... } 结构
-    match = re.search(r'\{[\s\S]*\}', text)
+    match = re.search(r'\{[\s\S]*?\}', text)
     if match:
         try:
             return json.loads(match.group(0))
@@ -359,7 +361,10 @@ async def get_ai_overview(
         try:
             chain = _get_analysis_chain()
             data_summary = _build_data_summary(dialogues, eval_summary, total_dialogues)
-            llm_output = await chain.ainvoke({"days": days, "data_summary": data_summary})
+            llm_output = await asyncio.wait_for(
+                chain.ainvoke({"days": days, "data_summary": data_summary}),
+                timeout=90,
+            )
             ai_raw = _extract_json(llm_output)
             if ai_raw:
                 logger.info("LLM analysis succeeded, extracted JSON with keys: %s", list(ai_raw.keys()))
