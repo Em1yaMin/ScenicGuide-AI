@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Any, Dict, Optional
 
@@ -181,15 +182,35 @@ async def _call_dify_chat(
         "conversation_id": conversation_id,
     }
 
-    async with httpx.AsyncClient(
-        base_url=base_url,
-        headers=headers,
-        timeout=httpx.Timeout(60.0),
-    ) as client:
-        response = await client.post("/chat-messages", json=payload)
-        response.raise_for_status()
-        data = response.json()
-        return {
-            "answer": data.get("answer", ""),
-            "conversation_id": data.get("conversation_id", ""),
-        }
+    max_retries = 3
+    last_error: Optional[Exception] = None
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(
+                base_url=base_url,
+                headers=headers,
+                timeout=httpx.Timeout(60.0),
+            ) as client:
+                response = await client.post("/chat-messages", json=payload)
+                response.raise_for_status()
+                data = response.json()
+                return {
+                    "answer": data.get("answer", ""),
+                    "conversation_id": data.get("conversation_id", ""),
+                }
+        except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.ConnectError) as e:
+            last_error = e
+            if attempt < max_retries - 1:
+                wait = 0.5 * (2 ** attempt)
+                logger.warning(
+                    "Dify chat failed (attempt %d/%d): %s; retrying in %.1fs",
+                    attempt + 1,
+                    max_retries,
+                    e,
+                    wait,
+                )
+                await asyncio.sleep(wait)
+        except Exception:
+            raise
+
+    raise last_error  # type: ignore[misc]
