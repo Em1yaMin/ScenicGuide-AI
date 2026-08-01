@@ -181,6 +181,49 @@ async def test_import_markdown(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_import_markdown_with_form_category(client: AsyncClient):
+    """前端新方式：default_category 作为 Form 字段传入（不再拼 Query）。"""
+    content = "# 标题一\n\n内容一。\n# 标题二\n\n内容二。\n"
+    resp = await client.post(
+        "/api/admin/knowledge/import",
+        data={"default_category": "讲解词"},
+        files={"file": ("data.md", content, "text/markdown")},
+        headers={"X-Admin-Token": "test-admin-token"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["imported_count"] == 2
+
+    list_resp = await client.get(
+        "/api/admin/knowledge",
+        params={"category": "讲解词"},
+        headers={"X-Admin-Token": "test-admin-token"},
+    )
+    assert list_resp.json()["total"] == 2
+
+
+@pytest.mark.asyncio
+async def test_import_markdown_form_priority_over_query(client: AsyncClient):
+    """Form 与 Query 同时传时，Form 参数优先（修复静默忽略问题）。"""
+    content = "# 标题一\n\n内容一。\n# 标题二\n\n内容二。\n"
+    resp = await client.post(
+        "/api/admin/knowledge/import",
+        params={"default_category": "Query值"},
+        data={"default_category": "Form值"},
+        files={"file": ("data.md", content, "text/markdown")},
+        headers={"X-Admin-Token": "test-admin-token"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["imported_count"] == 2
+
+    list_resp = await client.get(
+        "/api/admin/knowledge",
+        params={"category": "Form值"},
+        headers={"X-Admin-Token": "test-admin-token"},
+    )
+    assert list_resp.json()["total"] == 2
+
+
+@pytest.mark.asyncio
 async def test_unauthorized(client: AsyncClient):
     # 缺少 Token 时返回 401
     resp = await client.get("/api/admin/knowledge")

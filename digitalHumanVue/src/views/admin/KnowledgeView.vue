@@ -220,11 +220,15 @@ async function doImport() {
   try {
     const body = new FormData()
     body.append('file', importFile.value)
-    const data = await fetchWithCodeEnvelope<{ imported_count: number; skipped_count: number }>(`${API_ADMIN_KNOWLEDGE_IMPORT}?default_category=${encodeURIComponent(importCategory.value)}`, {
-      method: 'POST',
-      headers: { 'X-Admin-Token': localStorage.getItem(TOKEN_KEY) ?? '' },
-      body,
-    })
+    body.append('default_category', importCategory.value)
+    const data = await fetchWithCodeEnvelope<{ imported_count: number; skipped_count: number }>(
+      API_ADMIN_KNOWLEDGE_IMPORT,
+      {
+        method: 'POST',
+        headers: { 'X-Admin-Token': localStorage.getItem(TOKEN_KEY) ?? '' },
+        body,
+      },
+    )
     showImport.value = false
     importFile.value = null
     let msg = `成功导入 ${data.imported_count} 条`

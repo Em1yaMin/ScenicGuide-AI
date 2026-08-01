@@ -10,6 +10,7 @@ langchain-openai>=0.2.0
 langchain-core>=0.3.0
 python-multipart>=0.0.9
 
-# RAG / Local Knowledge Base (纯 Python 实现，无需外部依赖)
-# 使用 TF-IDF 向量化 + 文件持久化，兼容 langchain_core 接口
+# RAG / Local Knowledge Base (轻量实现，无外部向量库)
+# TF-IDF 向量化 + 文件持久化，numpy 用于检索阶段矩阵乘法加速
+numpy>=1.26.0
 langchain-core>=0.3.0
