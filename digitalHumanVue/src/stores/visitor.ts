@@ -2,11 +2,12 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { API_VISITOR_REGISTER } from '@/api'
 import { fetchWithCodeEnvelope } from '@/utils/fetchWithCodeEnvelope'
+import { generateUUID } from '@/utils/uuid'
 
 const STORAGE_KEY = 'visitor_id'
 
 export const useVisitorStore = defineStore('visitor', () => {
-  const visitorId = ref<string>(localStorage.getItem(STORAGE_KEY) ?? crypto.randomUUID())
+  const visitorId = ref<string>(localStorage.getItem(STORAGE_KEY) ?? generateUUID())
   localStorage.setItem(STORAGE_KEY, visitorId.value)
 
   const isAuthenticated = computed(() => Boolean(visitorId.value))
