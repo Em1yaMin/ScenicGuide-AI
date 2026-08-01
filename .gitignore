@@ -37,3 +37,9 @@ Thumbs.db
 rag_data/
 chroma_data/
 
+
+# 船长本地交付文档（不入库、不跟踪）
+/doc/产品总体设计文档.md
+/doc/产品部署和使用手册.md
+/doc/准确性测试文档/
+/doc/答辩PPT文档-景区导览AI数字人.md
