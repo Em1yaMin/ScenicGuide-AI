@@ -26,7 +26,7 @@
 - **TTS**: MiniMax API (`speech-2.8-hd` + `Chinese_sweet_girl_nv1` 音色)
 - **Agent**: Dify Chat Agent（与主项目共用 Dify 实例 `YOUR_DIFY_SERVER_IP`）
 
-启动步骤见上方「**4. 启动本地数字人服务**」。详细部署步骤与故障排查见 `claude.md` 或 `doc/local-digital-human-deploy-plan.md`。
+启动步骤见上方「**4. 启动本地数字人服务**」。详细部署步骤与故障排查见 `AGENTS.md`（ADH 专节）或 `doc/local-digital-human-deploy-plan.md`。
 
 ## 目录结构
 
@@ -60,7 +60,7 @@ digitalHuman/
 │   ├── tsconfig.json / tsconfig.app.json / tsconfig.node.json
 │   ├── .editorconfig / .prettierrc.json / .oxlintrc.json / eslint.config.ts
 │   └── .env                  # 前端环境变量（需自行创建）
-├── claude.md                  # AI 辅助开发指南与上下文记忆
+├── AGENTS.md                  # 项目记忆（唯一权威源；CLAUDE.md 为指向它的 symlink）
 ├── .pi/                       # pi 编码助手配置与扩展
 ├── doc/                       # 设计文档目录（Dify 工作流、部署计划等）
 ├── live2d-frontend/           # 本地 Live2D 数字人（awesome-digital-human-live2d）
@@ -186,7 +186,7 @@ pnpm run dev    # 或 node node_modules\next\dist\bin\next dev -p 3000
 
 > **两个命令需分别在各自的终端窗口中运行**（不要关掉）。首次启动前端可能需要清 localStorage `character-storage` 键以加载默认 Hiyori 模型。
 >
-> 引擎配置详见 `claude.md` 或 `doc/local-digital-human-deploy-plan.md`。当前已配置：腾讯云 ASR + Dify Agent + MiniMax TTS（`Chinese_sweet_girl_nv1` 音色）。
+> 引擎配置详见 `AGENTS.md`（ADH 专节）或 `doc/local-digital-human-deploy-plan.md`。当前已配置：腾讯云 ASR + Dify Agent + MiniMax TTS（`Chinese_sweet_girl_nv1` 音色）。
 
 ### 6. 访问应用
 
