@@ -1,27 +1,54 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import VChart from 'vue-echarts'
 import { registerECharts } from '@/composables/useECharts'
 import { useApi } from '@/composables/useApi'
-import { API_ADMIN_DASHBOARD } from '@/api'
+import { fetchWithCodeEnvelope } from '@/utils/fetchWithCodeEnvelope'
+import { API_ADMIN_DASHBOARD, API_ANALYSIS_OVERVIEW } from '@/api'
 import EmptyStateGuide from '@/components/EmptyStateGuide.vue'
-import type { DashboardResponse } from '@/types/dashboard'
+import type { DashboardResponse, AIOverviewResponse } from '@/types/dashboard'
 
 registerECharts()
 
-const { data, isLoading, error, execute: fetchDashboard } = useApi<DashboardResponse>(API_ADMIN_DASHBOARD)
+const {
+  data,
+  isLoading,
+  error,
+  execute: fetchDashboard,
+} = useApi<DashboardResponse>(API_ADMIN_DASHBOARD)
 
-const hasData = computed(() =>
-  data.value !== null && (
-    data.value?.sentiment_trend?.some(t => t.positive > 0 || t.negative > 0 || t.neutral > 0) ||
-    Object.keys(data.value?.satisfaction_distribution ?? {}).length > 0 ||
-    (data.value?.hot_issues?.length ?? 0) > 0 ||
-    (data.value?.spot_heatmap?.length ?? 0) > 0
-  )
+// AI 运营建议（使用动态 URL 以支持 days 参数）
+const aiData = ref<AIOverviewResponse | null>(null)
+const aiLoading = ref(false)
+const aiError = ref<string | null>(null)
+const aiDays = ref(30)
+
+async function fetchAIOverview(): Promise<void> {
+  aiLoading.value = true
+  aiError.value = null
+  try {
+    aiData.value = await fetchWithCodeEnvelope<AIOverviewResponse>(
+      `${API_ANALYSIS_OVERVIEW}?days=${aiDays.value}`,
+    )
+  } catch (e) {
+    aiError.value = e instanceof Error ? e.message : '未知错误'
+  } finally {
+    aiLoading.value = false
+  }
+}
+
+const hasData = computed(
+  () =>
+    data.value !== null &&
+    (data.value?.sentiment_trend?.some((t) => t.positive > 0 || t.negative > 0 || t.neutral > 0) ||
+      Object.keys(data.value?.satisfaction_distribution ?? {}).length > 0 ||
+      (data.value?.hot_issues?.length ?? 0) > 0 ||
+      (data.value?.spot_heatmap?.length ?? 0) > 0),
 )
 
 onMounted(() => {
   fetchDashboard()
+  fetchAIOverview()
 })
 
 // ── KPI Computations ──
@@ -35,7 +62,10 @@ const satisfactionRate = computed(() => {
   const total = Object.values(dist).reduce((sum, v) => sum + v, 0)
   if (total === 0) return 0
   // 加权平均分（假设 key 是分数 1-5）
-  const weightedSum = Object.entries(dist).reduce((sum, [score, count]) => sum + Number(score) * count, 0)
+  const weightedSum = Object.entries(dist).reduce(
+    (sum, [score, count]) => sum + Number(score) * count,
+    0,
+  )
   return Math.round((weightedSum / total) * 10) / 10
 })
 
@@ -93,7 +123,7 @@ const sentimentTrendOption = computed(() => {
     grid: { left: '3%', right: '4%', top: '8%', bottom: '14%', containLabel: true },
     xAxis: {
       type: 'category' as const,
-      data: trend.map(t => t.date),
+      data: trend.map((t) => t.date),
       axisLine: { lineStyle: { color: BRAND_COLORS.border } },
       axisTick: { show: false },
       axisLabel: { ...chartTextStyle },
@@ -105,19 +135,25 @@ const sentimentTrendOption = computed(() => {
     },
     series: [
       {
-        name: '正面', type: 'bar', stack: 'sentiment',
-        data: trend.map(t => t.positive ?? 0),
+        name: '正面',
+        type: 'bar',
+        stack: 'sentiment',
+        data: trend.map((t) => t.positive ?? 0),
         itemStyle: { color: BRAND_COLORS.positive, borderRadius: [0, 0, 0, 0] },
         barWidth: '50%',
       },
       {
-        name: '负面', type: 'bar', stack: 'sentiment',
-        data: trend.map(t => t.negative ?? 0),
+        name: '负面',
+        type: 'bar',
+        stack: 'sentiment',
+        data: trend.map((t) => t.negative ?? 0),
         itemStyle: { color: BRAND_COLORS.negative },
       },
       {
-        name: '中性', type: 'bar', stack: 'sentiment',
-        data: trend.map(t => t.neutral ?? 0),
+        name: '中性',
+        type: 'bar',
+        stack: 'sentiment',
+        data: trend.map((t) => t.neutral ?? 0),
         itemStyle: { color: BRAND_COLORS.neutral, borderRadius: [4, 4, 0, 0] },
       },
     ],
@@ -134,31 +170,33 @@ const satisfactionOption = computed(() => {
 
   return {
     tooltip: { trigger: 'item' as const, textStyle: { fontSize: 13 } },
-    series: [{
-      type: 'pie' as const,
-      radius: ['55%', '78%'],
-      center: ['50%', '50%'],
-      avoidLabelOverlap: false,
-      itemStyle: {
-        borderRadius: 3,
-        borderColor: BRAND_COLORS.paper,
-        borderWidth: 3,
-      },
-      label: { show: false },
-      emphasis: {
-        label: {
-          show: true,
-          fontSize: 20,
-          fontWeight: 'bold',
-          fontFamily: '"Noto Serif SC", serif',
+    series: [
+      {
+        type: 'pie' as const,
+        radius: ['55%', '78%'],
+        center: ['50%', '50%'],
+        avoidLabelOverlap: false,
+        itemStyle: {
+          borderRadius: 3,
+          borderColor: BRAND_COLORS.paper,
+          borderWidth: 3,
         },
-        scaleSize: 8,
+        label: { show: false },
+        emphasis: {
+          label: {
+            show: true,
+            fontSize: 20,
+            fontWeight: 'bold',
+            fontFamily: '"Noto Serif SC", serif',
+          },
+          scaleSize: 8,
+        },
+        data: chartData.map((d, i) => ({
+          ...d,
+          itemStyle: { color: warmPalette[i % warmPalette.length] },
+        })),
       },
-      data: chartData.map((d, i) => ({
-        ...d,
-        itemStyle: { color: warmPalette[i % warmPalette.length] },
-      })),
-    }],
+    ],
   }
 })
 
@@ -178,23 +216,25 @@ const hotIssuesOption = computed(() => {
     },
     yAxis: {
       type: 'category' as const,
-      data: issues.map(i => i.concern),
+      data: issues.map((i) => i.concern),
       axisTick: { show: false },
       axisLine: { show: false },
       axisLabel: { ...chartTextStyle, fontSize: 13, width: 130, overflow: 'truncate' },
     },
-    series: [{
-      type: 'bar' as const,
-      data: issues.map((i, idx) => ({
-        value: i.count,
-        itemStyle: {
-          color: BRAND_COLORS.accent,
-          borderRadius: [0, 4, 4, 0],
-          opacity: 1 - idx * 0.08,
-        },
-      })),
-      barWidth: '55%',
-    }],
+    series: [
+      {
+        type: 'bar' as const,
+        data: issues.map((i, idx) => ({
+          value: i.count,
+          itemStyle: {
+            color: BRAND_COLORS.accent,
+            borderRadius: [0, 4, 4, 0],
+            opacity: 1 - idx * 0.08,
+          },
+        })),
+        barWidth: '55%',
+      },
+    ],
   }
 })
 
@@ -214,25 +254,135 @@ const spotHeatmapOption = computed(() => {
     },
     yAxis: {
       type: 'category' as const,
-      data: spots.map(s => s.spot_name),
+      data: spots.map((s) => s.spot_name),
       axisTick: { show: false },
       axisLine: { show: false },
       axisLabel: { ...chartTextStyle, fontSize: 13, width: 130, overflow: 'truncate' },
     },
-    series: [{
-      type: 'bar' as const,
-      data: spots.map((s, idx) => ({
-        value: s.mention_count,
-        itemStyle: {
-          color: BRAND_COLORS.ink,
-          borderRadius: [0, 4, 4, 0],
-          opacity: 0.85 - idx * 0.06,
-        },
-      })),
-      barWidth: '55%',
-    }],
+    series: [
+      {
+        type: 'bar' as const,
+        data: spots.map((s, idx) => ({
+          value: s.mention_count,
+          itemStyle: {
+            color: BRAND_COLORS.ink,
+            borderRadius: [0, 4, 4, 0],
+            opacity: 0.85 - idx * 0.06,
+          },
+        })),
+        barWidth: '55%',
+      },
+    ],
   }
 })
+
+// ── AI 运营建议图表 ──
+
+const aiSatisfactionTrendOption = computed(() => {
+  const trend = aiData.value?.satisfaction_trend ?? []
+  return {
+    tooltip: {
+      trigger: 'axis' as const,
+      textStyle: { fontSize: 13 },
+      formatter: (params: any) => {
+        const p = Array.isArray(params) ? params[0] : params
+        return `${p.axisValue}<br/>满意度均分: <strong>${p.value}</strong>`
+      },
+    },
+    grid: { left: '3%', right: '4%', top: '8%', bottom: '10%', containLabel: true },
+    xAxis: {
+      type: 'category' as const,
+      data: trend.map((t) => t.date),
+      axisLine: { lineStyle: { color: BRAND_COLORS.border } },
+      axisTick: { show: false },
+      axisLabel: { ...chartTextStyle },
+    },
+    yAxis: {
+      type: 'value' as const,
+      min: 0,
+      max: 5,
+      splitLine: { lineStyle: { color: BRAND_COLORS.border, type: 'dashed' } },
+      axisLabel: { ...chartTextStyle },
+    },
+    series: [
+      {
+        type: 'line' as const,
+        data: trend.map((t) => t.avg_score),
+        smooth: true,
+        lineStyle: { color: BRAND_COLORS.accent, width: 2 },
+        itemStyle: { color: BRAND_COLORS.accent },
+        areaStyle: {
+          color: {
+            type: 'linear' as const,
+            x: 0,
+            y: 0,
+            x2: 0,
+            y2: 1,
+            colorStops: [
+              { offset: 0, color: 'rgba(196, 92, 38, 0.15)' },
+              { offset: 1, color: 'rgba(196, 92, 38, 0.02)' },
+            ],
+          },
+        },
+      },
+    ],
+  }
+})
+
+const aiPeakHoursOption = computed(() => {
+  const peaks = aiData.value?.peak_hours ?? []
+  const sorted = [...peaks].sort((a, b) => a.hour - b.hour)
+  const hours = sorted.map((p) => p.label || `${p.hour}:00`)
+  const values = sorted.map((p) => p.count)
+  const maxVal = Math.max(...values, 1)
+
+  return {
+    tooltip: {
+      trigger: 'axis' as const,
+      textStyle: { fontSize: 13 },
+      formatter: (params: any) => {
+        const p = Array.isArray(params) ? params[0] : params
+        return `${p.axisValue}<br/>对话量: <strong>${p.value}</strong>`
+      },
+    },
+    grid: { left: '3%', right: '5%', top: '5%', bottom: '3%', containLabel: true },
+    xAxis: {
+      type: 'category' as const,
+      data: hours,
+      axisLine: { lineStyle: { color: BRAND_COLORS.border } },
+      axisTick: { show: false },
+      axisLabel: { ...chartTextStyle, rotate: 45 },
+    },
+    yAxis: {
+      type: 'value' as const,
+      splitLine: { lineStyle: { color: BRAND_COLORS.border, type: 'dashed' } },
+      axisLabel: { ...chartTextStyle },
+    },
+    series: [
+      {
+        type: 'bar' as const,
+        data: values.map((v) => ({
+          value: v,
+          itemStyle: {
+            color: v === maxVal ? BRAND_COLORS.accent : BRAND_COLORS.ink,
+            borderRadius: [4, 4, 0, 0],
+            opacity: 0.4 + (v / maxVal) * 0.6,
+          },
+        })),
+        barWidth: '60%',
+      },
+    ],
+  }
+})
+
+const hasAIData = computed(
+  () =>
+    aiData.value !== null &&
+    ((aiData.value?.hot_questions?.length ?? 0) > 0 ||
+      (aiData.value?.unanswered_questions?.length ?? 0) > 0 ||
+      (aiData.value?.suggestions?.length ?? 0) > 0 ||
+      aiData.value?.total_dialogues > 0),
+)
 </script>
 
 <template>
@@ -242,11 +392,7 @@ const spotHeatmapOption = computed(() => {
         <h1>数据大屏</h1>
         <p class="header-desc">景区 AI 导览运营数据概览</p>
       </div>
-      <button
-        class="refresh-btn"
-        @click="fetchDashboard"
-        :disabled="isLoading"
-      >
+      <button class="refresh-btn" @click="fetchDashboard" :disabled="isLoading">
         {{ isLoading ? '加载中…' : '刷新数据' }}
       </button>
     </div>
@@ -316,7 +462,7 @@ const spotHeatmapOption = computed(() => {
         <div class="chart-card">
           <div class="chart-header">
             <h3>热门关注点</h3>
-            <p class="chart-annotation">访客最关心的 {{ (data?.hot_issues?.length ?? 0) }} 个问题</p>
+            <p class="chart-annotation">访客最关心的 {{ data?.hot_issues?.length ?? 0 }} 个问题</p>
           </div>
           <VChart :option="hotIssuesOption" :loading="isLoading" autoresize />
         </div>
@@ -328,6 +474,150 @@ const spotHeatmapOption = computed(() => {
             <p class="chart-annotation">各景点提及次数排名</p>
           </div>
           <VChart :option="spotHeatmapOption" :loading="isLoading" autoresize />
+        </div>
+      </div>
+
+      <!-- ═══ AI 运营建议 ═══ -->
+      <div class="ai-section">
+        <div class="ai-section-header">
+          <div>
+            <h2>AI 运营建议</h2>
+            <p class="ai-section-desc">
+              LangChain 聚合分析 · 最近 {{ aiDays }} 天 · {{ aiData?.total_dialogues ?? 0 }} 条对话
+            </p>
+          </div>
+          <div class="ai-header-actions">
+            <select v-model.number="aiDays" class="ai-days-select" @change="fetchAIOverview">
+              <option :value="7">最近 7 天</option>
+              <option :value="30">最近 30 天</option>
+              <option :value="90">最近 90 天</option>
+            </select>
+            <button class="refresh-btn" @click="fetchAIOverview" :disabled="aiLoading">
+              {{ aiLoading ? '分析中…' : '刷新分析' }}
+            </button>
+          </div>
+        </div>
+
+        <!-- AI Error -->
+        <div v-if="aiError" class="ai-error-banner">
+          <span>AI 分析暂时不可用：{{ aiError }}</span>
+          <button class="text-btn" @click="fetchAIOverview">重试</button>
+        </div>
+
+        <template v-if="hasAIData">
+          <!-- AI 摘要卡片 -->
+          <div class="ai-summary-card">
+            <div class="ai-summary-icon">🤖</div>
+            <div class="ai-summary-text">
+              <p class="ai-summary-title">分析摘要</p>
+              <p class="ai-summary-body">{{ aiData?.ai_summary }}</p>
+              <p class="ai-summary-direction">
+                满意度趋势判定：
+                <strong
+                  :class="{
+                    'trend-up': aiData?.satisfaction_direction === '上升',
+                    'trend-down': aiData?.satisfaction_direction === '下降',
+                  }"
+                >
+                  {{ aiData?.satisfaction_direction }}
+                </strong>
+              </p>
+            </div>
+          </div>
+
+          <!-- AI 分析图表区 -->
+          <div class="charts-grid">
+            <!-- 满意度趋势折线图 -->
+            <div class="chart-card">
+              <div class="chart-header">
+                <h3>满意度趋势</h3>
+                <p class="chart-annotation">日均分 {{ aiData?.satisfaction_direction }}</p>
+              </div>
+              <VChart :option="aiSatisfactionTrendOption" :loading="aiLoading" autoresize />
+            </div>
+
+            <!-- 高峰时段热力图 -->
+            <div class="chart-card">
+              <div class="chart-header">
+                <h3>高峰时段分布</h3>
+                <p class="chart-annotation">24小时对话量分布</p>
+              </div>
+              <VChart :option="aiPeakHoursOption" :loading="aiLoading" autoresize />
+            </div>
+          </div>
+
+          <!-- 热门问题 & 待优化问题 -->
+          <div class="charts-grid">
+            <!-- 热门问题 TOP10 -->
+            <div class="chart-card ai-list-card">
+              <div class="chart-header">
+                <h3>热门问题 TOP10</h3>
+                <p class="chart-annotation">游客最常问的问题</p>
+              </div>
+              <div class="ai-list">
+                <div
+                  v-for="(item, idx) in aiData?.hot_questions?.slice(0, 10)"
+                  :key="idx"
+                  class="ai-list-item"
+                >
+                  <span class="ai-list-rank" :class="{ top3: idx < 3 }">{{ idx + 1 }}</span>
+                  <div class="ai-list-content">
+                    <span class="ai-list-question">{{ item.question }}</span>
+                    <span class="ai-list-meta">
+                      <span class="ai-list-count">{{ item.count }} 次</span>
+                      <span v-if="item.category" class="ai-list-category">{{ item.category }}</span>
+                    </span>
+                  </div>
+                </div>
+                <div v-if="!aiData?.hot_questions?.length" class="ai-list-empty">
+                  暂无热门问题数据
+                </div>
+              </div>
+            </div>
+
+            <!-- 待优化问题 -->
+            <div class="chart-card ai-list-card">
+              <div class="chart-header">
+                <h3>待优化问题</h3>
+                <p class="chart-annotation">AI 回答不够好的问题</p>
+              </div>
+              <div class="ai-list">
+                <div
+                  v-for="(item, idx) in aiData?.unanswered_questions"
+                  :key="idx"
+                  class="ai-list-item unanswered"
+                >
+                  <span class="ai-list-rank warn">{{ idx + 1 }}</span>
+                  <div class="ai-list-content">
+                    <span class="ai-list-question">{{ item.question }}</span>
+                    <span class="ai-list-reason">{{ item.reason }}</span>
+                  </div>
+                </div>
+                <div v-if="!aiData?.unanswered_questions?.length" class="ai-list-empty">
+                  暂无待优化问题
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 运营建议 -->
+          <div v-if="aiData?.suggestions?.length" class="ai-suggestions-card">
+            <div class="chart-header">
+              <h3>💡 运营优化建议</h3>
+              <p class="chart-annotation">基于 AI 分析生成的建议</p>
+            </div>
+            <div class="suggestions-list">
+              <div v-for="(s, idx) in aiData.suggestions" :key="idx" class="suggestion-item">
+                <span class="suggestion-num">{{ idx + 1 }}</span>
+                <span class="suggestion-text">{{ s }}</span>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- AI 空态 -->
+        <div v-else-if="!aiLoading && !aiError" class="ai-empty">
+          <p>AI 分析暂无数据，请先积累对话记录</p>
         </div>
       </div>
     </template>
@@ -372,8 +662,7 @@ const spotHeatmapOption = computed(() => {
   font-size: var(--text-small);
   font-weight: 500;
   white-space: nowrap;
-  transition:
-    background var(--duration-fast) var(--ease-out);
+  transition: background var(--duration-fast) var(--ease-out);
 }
 
 .refresh-btn:hover {
@@ -493,6 +782,274 @@ const spotHeatmapOption = computed(() => {
   min-height: 300px;
 }
 
+/* ── AI 运营建议 ── */
+.ai-section {
+  margin-top: var(--space-2xl);
+  padding-top: var(--space-xl);
+  border-top: 2px solid var(--color-border);
+}
+
+.ai-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: var(--space-lg);
+  gap: var(--space-md);
+}
+
+.ai-section-header h2 {
+  font-family: var(--font-display);
+  font-size: var(--text-title);
+  margin: 0 0 var(--space-xs);
+  color: var(--color-ink);
+}
+
+.ai-section-desc {
+  font-size: var(--text-small);
+  color: var(--color-ink-secondary);
+  margin: 0;
+}
+
+.ai-header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.ai-days-select {
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-paper);
+  font-size: var(--text-small);
+  color: var(--color-ink);
+  cursor: pointer;
+  outline: none;
+}
+
+.ai-days-select:focus {
+  border-color: var(--color-accent);
+}
+
+.ai-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md) var(--space-lg);
+  margin-bottom: var(--space-lg);
+  background: rgba(196, 92, 38, 0.08);
+  border: 1px solid rgba(196, 92, 38, 0.2);
+  border-radius: 8px;
+  font-size: var(--text-small);
+  color: var(--color-accent);
+}
+
+.text-btn {
+  background: none;
+  border: none;
+  color: var(--color-accent);
+  cursor: pointer;
+  font-size: var(--text-small);
+  font-weight: 500;
+  text-decoration: underline;
+}
+
+/* ── AI 摘要卡片 ── */
+.ai-summary-card {
+  display: flex;
+  gap: var(--space-lg);
+  padding: var(--space-xl);
+  margin-bottom: var(--space-xl);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(107, 158, 109, 0.04), rgba(196, 92, 38, 0.04));
+}
+
+.ai-summary-icon {
+  font-size: 2rem;
+  flex-shrink: 0;
+}
+
+.ai-summary-title {
+  font-family: var(--font-display);
+  font-size: var(--text-subtitle);
+  margin: 0 0 var(--space-sm);
+  color: var(--color-ink);
+}
+
+.ai-summary-body {
+  font-size: var(--text-body);
+  color: var(--color-ink-secondary);
+  line-height: 1.6;
+  margin: 0 0 var(--space-sm);
+}
+
+.ai-summary-direction {
+  font-size: var(--text-small);
+  color: var(--color-ink-secondary);
+  margin: 0;
+}
+
+.trend-up {
+  color: #6b9e6d;
+}
+
+.trend-down {
+  color: #c45c26;
+}
+
+/* ── AI 列表卡片 ── */
+.ai-list-card {
+  min-height: auto;
+}
+
+.ai-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.ai-list-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: 6px;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.ai-list-item:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.ai-list-item.unanswered {
+  border-left: 3px solid rgba(196, 92, 38, 0.3);
+}
+
+.ai-list-rank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-border);
+  font-size: var(--text-small);
+  font-weight: 600;
+  color: var(--color-ink-secondary);
+  flex-shrink: 0;
+}
+
+.ai-list-rank.top3 {
+  background: var(--color-accent);
+  color: var(--color-paper);
+}
+
+.ai-list-rank.warn {
+  background: rgba(196, 92, 38, 0.15);
+  color: var(--color-accent);
+}
+
+.ai-list-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ai-list-question {
+  font-size: var(--text-body);
+  color: var(--color-ink);
+  line-height: 1.4;
+}
+
+.ai-list-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: var(--text-small);
+}
+
+.ai-list-count {
+  color: var(--color-ink-secondary);
+}
+
+.ai-list-category {
+  padding: 1px 8px;
+  background: rgba(107, 158, 109, 0.12);
+  color: #6b9e6d;
+  border-radius: 10px;
+  font-size: 11px;
+}
+
+.ai-list-reason {
+  font-size: var(--text-small);
+  color: var(--color-accent);
+  font-style: italic;
+}
+
+.ai-list-empty {
+  padding: var(--space-xl);
+  text-align: center;
+  color: var(--color-ink-secondary);
+  font-size: var(--text-small);
+}
+
+/* ── 运营建议卡片 ── */
+.ai-suggestions-card {
+  margin-top: var(--space-xl);
+  padding: var(--space-xl);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.suggestions-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  margin-top: var(--space-md);
+}
+
+.suggestion-item {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  background: rgba(107, 158, 109, 0.04);
+  border-radius: 6px;
+  border-left: 3px solid #6b9e6d;
+}
+
+.suggestion-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #6b9e6d;
+  color: var(--color-paper);
+  font-size: var(--text-small);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.suggestion-text {
+  font-size: var(--text-body);
+  color: var(--color-ink);
+  line-height: 1.5;
+  padding-top: 2px;
+}
+
+.ai-empty {
+  padding: var(--space-3xl);
+  text-align: center;
+  color: var(--color-ink-secondary);
+  font-size: var(--text-body);
+}
+
 /* ── Responsive ── */
 @media (max-width: 1024px) {
   .charts-grid {
@@ -510,6 +1067,18 @@ const spotHeatmapOption = computed(() => {
   }
 
   .page-header {
+    flex-direction: column;
+  }
+
+  .ai-section-header {
+    flex-direction: column;
+  }
+
+  .ai-header-actions {
+    width: 100%;
+  }
+
+  .ai-summary-card {
     flex-direction: column;
   }
 }

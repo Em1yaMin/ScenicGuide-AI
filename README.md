@@ -9,7 +9,7 @@
 | 后端 | Python 3.8+ · FastAPI · SQLAlchemy 2.0 (async) · SQLite (aiosqlite) · httpx · LangChain |
 | 前端 | Vue 3 · TypeScript · Vite 8 · Pinia · Vue Router · ECharts |
 | 部署 | Docker Compose · Nginx |
-| 外部服务 | Dify AI 平台（Chat Agent 对话 + Workflow 量化分析）、本地 Live2D 数字人（live2d-frontend） |
+| 外部服务 | Dify AI 平台（Chat Agent 对话 + Workflow 量化分析）、LangChain + OpenAI（AI 运营分析）、本地 Live2D 数字人（live2d-frontend） |
 
 ## 本地数字人依赖
 
@@ -99,6 +99,9 @@ cp .env.example .env
 | `DIFY_WORKFLOW_API_KEY` | Workflow 应用 Key（触发量化评估） |
 | `DIFY_RECOMMEND_WORKFLOW_API_KEY` | 推荐问句 Workflow 应用 Key（需在 Dify 平台单独创建） |
 | `DIFY_LIGHT4AI_USER` | light4ai 调 Dify 时固定的 user 字段 |
+| `OPENAI_API_KEY` | OpenAI API Key（用于 LangChain AI 运营分析，不配置时回退到纯 DB 统计） |
+| `OPENAI_API_BASE` | OpenAI API 基础地址（可选，默认官方地址） |
+| `OPENAI_MODEL` | OpenAI 模型名（默认 `gpt-4o-mini`） |
 | `SSH_HOST` / `SSH_PORT` / `SSH_USER` / `SSH_PASSWORD` | 部署 Dify 的远程服务器（可选） |
 
 **前端** — 复制并填写 `digitalHumanVue/.env`：
@@ -237,6 +240,8 @@ docker-compose up -d --build
 | POST | `/recommend` | 个性化路线推荐（接收偏好描述，返回匹配路线） |
 | POST | `/dialogue/sync-now` | 手动触发对话抓取 |
 | POST | `/analysis/run-now` | 手动触发量化分析 |
+| GET | `/analysis/overview` | AI 运营分析概览（支持 `?days=7/30/90`） |
+| GET | `/analysis/trends` | 趋势数据（每日对话量 + 满意度均分） |
 | GET | `/admin/dashboard` | 数据大屏聚合数据 |
 | GET | `/admin/report` | 分析报告数据 |
 
