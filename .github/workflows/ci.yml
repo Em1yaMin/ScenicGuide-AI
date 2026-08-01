@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend tests (Python 3.12)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: digitalHumanApi
+    env:
+      # app/core/config.py 的 Settings 在导入时校验 Dify 配置非空（无 .env 会抛错）。
+      # 测试本身不调用真实 Dify/OpenAI API（纯函数 + 内存 SQLite + 内联 stub），
+      # 因此 CI 只注入占位值，不依赖任何密钥。
+      DIFY_API_URL: https://dify.dummy.invalid/v1
+      DIFY_API_KEY: ci-dummy-key
+      DIFY_WORKFLOW_API_KEY: ci-dummy-key
+      DIFY_RECOMMEND_WORKFLOW_API_KEY: ci-dummy-key
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: digitalHumanApi/requirements*.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run tests
+        # 测试使用内存 SQLite（tests/conftest.py 的 sqlite+aiosqlite:///:memory: fixture），
+        # 无需 DATABASE_URL / .env。
+        run: pytest -q
+
+  frontend:
+    name: Frontend build (Node 22)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: digitalHumanVue
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: digitalHumanVue/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (vue-tsc type-check + vite build)
+        run: npm run build
