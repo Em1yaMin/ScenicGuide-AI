@@ -12,6 +12,7 @@ digitalHumanApi/          # Python FastAPI 后端
   app/
     main.py               # 应用入口（lifespan、CORS、全局异常处理）
     core/                 # 配置 (config.py) + 数据库引擎 (database.py)
+    data/                 # 本地 JSON 数据源（景点、路线）
     models/               # SQLAlchemy 2.0 ORM 实体 → models/CLAUDE.md
     schemas/              # Pydantic v2 请求/响应模型 → schemas/CLAUDE.md
     services/             # 业务逻辑，外部 API 客户端 → services/CLAUDE.md
