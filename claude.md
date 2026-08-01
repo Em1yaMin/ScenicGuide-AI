@@ -103,7 +103,7 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 
 # Business Context
 - **Visitor 端**: 访客通过数字人 iframe 对话（Dify Chat Agent），系统后台轮询抓取对话内容
-- **Admin 端**: 管理后台展示情感趋势、满意度、热点关注和景点热度（数据来自 Dify Workflow 量化分析）
+- **Admin 端**: 管理后台展示情感趋势、满意度、热点关注和景点热度（数据来自 Dify Workflow 量化分析），以及知识库管理（讲解词/FAQ/资料 CRUD + 批量导入）
 - **数据隔离**: 当前仅支持单一虚拟访客（`DIFY_LIGHT4AI_USER`），无多租户/认证
 
 <important if="you are adding a new domain entity end-to-end">

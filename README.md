@@ -196,6 +196,7 @@ pnpm run dev    # 或 node node_modules\next\dist\bin\next dev -p 3000
 | 访客端数字人对话 | http://localhost:5173/visitor/chat |
 | 管理后台数据大屏 | http://localhost:5173/admin |
 | 管理后台报告 | http://localhost:5173/admin/report |
+| 管理后台知识库 | http://localhost:5173/admin/knowledge |
 | 数字人前端（调试） | http://localhost:3000 |
 | 后端 API 文档 | http://localhost:8000/docs |
 
@@ -244,6 +245,16 @@ docker-compose up -d --build
 | GET | `/analysis/trends` | 趋势数据（每日对话量 + 满意度均分） |
 | GET | `/admin/dashboard` | 数据大屏聚合数据 |
 | GET | `/admin/report` | 分析报告数据 |
+
+管理接口（前缀 `/api/admin/knowledge`，需 `X-Admin-Token` 认证）：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/admin/knowledge` | 知识库列表（支持分类/关键词筛选、分页） |
+| POST | `/api/admin/knowledge` | 创建知识库条目 |
+| PUT | `/api/admin/knowledge/{id}` | 编辑知识库条目 |
+| DELETE | `/api/admin/knowledge/{id}` | 删除知识库条目 |
+| POST | `/api/admin/knowledge/import` | 批量导入（JSON/Markdown 文件） |
 
 ## 测试
 

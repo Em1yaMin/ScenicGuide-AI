@@ -44,6 +44,8 @@ class Settings(BaseModel):
     SSH_USER: str = os.environ.get("SSH_USER", "root")
     SSH_PASSWORD: str = os.environ.get("SSH_PASSWORD", "")
 
+    ADMIN_API_TOKEN: str = os.environ.get("ADMIN_API_TOKEN", "")
+
     @model_validator(mode="after")
     def _validate_dify_config(self) -> "Settings":
         """Validate that Dify API config values are non-empty at startup."""

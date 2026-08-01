@@ -19,6 +19,7 @@ schemas/
   health.py     # HealthResponse — 健康检查
   visitor.py    # VisitorRegisterRequest / VisitorRegisterResponse
   admin.py      # DashboardResponse、ReportResponse + 7 个嵌套 Item 类
+  knowledge.py  # KnowledgeCreateRequest/UpdateRequest/Item/ListResponse/ImportResponse
   dialogue.py   # DialogueItem — 预留未来对话列表 API
   analysis.py   # AnalysisResultItem — 预留未来分析结果 API
   recommend.py  # RecommendRequest / RecommendResponse + RouteRecommendation

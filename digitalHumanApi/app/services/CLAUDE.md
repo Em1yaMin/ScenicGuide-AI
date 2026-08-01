@@ -19,6 +19,7 @@
 services/
   visitor_service.py  # register_visitor() — 访客注册（upsert）
   admin_service.py    # get_dashboard_stats()、get_report_data() — 聚合统计
+  knowledge_service.py # CRUD + import — 知识库条目管理
   dify_client.py      # DifyClient 类 + dify_client 单例 — Dify API 封装
   recommend_agent.py  # LangChain Tool Calling 个性化路线推荐 Agent
 ```

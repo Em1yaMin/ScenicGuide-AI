@@ -20,6 +20,7 @@
       <nav>
         <RouterLink to="/admin">数据大屏</RouterLink>
         <RouterLink to="/admin/report">感受度报告</RouterLink>
+        <RouterLink to="/admin/knowledge">知识库</RouterLink>
       </nav>
     </aside>
     <main class="admin-main">
