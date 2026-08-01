@@ -100,7 +100,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 `live2d-frontend/`（下称 ADH）提供 Live2D 数字人前端 + Python 后端，替代 cloud light4ai 实现本地数字人对话。
 
-**引擎架构**: Registry + Factory + Pool 三层，引擎通过 `@Register("Name")` 装饰器自动注册（详见 ADH 研究文档 `local-digital-human-deploy`）。
+**引擎架构**: Registry + Factory + Pool 三层，引擎通过 `@Register("Name")` 装饰器自动注册（详见 `doc/local-digital-human-deploy-plan.md`）。
 
 ## 引擎配置现状
 
@@ -117,7 +117,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 ### 启动命令
 ```bash
-# 后端 (端口 8000)
+# 后端 (端口 8001，避免与主后端 8000 冲突)
 cd live2d-frontend/
 nohup ./venv/Scripts/python.exe main.py > backend.log 2>&1 &
 
@@ -130,7 +130,7 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 - `configs/config_template.yaml` — SUPPORT_LIST 精简为仅目标引擎
 - `configs/engines/asr/tencentAPI.yaml`、`configs/engines/tts/minimaxTTS.yaml`（新建）、`configs/agents/difyAgent.yaml` — 引擎凭证
 - `digitalHuman/engine/tts/minimaxTTS.py`（新建）+ `digitalHuman/engine/tts/__init__.py` — MiniMax TTS 引擎及注册
-- `digitalHuman/engine/asr/tencentASR.py:44` — 已移除 `req.AppId` 行
+- `digitalHuman/engine/asr/tencentASR.py` — 已移除 `req.AppId` 行
 - `digitalHuman/agent/core/difyAgent.py` — 新增 `ThinkFilter`，流式过滤 `<think>` 标签
 - `digitalHuman/server/asrApi.py` — DEBUG 音频保存到 `debug_audio/`
 - `web/app/ui/home/chatbot.tsx` — 录音改用原生 `MediaRecorder` + 客户端 webm→WAV（16kHz 重采样）
