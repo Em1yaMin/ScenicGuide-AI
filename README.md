@@ -6,7 +6,7 @@
 
 | 层 | 技术 |
 |----|------|
-| 后端 | Python 3.8+ · FastAPI · SQLAlchemy 2.0 (async) · SQLite (aiosqlite) · httpx · LangChain |
+| 后端 | Python 3.9+ · FastAPI · SQLAlchemy 2.0 (async) · SQLite (aiosqlite) · httpx · LangChain |
 | 前端 | Vue 3 · TypeScript · Vite 8 · Pinia · Vue Router · ECharts |
 | 部署 | Docker Compose · Nginx |
 | 外部服务 | Dify AI 平台（Chat Agent 对话 + Workflow 量化分析）、LangChain + OpenAI（AI 运营分析）、本地 Live2D 数字人（live2d-frontend） |
@@ -75,7 +75,7 @@ digitalHuman/
 
 | 依赖 | 版本要求 | 用途 |
 |------|---------|------|
-| Python | 主后端 ≥ 3.8（建议 3.10+）；**ADH 要求 3.10 或更低** | 主后端 FastAPI；ADH 数字人后端 |
+| Python | 主后端 ≥ 3.9（建议 3.10+）；**ADH 要求 3.11 或更低** | 主后端 FastAPI；ADH 数字人后端 |
 | ffmpeg / ffprobe | 系统包（`sudo apt install ffmpeg`） | ADH 数字人 TTS 链路必需 |
 | Node.js | ^22.18.0 \|\| ≥ 24.12.0 | Vue 前端（package.json engines）；ADH Next.js 前端 v14 |
 | npm | ≥ 10 | 前端包管理 |
@@ -83,7 +83,7 @@ digitalHuman/
 **详细说明**（基于 2026-08-01 实际部署验证）：
 
 - **ffmpeg / ffprobe**：ADH 数字人 TTS 链路必需——MiniMax 返回 MP3，`pydub` 转 WAV 依赖它。缺失时 TTS 静默失败，后端日志报 `No such file or directory: 'ffprobe'`。安装：`sudo apt install ffmpeg`。
-- **Python 版本**：主后端 FastAPI 用 Python 3.10+（README 原「Python 3.8+」同样适用）；**ADH（live2d-frontend）要求 Python 3.10 或更低**——其 `numpy==1.24.4` 无 Python 3.11+ 的预编译包，在 Python 3.12 下 pip 源码编译失败。若系统默认 Python 3.12，需用 `virtualenv` 创建 3.10 虚拟环境（Ubuntu 的 `python3.10-venv` 包可能缺失，`virtualenv` 是可靠替代）：
+- **Python 版本**：主后端 FastAPI 用 Python 3.10+（最低要求 3.9，因 `numpy>=1.26.0` 不再支持 Python 3.8）；**ADH（live2d-frontend）要求 Python 3.11 或更低**——其 `numpy==1.24.4` 的预编译包最高支持到 3.11，在 Python 3.12 下 pip 源码编译失败。若系统默认 Python 3.12，需用 `virtualenv` 创建 3.10 虚拟环境（Ubuntu 的 `python3.10-venv` 包可能缺失，`virtualenv` 是可靠替代）：
 
   ```bash
   cd live2d-frontend
