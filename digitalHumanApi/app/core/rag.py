@@ -376,8 +376,10 @@ class SimpleVectorStore:
         # 零向量（norm=0）相似度置 0，与原实现（norm or 1.0）语义一致
         sims = np.nan_to_num(sims, nan=0.0, posinf=0.0, neginf=0.0)
 
-        # 排序取 top-k，再过滤极低相似度（与原逻辑一致）
-        top_indices = np.argsort(-sims)[:k]
+        # 排序取 top-k，再过滤极低相似度（与原逻辑一致）。
+        # 用稳定排序保持并列分数时按文档索引升序，与旧实现的
+        # Python 稳定 sort 行为完全一致。
+        top_indices = np.argsort(-sims, kind="stable")[:k]
         results = []
         for i in top_indices:
             score = float(sims[i])

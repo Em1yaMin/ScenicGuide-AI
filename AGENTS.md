@@ -12,7 +12,7 @@
 digitalHumanApi/          # Python FastAPI 后端
   app/
     main.py               # 应用入口（lifespan、CORS、全局异常处理、router 注册）
-    core/                 # config.py (Settings) + database.py + rag.py (纯 Python TF-IDF)
+    core/                 # config.py (Settings) + database.py + rag.py (轻量 TF-IDF + numpy 矩阵检索)
     data/                 # 本地 JSON 数据源（景点、路线）
     models/               # SQLAlchemy 2.0 ORM 实体 → models/CLAUDE.md
     schemas/              # Pydantic v2 请求/响应模型 → schemas/CLAUDE.md
@@ -40,7 +40,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 ## 本地 RAG 知识库（无外部向量库依赖）
 
-- `app/core/rag.py` — 纯 Python TF-IDF 向量化 + 文件持久化，兼容 langchain_core `Document`/`Embeddings` 接口；向量持久化到 `rag_data/`（已 gitignore），文档源为根目录 `doc/`
+- `app/core/rag.py` — 轻量 TF-IDF 向量化（检索阶段用 numpy 矩阵乘法加速余弦相似度）+ 文件持久化，兼容 langchain_core `Document`/`Embeddings` 接口；向量持久化到 `rag_data/`（已 gitignore），文档源为根目录 `doc/`
 - `app/services/rag_service.py` — 文档加载、分块、向量化、检索；`RAG_MAX_CONTEXT_LEN`（默认 2000）控制注入上下文长度
 - `app/routers/rag.py` — `POST /api/rag/search`、`POST /api/rag/index`、`GET /api/rag/status`
 - `app/routers/dialogue.py` — `POST /api/v1/dialogue/chat` 支持 RAG 增强（`use_rag`、`rag_top_k` 参数；RAG 无结果时回退正常 Dify 调用）；另有 `/api/v1/dialogue/rag-context` 供 ADH 调用
