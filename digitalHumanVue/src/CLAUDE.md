@@ -34,8 +34,10 @@ if (result.code) { error.value = result.message || '服务器错误' }
 ## Pinia Store Pattern
 ```ts
 // stores/visitor.ts — Composition API (setup store) 语法
+// generateUUID(): 优先 crypto.randomUUID()，非安全上下文（HTTP 局域网 IP）降级为 Math.random + Date.now 生成 UUID v4
+import { generateUUID } from '@/utils/uuid'
 export const useVisitorStore = defineStore('visitor', () => {
-  const visitorId = ref(localStorage.getItem(STORAGE_KEY) ?? crypto.randomUUID())
+  const visitorId = ref(localStorage.getItem(STORAGE_KEY) ?? generateUUID())
   const isAuthenticated = computed(() => Boolean(visitorId.value))
   return { visitorId, isAuthenticated }
 })
