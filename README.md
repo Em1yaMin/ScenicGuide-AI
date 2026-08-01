@@ -394,6 +394,13 @@ A: 检查 ffmpeg 是否安装——后端日志报 `No such file or directory: '
 **Q: 页面空白 + 控制台报 `crypto.randomUUID is not a function`？**
 A: `crypto.randomUUID()` 仅在安全上下文（HTTPS 或 localhost）可用，通过局域网 IP + 明文 HTTP 访问时浏览器无此 API。项目已在 `digitalHumanVue/src/utils/uuid.ts` 实现 fallback（降级为 `Math.random` + `Date.now` 生成 UUID v4）；旧版本需要同样处理。
 
+**Q: 语音输入不可用（麦克风点击无响应、控制台报 `navigator.mediaDevices is undefined`、麦克风报 error 1）？**
+A: 语音功能需要**安全上下文**（HTTPS 或 localhost）。ADH 数字人的语音输入（`navigator.mediaDevices.getUserMedia`）与部分 Web API（如 `crypto.randomUUID`）仅限安全上下文可用；通过**局域网 IP + 明文 HTTP**（如 `http://<服务器IP>:3000`）访问时浏览器会直接禁用，表现即控制台报 `navigator.mediaDevices is undefined`、麦克风报 error 1、点击无响应。这是浏览器硬性安全策略，代码无法绕过。配置方法：
+1. **临时调试**：SSH 端口转发 `ssh -L 3000:127.0.0.1:3000 <user>@<服务器IP>` 后访问 `http://localhost:3000`
+2. **正式使用**：部署 HTTPS（nginx/caddy 反代 + 证书）
+
+管理后台等非语音功能不受此限制。本项目已内置 `crypto.randomUUID` 的 fallback（见 `digitalHumanVue/src/utils/uuid.ts`），因此访客端非语音页面可在明文 HTTP 下正常运行，仅语音输入受限。
+
 **Q: ADH 数字人凭据在哪里配置？**
 A: 凭据不写入代码库，配置在 ADH 引擎配置文件中：`live2d-frontend/configs/engines/tts/minimaxTTS.yaml`（MiniMax TTS）、`live2d-frontend/configs/engines/asr/tencentAPI.yaml`（腾讯云 ASR）、`live2d-frontend/configs/agents/difyAgent.yaml`（Dify Agent）。修改后需重启 ADH 后端生效。
 
