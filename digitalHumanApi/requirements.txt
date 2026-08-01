@@ -9,3 +9,7 @@ langchain>=0.3.0
 langchain-openai>=0.2.0
 langchain-core>=0.3.0
 python-multipart>=0.0.9
+
+# RAG / Local Knowledge Base (纯 Python 实现，无需外部依赖)
+# 使用 TF-IDF 向量化 + 文件持久化，兼容 langchain_core 接口
+langchain-core>=0.3.0
