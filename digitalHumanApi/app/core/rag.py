@@ -1,8 +1,8 @@
 """
 RAG 核心配置与向量存储。
 
-使用纯 Python 实现的轻量 TF-IDF 向量化 + 文件持久化，
-无需 chromadb、sentence-transformers 等外部依赖。
+使用轻量 TF-IDF 向量化 + 文件持久化（无需外部向量库），
+检索阶段用 numpy 矩阵乘法加速余弦相似度计算。
 兼容 langchain_core 的 Document 和 Embeddings 接口。
 """
 
@@ -16,6 +16,8 @@ import threading
 from collections import Counter
 from pathlib import Path
 from typing import List, Optional, Tuple
+
+import numpy as np
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -42,7 +44,7 @@ class TFIDFEmbeddings(Embeddings):
     """纯 Python 实现的 TF-IDF 向量化，兼容 LangChain Embeddings 接口。
 
     特点:
-    - 无需 numpy、scikit-learn、sentence-transformers 等外部依赖
+    - 无需 scikit-learn、sentence-transformers 等外部向量库依赖
     - 支持中文分词（基于字符 bigram + unigram）
     - 支持增量添加文档
     """
@@ -207,7 +209,9 @@ class TFIDFEmbeddings(Embeddings):
 class SimpleVectorStore:
     """简单的文件持久化向量存储。
 
-    使用 TF-IDF 向量 + 余弦相似度进行检索。
+    使用 TF-IDF 向量 + 余弦相似度进行检索；
+    检索时向量以 numpy 矩阵形态一次性做矩阵乘法（X @ q），
+    避免逐向量 Python 循环，大幅提升检索速度。
     持久化到 JSON 文件，兼容离线环境。
     """
 
@@ -223,6 +227,7 @@ class SimpleVectorStore:
         self.embedding = TFIDFEmbeddings()
         self._documents: List[Document] = []
         self._vectors: List[List[float]] = []
+        self._vector_matrix: Optional[np.ndarray] = None  # float32 矩阵缓存
 
         # 尝试加载已有数据
         self._load()
@@ -271,6 +276,7 @@ class SimpleVectorStore:
                     if self._documents and self.embedding.is_fitted:
                         texts = [d.page_content for d in self._documents]
                         self._vectors = self.embedding.embed_documents(texts)
+                        self._refresh_matrix()
                     elif self._documents and not self.embedding.is_fitted:
                         logger.warning(
                             "Documents loaded but vocabulary missing; "
@@ -325,6 +331,7 @@ class SimpleVectorStore:
         texts = [d.page_content for d in all_docs]
         self._vectors = self.embedding.embed_documents(texts)
         self._documents = all_docs
+        self._refresh_matrix()
 
         self._save()
         logger.info(
@@ -352,21 +359,45 @@ class SimpleVectorStore:
 
         query_vec = self.embedding.embed_query(query)
 
-        # 计算余弦相似度
-        scores = []
-        for i, doc_vec in enumerate(self._vectors):
-            sim = self._cosine_similarity(query_vec, doc_vec)
-            scores.append((i, sim))
+        # 惰性重建矩阵（防止外部直接改动 _vectors 导致不一致）
+        if self._vector_matrix is None or len(self._vector_matrix) != len(
+            self._vectors
+        ):
+            self._refresh_matrix()
 
-        # 排序取 top-k
-        scores.sort(key=lambda x: -x[1])
-        top_k = scores[:k]
+        X = self._vector_matrix
+        q = np.asarray(query_vec, dtype=np.float32)
 
-        return [
-            (self._documents[i], score)
-            for i, score in top_k
-            if score > 0.01  # 过滤极低相似度
-        ]
+        # 一次矩阵乘法计算全部余弦相似度（替代逐向量 Python 循环）
+        doc_norms = np.linalg.norm(X, axis=1)
+        q_norm = np.linalg.norm(q)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            sims = X @ q / (doc_norms * q_norm)
+        # 零向量（norm=0）相似度置 0，与原实现（norm or 1.0）语义一致
+        sims = np.nan_to_num(sims, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # 排序取 top-k，再过滤极低相似度（与原逻辑一致）
+        top_indices = np.argsort(-sims)[:k]
+        results = []
+        for i in top_indices:
+            score = float(sims[i])
+            if score <= 0.01:
+                continue
+            results.append((self._documents[int(i)], score))
+        return results
+
+    def _refresh_matrix(self) -> None:
+        """把稀疏列表形态的向量转为 float32 numpy 矩阵（节省内存）。"""
+        if not self._vectors:
+            self._vector_matrix = None
+            return
+        try:
+            self._vector_matrix = np.asarray(self._vectors, dtype=np.float32)
+        except ValueError:
+            # 罕见：向量维度不一致时退化为补零对齐（与原实现语义一致）
+            max_len = max(len(v) for v in self._vectors)
+            padded = [v + [0.0] * (max_len - len(v)) for v in self._vectors]
+            self._vector_matrix = np.asarray(padded, dtype=np.float32)
 
     @staticmethod
     def _cosine_similarity(a: List[float], b: List[float]) -> float:
@@ -395,6 +426,7 @@ class SimpleVectorStore:
         try:
             self._documents = []
             self._vectors = []
+            self._vector_matrix = None
             self.embedding = TFIDFEmbeddings()
             if self._docs_path.exists():
                 self._docs_path.unlink()

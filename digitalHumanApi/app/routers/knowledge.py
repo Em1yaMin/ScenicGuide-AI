@@ -1,6 +1,17 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -97,11 +108,18 @@ async def delete_knowledge(
 
 @router.post("/import", response_model=KnowledgeImportResponse)
 async def import_knowledge(
+    request: Request,
     file: UploadFile = File(..., description="JSON 或 Markdown 文件"),
-    default_category: str = Query("景点资料", description="Markdown 导入默认分类"),
+    default_category: Optional[str] = Form(None, description="Markdown 导入默认分类（Form 优先，兼容 Query 传参）"),
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_admin_token),
 ) -> KnowledgeImportResponse:
+    # Form 字段优先；未传时回退 Query 参数（兼容旧调用方），最后用默认值
+    category = (
+        default_category
+        or request.query_params.get("default_category")
+        or "景点资料"
+    )
     if file.filename is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -117,7 +135,7 @@ async def import_knowledge(
         ) from exc
     try:
         return await knowledge_service.import_knowledge(
-            db, content, file.filename, default_category
+            db, content, file.filename, category
         )
     except ValueError as exc:
         raise HTTPException(
