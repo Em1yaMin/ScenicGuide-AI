@@ -6,7 +6,7 @@
 
 | 层 | 技术 |
 |----|------|
-| 后端 | Python 3.8+ · FastAPI · SQLAlchemy 2.0 (async) · SQLite (aiosqlite) · httpx · LangChain |
+| 后端 | Python 3.9+ · FastAPI · SQLAlchemy 2.0 (async) · SQLite (aiosqlite) · httpx · LangChain |
 | 前端 | Vue 3 · TypeScript · Vite 8 · Pinia · Vue Router · ECharts |
 | 部署 | Docker Compose · Nginx |
 | 外部服务 | Dify AI 平台（Chat Agent 对话 + Workflow 量化分析）、LangChain + OpenAI（AI 运营分析）、本地 Live2D 数字人（live2d-frontend） |
@@ -71,11 +71,27 @@ digitalHuman/
 └── .env.example              # Docker Compose 部署用环境变量示例
 ```
 
-## 环境要求
+## 前置系统依赖
 
-- **Python** ≥ 3.8
-- **Node.js** ^22.18.0 || ≥ 24.12.0
-- **npm** ≥ 10
+| 依赖 | 版本要求 | 用途 |
+|------|---------|------|
+| Python | 主后端 ≥ 3.9（建议 3.10+）；**ADH 要求 3.11 或更低** | 主后端 FastAPI；ADH 数字人后端 |
+| ffmpeg / ffprobe | 系统包（`sudo apt install ffmpeg`） | ADH 数字人 TTS 链路必需 |
+| Node.js | ^22.18.0 \|\| ≥ 24.12.0 | Vue 前端（package.json engines）；ADH Next.js 前端 v14 |
+| npm | ≥ 10 | 前端包管理 |
+
+**详细说明**（基于 2026-08-01 实际部署验证）：
+
+- **ffmpeg / ffprobe**：ADH 数字人 TTS 链路必需——MiniMax 返回 MP3，`pydub` 转 WAV 依赖它。缺失时 TTS 静默失败，后端日志报 `No such file or directory: 'ffprobe'`。安装：`sudo apt install ffmpeg`。
+- **Python 版本**：主后端 FastAPI 用 Python 3.10+（最低要求 3.9，因 `numpy>=1.26.0` 不再支持 Python 3.8）；**ADH（live2d-frontend）要求 Python 3.11 或更低**——其 `numpy==1.24.4` 的预编译包最高支持到 3.11，在 Python 3.12 下 pip 源码编译失败。若系统默认 Python 3.12，需用 `virtualenv` 创建 3.10 虚拟环境（Ubuntu 的 `python3.10-venv` 包可能缺失，`virtualenv` 是可靠替代）：
+
+  ```bash
+  cd live2d-frontend
+  virtualenv -p python3.10 venv
+  ./venv/bin/pip install -r requirements.txt
+  ```
+
+- **Node.js**：数字人 Vue 前端要求 `^22.18.0 || >= 24.12.0`（见 `digitalHumanVue/package.json` 的 `engines`）；ADH Next.js 前端为 v14。
 
 ## 本地开发启动
 
@@ -204,6 +220,69 @@ pnpm run dev    # 或 node node_modules\next\dist\bin\next dev -p 3000
 >
 > 访客端数字人对话页面通过 iframe 嵌入数字人前端（`localhost:3000`），需确保两个服务同时运行。
 
+## 本地部署指南（Linux / 局域网）
+
+适用于在 Linux 服务器（或宿主机）上以开发模式本地部署、供局域网/远程访问的场景（部署经验基于 2026-08-01 实测）。生产环境请使用下方 Docker Compose 部署。
+
+### 1. 端口规划
+
+| 服务 | 端口 | 配置位置 |
+|------|------|---------|
+| FastAPI 主后端 | 8000 | `digitalHumanApi/`（`uvicorn app.main:app`） |
+| ADH 数字人后端 | 8001 | `live2d-frontend/configs/config_template.yaml` 的 `SERVER.PORT`（默认 8000，因主后端占用改为 8001） |
+| ADH 数字人前端（Next.js） | 3000 | `live2d-frontend/web/` |
+| Vue 管理/访客前端（Vite） | 5173 | `digitalHumanVue/` |
+
+### 2. 环境变量配置
+
+**Vue 前端** — `digitalHumanVue/.env`（复制 `.env.example`）：
+
+| 变量 | 说明 |
+|------|------|
+| `VITE_LIGHT4AI_URL` | 数字人 iframe 地址。**局域网/远程访问必须填 `http://<服务器IP>:3000`，不能填 `localhost`**——否则访客浏览器会指向自己机器上的 3000 端口 |
+| `VITE_API_BASE` | 后端 API 地址，默认 `http://localhost:8000`（开发时由 Vite 代理转发，可不改） |
+
+**ADH 前端** — `live2d-frontend/web/.env`（复制 `.env.example`）：
+
+| 变量 | 说明 |
+|------|------|
+| `NEXT_PUBLIC_ADH_SERVER_PORT` | **必须配置为 `8001`**。不配置则前端请求打到 8000 主后端，报 CORS/400，数字人显示 "Soul is death!" |
+
+**主后端** — `digitalHumanApi/.env`：按上方「1. 配置环境变量」填写 `DIFY_API_URL`、`DIFY_API_KEY`、`DIFY_WORKFLOW_API_KEY` 等（启动时校验非空，缺失会启动失败）。
+
+### 3. 启动步骤（开发模式）
+
+```bash
+# 1) 主后端 (8000)
+cd digitalHumanApi
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# 2) Vue 前端 (5173) —— 必须 --host 0.0.0.0，否则宿主机/局域网无法访问
+cd digitalHumanVue
+npm run dev -- --host 0.0.0.0
+
+# 3) ADH 数字人后端 (8001) —— venv 为 Python 3.10，依赖见 requirements.txt
+cd live2d-frontend
+./venv/bin/python main.py
+
+# 4) ADH 数字人前端 (3000)
+cd live2d-frontend/web
+npm run dev
+```
+
+四个服务需分别在各自终端中运行。若 ADH 前端 `npm run dev` 启动失败，可降级为 `node node_modules/next/dist/bin/next dev -p 3000`。
+
+### 4. 防火墙放行
+
+```bash
+sudo ufw allow 8000/tcp   # 主后端
+sudo ufw allow 5173/tcp   # Vue 前端
+sudo ufw allow 3000/tcp   # ADH 前端
+sudo ufw allow 8001/tcp   # ADH 后端
+```
+
+> 局域网内其他机器访问入口：访客端 `http://<服务器IP>:5173/visitor`；数字人 iframe 会按 `VITE_LIGHT4AI_URL` 加载 `http://<服务器IP>:3000`。
+
 ## Docker Compose 部署
 
 用于生产或一体化部署（api + web + nginx）：
@@ -302,6 +381,21 @@ A: 确认后端已启动在 8000 端口，且 `digitalHumanVue/.env` 的 `VITE_A
 
 **Q: 数字人对话框空白？**
 A: 检查 `digitalHumanVue/.env` 的 `VITE_LIGHT4AI_URL` 是否指向可访问的 light4ai 服务地址。
+
+**Q: ADH 前端 `npm install` 报 nextui peer 依赖冲突？**
+A: 用 `npm install --legacy-peer-deps` 安装。若编译报 `'alert' is not exported from '@nextui-org/theme'`，升级 `@nextui-org/react`、`@nextui-org/system`、`@nextui-org/theme` 到 latest 后重启（清掉 `.next` 缓存）。
+
+**Q: Vue 前端 vite 报 `Cannot find native binding`（rolldown）？**
+A: 依赖安装不完整所致，执行 `npm ci` 重装依赖。
+
+**Q: 数字人 TTS 无声音？**
+A: 检查 ffmpeg 是否安装——后端日志报 `No such file or directory: 'ffprobe'` 即为缺失，执行 `sudo apt install ffmpeg` 后重启 ADH 后端。
+
+**Q: 页面空白 + 控制台报 `crypto.randomUUID is not a function`？**
+A: `crypto.randomUUID()` 仅在安全上下文（HTTPS 或 localhost）可用，通过局域网 IP + 明文 HTTP 访问时浏览器无此 API。项目已在 `digitalHumanVue/src/utils/uuid.ts` 实现 fallback（降级为 `Math.random` + `Date.now` 生成 UUID v4）；旧版本需要同样处理。
+
+**Q: ADH 数字人凭据在哪里配置？**
+A: 凭据不写入代码库，配置在 ADH 引擎配置文件中：`live2d-frontend/configs/engines/tts/minimaxTTS.yaml`（MiniMax TTS）、`live2d-frontend/configs/engines/asr/tencentAPI.yaml`（腾讯云 ASR）、`live2d-frontend/configs/agents/difyAgent.yaml`（Dify Agent）。修改后需重启 ADH 后端生效。
 
 ## Dify Workflow 量化分析规格
 

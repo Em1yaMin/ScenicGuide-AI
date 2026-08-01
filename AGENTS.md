@@ -142,7 +142,7 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 
 <important if="you are working on the ADH local digital human">
 ## ADH 注意事项
-- **Python 环境**: 使用 ADH 自带 `venv/`（Python 3.8.6），不污染主项目环境
+- **Python 环境**: 使用 ADH 的 `live2d-frontend/venv/`（Python 3.11 或更低；部署实测为 3.10，用 `virtualenv -p python3.10 venv` 创建，见 README「前置系统依赖」），不污染主项目环境
 - **嵌套 git**: ADH 为独立 git 仓库，改动不影响主仓库 `git status`
 - **前端启动**: 不要用 `pnpm dev`（会触发失败的依赖检查），直接用 `node node_modules/next/dist/bin/next dev -p 3000`
 - **Live2D 默认模型**: 已改为 Hiyori，首次访问需清 localStorage `character-storage`

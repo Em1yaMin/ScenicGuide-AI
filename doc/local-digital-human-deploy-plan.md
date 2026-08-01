@@ -355,7 +355,7 @@ class DifyWorkflowAPI(BaseEngine):
 | 前端录音采样率与腾讯云要求不匹配 | 低 | 前端 chatbot.tsx 已配 16000，腾讯云 `16k_zh` 匹配 |
 | iframe 跨域 | 低 | live2d-frontend CORS 已设 `allow_origins=["*"]`（api.py:25） |
 | 两个前端服务并存（5173+3000） | 低 | 端口不冲突，按规划运行 |
-| Python 3.8 vs 参考 requirements 要求 3.10 | 中 | fastapi 0.105 支持 3.8，先试；若 pydantic/类型语法报错再升 3.10 |
+| Python 3.8 vs 参考 requirements 要求 3.10 | 中 | 已定论：ADH 需 Python 3.11 或更低（`numpy==1.24.4` 无 3.12 预编译包），实测部署用 Python 3.10 venv（见 README「前置系统依赖」） |
 
 ## 八、文件改动清单（仅live2d-frontend，不改主项目代码）
 
