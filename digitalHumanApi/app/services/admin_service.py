@@ -23,7 +23,30 @@ logger = logging.getLogger(__name__)
 async def get_dashboard_stats(db: AsyncSession) -> DashboardResponse:
     """Aggregate dashboard statistics from evaluations."""
 
-    # Sentiment trend: 7-day continuous sequence with daily breakdown
+    today = datetime.now(timezone.utc).date()
+
+    # Total conversations: full-count dialogues (no time window)
+    total_result = await db.execute(select(func.count(Dialogue.id)))
+    total_conversations = total_result.scalar() or 0
+
+    # Sentiment trend: full-range continuous sequence (from earliest dialogue
+    # date to today) with daily breakdown, zero-filled for missing days
+    earliest_result = await db.execute(
+        select(func.min(func.date(Dialogue.timestamp)))
+    )
+    earliest_day = earliest_result.scalar()
+    if earliest_day is None:
+        # No dialogue at all — degenerate to a single (today) point
+        start_date = today
+    else:
+        start_date = datetime.fromisoformat(earliest_day).date()
+        if start_date > today:
+            start_date = today
+    days = [
+        (start_date + timedelta(days=i)).isoformat()
+        for i in range((today - start_date).days + 1)
+    ]
+
     trend_result = await db.execute(
         select(
             func.date(Dialogue.timestamp).label("day"),
@@ -33,8 +56,6 @@ async def get_dashboard_stats(db: AsyncSession) -> DashboardResponse:
         .join(Dialogue, Evaluation.dialogue_id == Dialogue.id)
         .where(
             Evaluation.sentiment_label.isnot(None),
-            func.date(Dialogue.timestamp)
-            >= (datetime.now(timezone.utc).date() - timedelta(days=6)).isoformat(),
         )
         .group_by(
             func.date(Dialogue.timestamp),
@@ -43,11 +64,7 @@ async def get_dashboard_stats(db: AsyncSession) -> DashboardResponse:
         .order_by(func.date(Dialogue.timestamp))
     )
 
-    # Build 7-day continuous sequence (backfill zeros for missing days)
-    today = datetime.now(timezone.utc).date()
-    days = [
-        (today - timedelta(days=i)).isoformat() for i in range(6, -1, -1)
-    ]
+    # Build full-range continuous sequence (backfill zeros for missing days)
     trend_map: Dict[str, Dict[str, int]] = {
         d: {"positive": 0, "negative": 0, "neutral": 0} for d in days
     }
@@ -120,6 +137,7 @@ async def get_dashboard_stats(db: AsyncSession) -> DashboardResponse:
     ]
 
     return DashboardResponse(
+        total_conversations=total_conversations,
         sentiment_trend=sentiment_trend,
         satisfaction_distribution=satisfaction_distribution,
         hot_issues=hot_issues,

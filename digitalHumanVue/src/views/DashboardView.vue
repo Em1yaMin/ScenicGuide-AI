@@ -52,10 +52,7 @@ onMounted(() => {
 })
 
 // ── KPI Computations ──
-const totalConversations = computed(() => {
-  const trend = data.value?.sentiment_trend ?? []
-  return trend.reduce((sum, t) => sum + (t.positive ?? 0) + (t.negative ?? 0) + (t.neutral ?? 0), 0)
-})
+const totalConversations = computed(() => data.value?.total_conversations ?? 0)
 
 const satisfactionRate = computed(() => {
   const dist = data.value?.satisfaction_distribution ?? {}
@@ -111,6 +108,8 @@ const chartTextStyle = {
 
 const sentimentTrendOption = computed(() => {
   const trend = data.value?.sentiment_trend ?? []
+  // 全量日期序列可能较长，标签拥挤时旋转显示
+  const rotateLabel = trend.length > 31 ? 45 : trend.length > 14 ? 30 : 0
   return {
     tooltip: { trigger: 'axis' as const, textStyle: { fontSize: 13 } },
     legend: {
@@ -126,7 +125,7 @@ const sentimentTrendOption = computed(() => {
       data: trend.map((t) => t.date),
       axisLine: { lineStyle: { color: BRAND_COLORS.border } },
       axisTick: { show: false },
-      axisLabel: { ...chartTextStyle },
+      axisLabel: { ...chartTextStyle, rotate: rotateLabel },
     },
     yAxis: {
       type: 'value' as const,

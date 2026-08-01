@@ -16,6 +16,7 @@ export interface SpotHeatmapItem {
 }
 
 export interface DashboardResponse {
+  total_conversations: number
   sentiment_trend: SentimentTrendItem[]
   satisfaction_distribution: Record<string, number>
   hot_issues: HotIssueItem[]

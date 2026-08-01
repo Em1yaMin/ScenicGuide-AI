@@ -21,6 +21,7 @@ class SpotHeatmapItem(BaseModel):
 
 
 class DashboardResponse(BaseModel):
+    total_conversations: int
     sentiment_trend: List[SentimentTrendItem]
     satisfaction_distribution: Dict[str, int]
     hot_issues: List[HotIssueItem]
