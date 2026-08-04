@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.core.database import engine
 from app.models import Base
-from app.routers import admin, analysis, dialogue, knowledge, rag, recommend, visitor
+from app.routers import admin, analysis, auth, dialogue, knowledge, rag, recommend, visitor
 from app.schemas.common import ErrorResponse
 from app.schemas.health import HealthResponse
 from app.tasks.analysis import analysis_loop
@@ -86,6 +86,7 @@ app.add_middleware(
 )
 
 app.include_router(visitor.router)
+app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(dialogue.router)
 app.include_router(analysis.router)

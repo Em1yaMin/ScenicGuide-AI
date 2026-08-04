@@ -46,6 +46,16 @@ class Settings(BaseModel):
 
     ADMIN_API_TOKEN: str = os.environ.get("ADMIN_API_TOKEN", "")
 
+    # JWT 用户认证（注册/登录/游客 token，见 app/core/security.py）
+    # JWT_SECRET: 生产环境必须设置为随机长字符串；留空时启动生成随机临时密钥（重启失效）
+    JWT_SECRET: str = os.environ.get("JWT_SECRET", "")
+    # 登录用户 token 有效期（分钟），默认 1440（24 小时）
+    JWT_EXPIRES_MINUTES: int = int(os.environ.get("JWT_EXPIRES_MINUTES", "1440"))
+    # 游客 token 有效期（分钟），短期即可，默认 30 分钟
+    GUEST_TOKEN_EXPIRES_MINUTES: int = int(
+        os.environ.get("GUEST_TOKEN_EXPIRES_MINUTES", "30")
+    )
+
     @model_validator(mode="after")
     def _validate_dify_config(self) -> "Settings":
         """Validate that Dify API config values are non-empty at startup."""

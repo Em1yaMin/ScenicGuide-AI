@@ -19,6 +19,7 @@ models/
   evaluation.py       # Evaluation — AI 评估结果（FK→dialogues, UNIQUE）
   stat.py             # Stat — 聚合统计（独立表，无外键）
   knowledge.py        # KnowledgeBase — 知识库条目（id/title/category/content/tags）
+  user.py             # User — 注册用户（username 唯一；登录用户才有长期记忆）
   __init__.py         # 重导出 Base + 所有模型（使 create_all 发现所有表）
 ```
 

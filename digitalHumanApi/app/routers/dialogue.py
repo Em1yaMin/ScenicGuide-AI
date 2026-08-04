@@ -3,10 +3,11 @@ import logging
 from typing import Any, Dict, Optional
 
 import httpx
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Header, Query
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
+from app.core.security import resolve_dialogue_user
 from app.services.rag_service import build_rag_context, search_documents
 from app.tasks.polling import poll_once
 
@@ -61,7 +62,14 @@ async def sync_now(user: Optional[str] = Query(None)) -> Dict[str, Any]:
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_with_rag(request: ChatRequest) -> ChatResponse:
+async def chat_with_rag(
+    request: ChatRequest,
+    authorization: Optional[str] = Header(
+        default=None,
+        description="Bearer token（可选）：登录用户/游客 token 优先于请求体 user 字段；"
+        "无 token 时向后兼容，使用请求体 user（默认 visitor）",
+    ),
+) -> ChatResponse:
     """RAG 增强的对话接口。
 
     流程:
@@ -100,10 +108,15 @@ async def chat_with_rag(request: ChatRequest) -> ChatResponse:
             logger.warning("RAG retrieval failed, proceeding without RAG: %s", e)
 
     # Step 2: 调用 Dify Chat Agent
+    # 用户标识来源：优先 Authorization Bearer token（登录用户 → 用户 id；
+    # 游客 token → 游客 id；无效 token 降级为 "visitor" 并告警，见
+    # security.resolve_dialogue_user 决策注释）；无 token 时回退请求体 user
+    # 字段（默认 "visitor"），保持向后兼容。
+    effective_user = resolve_dialogue_user(authorization) or request.user
     try:
         dify_response = await _call_dify_chat(
             query=modified_query,
-            user=request.user,
+            user=effective_user,
             conversation_id=request.conversation_id,
         )
         answer = dify_response.get("answer", "")
