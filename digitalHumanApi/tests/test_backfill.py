@@ -165,6 +165,61 @@ async def test_fetch_conversations_raises_when_cursor_missing():
 
 
 @pytest.mark.asyncio
+async def test_fetch_conversations_raises_when_has_more_missing():
+    """响应缺失 has_more 键且页满（无法判断是否还有下一页）必须抛错，不能静默截断。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"limit": 100, "data": [_conv(f"c{i}") for i in range(100)]},
+        )
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url=BASE_URL
+    )
+    with pytest.raises(RuntimeError):
+        await fetch_conversations_paginated(
+            client, BASE_URL, HEADERS, "u1", interval=0
+        )
+
+
+@pytest.mark.asyncio
+async def test_fetch_messages_raises_when_has_more_missing():
+    """messages 响应缺失 has_more 键且页满同样必须抛错。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"limit": 100, "data": [_msg(f"m{i}", "user") for i in range(100)]},
+        )
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url=BASE_URL
+    )
+    with pytest.raises(RuntimeError):
+        await fetch_messages_paginated(
+            client, BASE_URL, HEADERS, "conv-1", "u1", interval=0
+        )
+
+
+@pytest.mark.asyncio
+async def test_fetch_conversations_partial_page_without_has_more_ok():
+    """响应缺失 has_more 键但页未满：可判定已到末尾，正常结束不抛错。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"limit": 100, "data": [_conv("c1")]})
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url=BASE_URL
+    )
+    result, complete = await fetch_conversations_paginated(
+        client, BASE_URL, HEADERS, "u1", interval=0
+    )
+    assert complete is True
+    assert [c["id"] for c in result] == ["c1"]
+
+
+@pytest.mark.asyncio
 async def test_fetch_conversations_skips_failed_page():
     """中间页失败（重试耗尽）时跳过该页，不中断整体。"""
 

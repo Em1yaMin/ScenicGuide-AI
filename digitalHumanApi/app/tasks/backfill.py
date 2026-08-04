@@ -10,8 +10,9 @@
 - **不动主链路**：不修改 dify_client.py / polling.py，自带分页与节流实现。
 - **分页**：Dify 服务端 API 的 /conversations 与 /messages 均支持
   `limit`（1-100）+ `cursor` 分页，响应携带 `has_more` 与 `cursor`。
-  若部署版本响应契约不符（`has_more=true` 却无 cursor/items），脚本抛错
-  中止而非静默截断；单页请求重试耗尽则停止该分页链并在统计/退出码中体现。
+  若部署版本响应契约不符（`has_more=true` 却无 cursor/items，或响应缺失
+  `has_more` 键且页满），脚本抛错中止而非静默截断；单页请求重试耗尽则
+  停止该分页链并在统计/退出码中体现。
 - **去重/幂等**：以 Dify message `id`（external_message_id，assistant 行加
   `:answer` 后缀）为唯一键，写入前预查 + 数据库 UNIQUE 约束兜底；重跑只补缺失部分。
 - **节流**：相邻 HTTP 请求间隔默认 >= 1 秒（`--interval 1.0`），避免触发 Dify 限流。
@@ -124,8 +125,9 @@ async def fetch_conversations_paginated(
 
     Dify API: GET /conversations?user=xxx&limit=100&cursor=xxx
     返回 (conversations, complete)。complete=False 表示某页请求重试耗尽，
-    剩余页未拉取（调用方须记入统计并体现于退出码）；has_more=true 但响应
-    缺 cursor/items 视为分页契约不匹配，抛错拒绝静默截断。
+    剩余页未拉取（调用方须记入统计并体现于退出码）；`has_more=true` 但响应
+    缺 cursor/items、或响应缺失 `has_more` 键且页满，视为分页契约不匹配，
+    抛错拒绝静默截断。
     """
     page_size = min(max(1, page_size), MAX_PAGE_SIZE)
     collected: List[Dict[str, Any]] = []
@@ -157,6 +159,12 @@ async def fetch_conversations_paginated(
         items = data.get("data", [])
         collected.extend(items)
         cursor = data.get("cursor")
+        if "has_more" not in data and len(items) >= page_size:
+            raise RuntimeError(
+                f"Dify pagination contract mismatch for conversations "
+                f"(user={user}): response lacks 'has_more' key but page is "
+                f"full (limit={page_size}); refusing to truncate history"
+            )
         if not data.get("has_more"):
             break
         if not cursor or not items:
@@ -217,6 +225,13 @@ async def fetch_messages_paginated(
         items = data.get("data", [])
         collected.extend(items)
         cursor = data.get("cursor")
+        if "has_more" not in data and len(items) >= page_size:
+            raise RuntimeError(
+                f"Dify pagination contract mismatch for messages "
+                f"(conversation={conversation_id}): response lacks 'has_more' "
+                f"key but page is full (limit={page_size}); refusing to "
+                f"truncate history"
+            )
         if not data.get("has_more"):
             break
         if not cursor or not items:
