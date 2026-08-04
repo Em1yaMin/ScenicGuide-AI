@@ -68,10 +68,10 @@ async def test_retry_returns_default():
 ```
 
 ## Architectural Boundaries
-- **ZERO mock 库** — 不使用 `unittest.mock`、`pytest-mock`、`monkeypatch`
+- **无外部 mock 库** — 不使用 `unittest.mock`、`pytest-mock`；HTTP 层用 httpx 自带的 `MockTransport` 模拟 Dify 响应，时间函数用 pytest 内置 `monkeypatch` 替换 `asyncio.sleep`（仅限流/退避间隔测试，见 test_backfill.py）
 - 数据库测试用真实 SQLite 内存引擎，HTTP 测试用 FastAPI `dependency_overrides` 替换 `get_db`
 - 函数级隔离 — 每个测试独立 engine/session/client，测试间数据不互相影响
-- 不测试外部 API（Dify）— 通过内联 stub 函数模拟
+- 不测试外部 API（Dify）— 通过 httpx `MockTransport` / 内联 stub 函数模拟
 
 <important if="you are writing or modifying tests">
 ## Adding a New Test
@@ -79,4 +79,5 @@ async def test_retry_returns_default():
 2. 服务+DB → `@pytest.mark.asyncio` + `db_session: AsyncSession` 参数
 3. HTTP 端点 → `@pytest.mark.asyncio` + `client: AsyncClient` 参数
 4. 重试逻辑 → 内联 `async def` stub 函数，不 mock
+5. HTTP 客户端调用 → httpx `MockTransport` 模拟响应；验证限流/退避间隔 → `monkeypatch` 替换 `asyncio.sleep`（如 test_backfill.py）
 </important>

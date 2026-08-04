@@ -41,7 +41,7 @@ digitalHuman/
 │   │   ├── data/             # 本地 JSON 数据源（景点、路线）
 │   │   ├── services/         # 业务逻辑 + Dify API 客户端
 │   │   ├── routers/          # FastAPI HTTP 端点
-│   │   └── tasks/            # 后台 asyncio 循环（polling、analysis）
+│   │   └── tasks/            # 后台 asyncio 循环（polling、analysis）+ 补拉 CLI（backfill）
 │   ├── tests/                # pytest 测试套件
 │   ├── requirements.txt
 │   ├── requirements-dev.txt

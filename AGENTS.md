@@ -99,7 +99,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 <important if="you are writing or modifying tests">
 ## 测试
-- 后端: pytest + 内存 SQLite（见 tests/CLAUDE.md），不使用 mock 库
+- 后端: pytest + 内存 SQLite（见 tests/CLAUDE.md），不使用外部 mock 库（httpx.MockTransport 模拟 Dify 响应）
 - 前端: 暂无测试基础设施
 </important>
 
