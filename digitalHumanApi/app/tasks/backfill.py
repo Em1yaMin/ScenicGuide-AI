@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -83,7 +84,7 @@ async def _request_with_retry(
             )
             response.raise_for_status()
             return response.json()
-        except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+        except (httpx.HTTPStatusError, httpx.RequestError, json.JSONDecodeError) as exc:
             if attempt < max_retries - 1:
                 wait = backoff_base * (2**attempt)
                 logger.warning(
@@ -382,6 +383,7 @@ async def backfill_user(
                 "Backfill commit rolled back for user=%s, rerun to retry", user
             )
             stats.inserted = 0
+            stats.incomplete = True
     return stats
 
 
