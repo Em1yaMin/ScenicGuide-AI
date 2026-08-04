@@ -78,7 +78,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 - **Visitor 端**: 访客通过数字人 iframe 对话（Dify Chat Agent），系统后台轮询抓取对话内容
 - **Admin 端**: 管理后台展示情感趋势、满意度、热点关注和景点热度（数据来自 Dify Workflow 量化分析），以及知识库管理（讲解词/FAQ/资料 CRUD + 批量导入）
-- **数据隔离**: 当前仅支持单一虚拟访客（`DIFY_LIGHT4AI_USER`），无多租户/认证
+- **数据隔离**: 轮询/量化仍仅跟踪单一虚拟访客（`DIFY_LIGHT4AI_USER`），无多租户、无按用户的数据隔离（JWT 认证仅标记对话 user，不隔离数据，见上方「用户体系」）
 
 # 开发指南
 
