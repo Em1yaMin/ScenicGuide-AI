@@ -1,7 +1,7 @@
 """backfill.py 补拉脚本测试。
 
-覆盖：分页拉取、去重与幂等、限流间隔、退避重试。
-使用 httpx.MockTransport 模拟 Dify 响应（无外部 mock 库）。
+覆盖：分页拉取、分页契约违规抛错、去重与幂等、限流间隔、退避重试、
+query/answer 字段映射。使用 httpx.MockTransport 模拟 Dify 响应（无外部 mock 库）。
 """
 
 from __future__ import annotations
@@ -39,6 +39,18 @@ def _msg(msg_id: str, role: str, created_at: int = 1700000000, content: str = "h
         "role": role,
         "created_at": created_at,
         "content": content,
+    }
+
+
+def _qa_msg(
+    msg_id: str, query: str, answer: str, created_at: int = 1700000000
+) -> Dict:
+    """Dify 服务端 API /messages 的真实条目结构：一问一答。"""
+    return {
+        "id": msg_id,
+        "query": query,
+        "answer": answer,
+        "created_at": created_at,
     }
 
 
@@ -94,9 +106,10 @@ async def test_fetch_conversations_paginated_follows_cursor():
         },
         messages={},
     )
-    result = await fetch_conversations_paginated(
+    result, complete = await fetch_conversations_paginated(
         client, BASE_URL, HEADERS, "u1", interval=0
     )
+    assert complete is True
     assert [c["id"] for c in result] == ["c1", "c2", "c3"]
 
 
@@ -113,9 +126,10 @@ async def test_fetch_messages_paginated_follows_cursor():
             }
         },
     )
-    result = await fetch_messages_paginated(
+    result, complete = await fetch_messages_paginated(
         client, BASE_URL, HEADERS, "conv-1", "u1", interval=0
     )
+    assert complete is True
     assert [m["id"] for m in result] == ["m1", "m2", "m3"]
 
 
@@ -125,10 +139,30 @@ async def test_fetch_conversations_stops_when_no_more():
         conversations={None: _page_response([_conv("c1")], None, False)},
         messages={},
     )
-    result = await fetch_conversations_paginated(
+    result, complete = await fetch_conversations_paginated(
         client, BASE_URL, HEADERS, "u1", interval=0
     )
+    assert complete is True
     assert [c["id"] for c in result] == ["c1"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_conversations_raises_when_cursor_missing():
+    """has_more=true 但响应无 cursor/items（分页契约不匹配）必须抛错，不能静默截断。"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"limit": 100, "has_more": True, "data": [_conv("c1")]},
+        )
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url=BASE_URL
+    )
+    with pytest.raises(RuntimeError):
+        await fetch_conversations_paginated(
+            client, BASE_URL, HEADERS, "u1", interval=0
+        )
 
 
 @pytest.mark.asyncio
@@ -150,10 +184,11 @@ async def test_fetch_conversations_skips_failed_page():
     client = httpx.AsyncClient(
         transport=httpx.MockTransport(handler), base_url=BASE_URL
     )
-    result = await fetch_conversations_paginated(
+    result, complete = await fetch_conversations_paginated(
         client, BASE_URL, HEADERS, "u1", interval=0, max_retries=2, backoff_base=0
     )
     assert [c["id"] for c in result] == ["c1"]
+    assert complete is False
 
 
 # 去重与幂等 -----------------------------------------------------------------
@@ -254,6 +289,45 @@ async def test_backfill_fields_mapping(db_session: AsyncSession):
         await db_session.execute(select(Visitor).where(Visitor.id == "u1"))
     ).scalar_one()
     assert visitor is not None
+
+
+@pytest.mark.asyncio
+async def test_backfill_qa_mapping(db_session: AsyncSession):
+    """Dify /messages 真实结构（query/answer 一问一答）拆为 user+assistant 两条。"""
+    created = 1700000123
+    client = make_mock_client(
+        conversations={None: _page_response([_conv("conv-1")], None, False)},
+        messages={
+            "conv-1": {
+                None: _page_response(
+                    [_qa_msg("m1", "你好", "你好呀", created)], None, False
+                ),
+            }
+        },
+    )
+    stats = await backfill_user(
+        db_session, client, BASE_URL, HEADERS, "u1", interval=0
+    )
+    assert stats.inserted == 2
+    assert stats.messages_seen == 1
+    rows = (
+        (await db_session.execute(select(Dialogue).order_by(Dialogue.id))).scalars()
+    ).all()
+    assert rows[0].role.value == "user"
+    assert rows[0].content == "你好"
+    assert rows[0].external_message_id == "m1"
+    assert rows[1].role.value == "assistant"
+    assert rows[1].content == "你好呀"
+    assert rows[1].external_message_id == "m1:answer"
+    assert rows[0].timestamp == datetime.fromtimestamp(
+        created, tz=timezone.utc
+    ).replace(tzinfo=None)
+
+    stats2 = await backfill_user(
+        db_session, client, BASE_URL, HEADERS, "u1", interval=0
+    )
+    assert stats2.inserted == 0
+    assert stats2.skipped_duplicates == 2
 
 
 # 限流与退避 -----------------------------------------------------------------

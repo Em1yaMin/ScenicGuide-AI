@@ -32,7 +32,10 @@
   Dify API 无「列出全部 user」端点）。需控制台确认（见缺口清单）。
 - Dify `/conversations` 响应不含 user 维度枚举能力，且无 cursor 时仅返回单页，
   补拉脚本已实现 `cursor + has_more` 分页以覆盖 >100 条场景（当前无数据，逻辑经
-  mock 测试验证）。
+  mock 测试验证）。注意：分页契约未对真实数据端到端验证过，脚本对
+  `has_more=true` 但响应缺 cursor/items 的情况会**抛错中止而非静默截断**，
+  对单页请求重试耗尽的情况会标记迁移不完整并以非零退出码结束——若部署的 Dify
+  版本分页字段不同（部分版本用 `first_id`/`last_id`），首次真实分页时会立即暴露。
 
 ### 1.3 Dify 侧知识库（API 盘点）
 
@@ -63,10 +66,14 @@
 - **能力**：分页拉取（`cursor + has_more`）、按 `external_message_id` 去重（预查 +
   UNIQUE 兜底）、限流（默认请求间隔 ≥ 1 秒）、指数退避重试（默认 3 次）、幂等可重跑、
   独立 CLI（`python -m app.tasks.backfill [--user xxx]`，自动建表）。
+  `/messages` 按 Dify 服务端 API 真实结构（`query`/`answer` 一问一答）映射为
+  user/assistant 两条记录；分页契约不匹配时抛错、请求失败时以非零退出码+警告行
+  体现迁移不完整。
 - **不动主链路**：不修改 `dify_client.py` / `polling.py` / `_call_dify_chat`。
-- **测试**：`digitalHumanApi/tests/test_backfill.py`，10 个用例（分页跟随 cursor、
-  页失败跳过、跨会话去重、重跑幂等、字段映射、限流间隔、退避重试、headers 透传），
-  全部通过；全量测试 94 passed。
+- **测试**：`digitalHumanApi/tests/test_backfill.py`，13 个用例（分页跟随 cursor、
+  契约违规抛错、页失败标记不完整、跨会话去重、重跑幂等、role/content 与
+  query/answer 两种字段映射、限流间隔、退避重试、headers 透传），全部通过；
+  全量测试 94 passed。
 - **真实执行结果**：对 `adh` user 补拉，Dify 返回 200 且 0 条对话，本地库保持 0 条
   （与盘点一致；脚本链路端到端验证通过）。
 

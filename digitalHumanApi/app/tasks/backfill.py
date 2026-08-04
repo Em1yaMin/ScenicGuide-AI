@@ -10,8 +10,10 @@
 - **不动主链路**：不修改 dify_client.py / polling.py，自带分页与节流实现。
 - **分页**：Dify 服务端 API 的 /conversations 与 /messages 均支持
   `limit`（1-100）+ `cursor` 分页，响应携带 `has_more` 与 `cursor`。
-- **去重/幂等**：以 Dify message `id`（external_message_id）为唯一键，
-  写入前预查 + 数据库 UNIQUE 约束兜底；重跑只补缺失部分。
+  若部署版本响应契约不符（`has_more=true` 却无 cursor/items），脚本抛错
+  中止而非静默截断；单页请求重试耗尽则停止该分页链并在统计/退出码中体现。
+- **去重/幂等**：以 Dify message `id`（external_message_id，assistant 行加
+  `:answer` 后缀）为唯一键，写入前预查 + 数据库 UNIQUE 约束兜底；重跑只补缺失部分。
 - **节流**：相邻 HTTP 请求间隔默认 >= 1 秒（`--interval 1.0`），避免触发 Dify 限流。
 - **退避重试**：HTTP 错误/超时按指数退避重试（默认 3 次，`0.5 * 2^n` 秒）。
 
@@ -56,6 +58,7 @@ class BackfillStats:
     inserted: int = 0
     skipped_duplicates: int = 0
     failed_conversations: List[str] = field(default_factory=list)
+    incomplete: bool = False
 
 
 async def _request_with_retry(
@@ -116,15 +119,18 @@ async def fetch_conversations_paginated(
     interval: float = DEFAULT_INTERVAL,
     max_retries: int = 3,
     backoff_base: float = 0.5,
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], bool]:
     """分页拉取某 user 的全部 conversations（按创建时间倒序）。
 
     Dify API: GET /conversations?user=xxx&limit=100&cursor=xxx
-    返回 [{id, ...}, ...]；单页失败跳过该页并记日志（不中断整体）。
+    返回 (conversations, complete)。complete=False 表示某页请求重试耗尽，
+    剩余页未拉取（调用方须记入统计并体现于退出码）；has_more=true 但响应
+    缺 cursor/items 视为分页契约不匹配，抛错拒绝静默截断。
     """
     page_size = min(max(1, page_size), MAX_PAGE_SIZE)
     collected: List[Dict[str, Any]] = []
     cursor: Optional[str] = None
+    complete = True
     while True:
         params: Dict[str, Any] = {
             "user": user,
@@ -145,15 +151,22 @@ async def fetch_conversations_paginated(
         )
         if data is None:
             logger.error("Skipping conversations page for user=%s", user)
+            complete = False
             break
         items = data.get("data", [])
         collected.extend(items)
         cursor = data.get("cursor")
-        if not data.get("has_more") or not cursor or not items:
+        if not data.get("has_more"):
             break
+        if not cursor or not items:
+            raise RuntimeError(
+                f"Dify pagination contract mismatch for conversations "
+                f"(user={user}): has_more=true but no cursor/items in "
+                f"response; refusing to truncate history"
+            )
         if interval > 0:
             await asyncio.sleep(interval)
-    return collected
+    return collected, complete
 
 
 async def fetch_messages_paginated(
@@ -167,14 +180,16 @@ async def fetch_messages_paginated(
     interval: float = DEFAULT_INTERVAL,
     max_retries: int = 3,
     backoff_base: float = 0.5,
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], bool]:
     """分页拉取某个 conversation 的全部 messages（按创建时间倒序）。
 
     Dify API: GET /messages?conversation_id=xxx&user=xxx&limit=100&cursor=xxx
+    返回 (messages, complete)；失败语义与 fetch_conversations_paginated 一致。
     """
     page_size = min(max(1, page_size), MAX_PAGE_SIZE)
     collected: List[Dict[str, Any]] = []
     cursor: Optional[str] = None
+    complete = True
     while True:
         params: Dict[str, Any] = {
             "conversation_id": conversation_id,
@@ -197,42 +212,87 @@ async def fetch_messages_paginated(
             logger.error(
                 "Skipping messages page for conversation=%s", conversation_id
             )
+            complete = False
             break
         items = data.get("data", [])
         collected.extend(items)
         cursor = data.get("cursor")
-        if not data.get("has_more") or not cursor or not items:
+        if not data.get("has_more"):
             break
+        if not cursor or not items:
+            raise RuntimeError(
+                f"Dify pagination contract mismatch for messages "
+                f"(conversation={conversation_id}): has_more=true but no "
+                f"cursor/items in response; refusing to truncate history"
+            )
         if interval > 0:
             await asyncio.sleep(interval)
-    return collected
+    return collected, complete
 
 
-def _to_dialogue(
+def _to_dialogues(
     user: str, conversation_id: str, msg: Dict[str, Any]
-) -> Optional[Dialogue]:
-    """把 Dify message dict 映射为 Dialogue 对象（字段规则与 polling.py 一致）。"""
+) -> List[Dialogue]:
+    """把 Dify message dict 映射为 Dialogue 列表（兼容两种响应结构）。
+
+    - `{role, content}`：与 polling.py 一致的单条消息结构（部分版本）。
+    - `{query, answer}`：Dify 服务端 API /messages 的真实结构，一问一答拆为
+      user/assistant 两条；assistant 行 external_message_id 加 `:answer` 后缀
+      保持唯一键可去重。
+    """
     external_id = msg.get("id")
     if not external_id:
-        return None
-    role_str = msg.get("role", "user")
-    try:
-        role = DialogueRole(role_str)
-    except ValueError:
-        role = DialogueRole.user
+        return []
     created_at = msg.get("created_at")
     if isinstance(created_at, (int, float)):
         timestamp = datetime.fromtimestamp(created_at, tz=timezone.utc)
     else:
         timestamp = datetime.now(timezone.utc)
-    return Dialogue(
-        visitor_id=user,
-        conversation_id=conversation_id,
-        external_message_id=external_id,
-        content=msg.get("content", "") or msg.get("query", ""),
-        role=role,
-        timestamp=timestamp,
-    )
+
+    if "role" in msg or "content" in msg:
+        role_str = msg.get("role", "user")
+        try:
+            role = DialogueRole(role_str)
+        except ValueError:
+            role = DialogueRole.user
+        content = msg.get("content", "") or msg.get("query", "")
+        return [
+            Dialogue(
+                visitor_id=user,
+                conversation_id=conversation_id,
+                external_message_id=external_id,
+                content=content,
+                role=role,
+                timestamp=timestamp,
+            )
+        ]
+
+    dialogues: List[Dialogue] = []
+    query = msg.get("query", "")
+    if query:
+        dialogues.append(
+            Dialogue(
+                visitor_id=user,
+                conversation_id=conversation_id,
+                external_message_id=external_id,
+                content=query,
+                role=DialogueRole.user,
+                timestamp=timestamp,
+            )
+        )
+    answer = msg.get("answer", "")
+    if answer:
+        dialogues.append(
+            Dialogue(
+                visitor_id=user,
+                conversation_id=conversation_id,
+                external_message_id=f"{external_id}:answer",
+                content=answer,
+                role=DialogueRole.assistant,
+                timestamp=timestamp,
+            )
+        )
+    return dialogues
 
 
 async def backfill_user(
@@ -264,7 +324,7 @@ async def backfill_user(
     )
     known_ids = {row[0] for row in rows.all()}
 
-    conversations = await fetch_conversations_paginated(
+    conversations, conv_complete = await fetch_conversations_paginated(
         client,
         base_url,
         headers,
@@ -275,12 +335,14 @@ async def backfill_user(
         backoff_base=backoff_base,
     )
     stats.conversations_seen = len(conversations)
+    if not conv_complete:
+        stats.incomplete = True
 
     for conv in conversations:
         conversation_id = conv.get("id")
         if not conversation_id:
             continue
-        messages = await fetch_messages_paginated(
+        messages, msgs_complete = await fetch_messages_paginated(
             client,
             base_url,
             headers,
@@ -291,20 +353,21 @@ async def backfill_user(
             max_retries=max_retries,
             backoff_base=backoff_base,
         )
+        if not msgs_complete:
+            stats.incomplete = True
+            stats.failed_conversations.append(conversation_id)
         for msg in messages:
             external_id = msg.get("id")
             if not external_id:
                 continue
             stats.messages_seen += 1
-            if external_id in known_ids:
-                stats.skipped_duplicates += 1
-                continue
-            dialogue = _to_dialogue(user, conversation_id, msg)
-            if dialogue is None:
-                continue
-            db.add(dialogue)
-            known_ids.add(external_id)
-            stats.inserted += 1
+            for dialogue in _to_dialogues(user, conversation_id, msg):
+                if dialogue.external_message_id in known_ids:
+                    stats.skipped_duplicates += 1
+                    continue
+                db.add(dialogue)
+                known_ids.add(dialogue.external_message_id)
+                stats.inserted += 1
         # 页间限流由 fetch 内部处理；conversation 之间也保持间隔
         if interval > 0:
             await asyncio.sleep(interval)
@@ -404,12 +467,26 @@ async def _main(argv: Optional[List[str]] = None) -> int:
         interval=args.interval,
         max_retries=args.max_retries,
     )
+    incomplete = 0
     for stats in stats_list:
         print(
             f"user={stats.user}: conversations={stats.conversations_seen} "
             f"messages={stats.messages_seen} inserted={stats.inserted} "
             f"skipped={stats.skipped_duplicates}"
         )
+        if stats.incomplete:
+            incomplete += 1
+            if stats.failed_conversations:
+                detail = (
+                    "消息拉取失败的会话: "
+                    + ", ".join(stats.failed_conversations)
+                )
+            else:
+                detail = "conversations 列表拉取被截断"
+            print(f"  !! 迁移不完整：{detail}（可重跑补齐）")
+    if incomplete:
+        print(f"{incomplete} 个 user 迁移不完整，退出码 1")
+        return 1
     return 0
 
 
