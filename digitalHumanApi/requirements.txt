@@ -16,7 +16,8 @@ python-multipart>=0.0.9
 pwdlib[bcrypt]>=0.2.0
 PyJWT>=2.8.0
 
-# RAG / Local Knowledge Base (轻量实现，无外部向量库)
-# TF-IDF 向量化 + 文件持久化，numpy 用于检索阶段矩阵乘法加速
+# RAG / Local Knowledge Base (文件持久化，无外部向量库服务)
+# 向量化: Minimax Embedding API（httpx，EMBEDDING_* 配置，见 app/core/embedding.py）
+# 或本地 TF-IDF 降级路径；numpy 用于检索阶段矩阵乘法加速
 numpy>=1.26.0
 langchain-core>=0.3.0

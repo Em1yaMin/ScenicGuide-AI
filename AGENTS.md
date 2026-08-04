@@ -12,7 +12,7 @@
 digitalHumanApi/          # Python FastAPI 后端
   app/
     main.py               # 应用入口（lifespan、CORS、全局异常处理、router 注册）
-    core/                 # config.py (Settings) + database.py + rag.py (轻量 TF-IDF + numpy 矩阵检索)
+    core/                 # config.py (Settings) + database.py + embedding.py (Embedding 工厂/Minimax) + rag.py (命名空间向量存储)
     data/                 # 本地 JSON 数据源（景点、路线）
     models/               # SQLAlchemy 2.0 ORM 实体 → models/CLAUDE.md
     schemas/              # Pydantic v2 请求/响应模型 → schemas/CLAUDE.md
@@ -100,7 +100,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 <important if="you are writing or modifying tests">
 ## 测试
-- 后端: pytest + 内存 SQLite（见 tests/CLAUDE.md），不使用 mock 库
+- 后端: pytest + 内存 SQLite（见 tests/CLAUDE.md），不使用第三方 mock 库（允许 pytest 内置 monkeypatch 与 httpx.MockTransport）
 - 前端: 暂无测试基础设施
 </important>
 

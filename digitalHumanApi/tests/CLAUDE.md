@@ -11,9 +11,12 @@ pytest + pytest-asyncio 测试套件。覆盖 FastAPI HTTP 端点、服务层逻
 ## Test Fixtures (conftest.py)
 
 ```
+_pin_embedding_api_key_off (autouse, 固定 EMBEDDING_API_KEY 为空 → 走本地 TF-IDF)
 db_engine → db_session → client
   (3 个函数级 fixture，链式依赖，每个测试完全隔离)
 ```
+
+Embedding 测试另用 `rag_persist_dir` fixture（test_embedding.py 内）把 `RAG_DATA_DIR` 重定向到 tmp_path，避免污染工作区 `rag_data/`。
 
 ## HTTP Endpoint Test Pattern
 
@@ -68,7 +71,7 @@ async def test_retry_returns_default():
 ```
 
 ## Architectural Boundaries
-- **ZERO mock 库** — 不使用 `unittest.mock`、`pytest-mock`、`monkeypatch`
+- **无第三方 mock 框架** — 不使用 `unittest.mock`、`pytest-mock`；允许 pytest 内置 `monkeypatch`（固定环境变量/路径，见 conftest.py）与 `httpx.MockTransport`（模拟 Embedding API 网络层）
 - 数据库测试用真实 SQLite 内存引擎，HTTP 测试用 FastAPI `dependency_overrides` 替换 `get_db`
 - 函数级隔离 — 每个测试独立 engine/session/client，测试间数据不互相影响
 - 不测试外部 API（Dify）— 通过内联 stub 函数模拟
