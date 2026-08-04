@@ -18,6 +18,7 @@ from app.core.rag import (
     CHUNK_SIZE,
     DEFAULT_DOC_DIR,
     DEFAULT_TOP_K,
+    NAMESPACE_DOCUMENTS,
     get_vectorstore_for_namespace,
     normalize_namespaces,
 )
@@ -189,11 +190,15 @@ def _index_documents_sync(
          "degraded", "degraded_reason"}
     """
     doc_dir = doc_dir or DEFAULT_DOC_DIR
-    namespaces = normalize_namespaces(namespace)
-    if len(namespaces) != 1:
-        # 索引接口只接受单一命名空间，避免同一批 doc/ 文档写入多个命名空间
-        raise ValueError(f"索引接口的 namespace 参数需为单一命名空间，收到: {namespaces}")
-    ns = namespaces[0]
+    if namespace is None or not namespace.strip():
+        # 无 body 的旧调用方式默认索引 documents 命名空间
+        ns = NAMESPACE_DOCUMENTS
+    else:
+        namespaces = normalize_namespaces(namespace)
+        if len(namespaces) != 1:
+            # 索引接口只接受单一命名空间，避免同一批 doc/ 文档写入多个命名空间
+            raise ValueError(f"索引接口的 namespace 参数需为单一命名空间，收到: {namespaces}")
+        ns = namespaces[0]
 
     # 加载
     documents = _load_documents(doc_dir)

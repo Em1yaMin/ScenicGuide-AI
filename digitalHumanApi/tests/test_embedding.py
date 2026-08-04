@@ -37,6 +37,19 @@ KNOWLEDGE_DOC = "景区开放时间：旺季 8:00-18:00，淡季 8:30-17:30，�
 MEMORY_DOC = "用户偏好：喜欢徒步路线，对溶洞景观特别感兴趣。"
 
 
+@pytest.fixture
+def rag_persist_dir(monkeypatch, tmp_path):
+    """将 RAG 全局单例的持久化目录重定向到临时目录。
+
+    服务层/API 层测试经 get_vectorstore_for_namespace 全局单例读写
+    持久化文件，默认落在工作区 rag_data/；重定向到 tmp_path 避免
+    污染工作区并保证测试间隔离。
+    """
+    persist_dir = tmp_path / "rag_data"
+    monkeypatch.setattr("app.core.rag.RAG_DATA_DIR", persist_dir)
+    return persist_dir
+
+
 # ---------------------------------------------------------------------------
 # 测试用确定性 Embedding
 # ---------------------------------------------------------------------------
@@ -402,7 +415,7 @@ def test_store_with_minimax_mock_end_to_end(tmp_path):
 # 服务层 / API 层：namespace 参数贯通
 # ---------------------------------------------------------------------------
 
-async def test_index_and_search_service_with_namespace(tmp_path):
+async def test_index_and_search_service_with_namespace(tmp_path, rag_persist_dir):
     """索引/检索服务层接受 namespace 参数，且命名空间互不命中。"""
     (tmp_path / "a.md").write_text(
         "# 黄果树瀑布\n黄果树瀑布位于贵州安顺，是亚洲最大的瀑布。", encoding="utf-8"
@@ -433,7 +446,7 @@ async def test_index_and_search_service_with_namespace(tmp_path):
     assert results_default[0]["namespace"] == "documents"
 
 
-async def test_rag_search_api_accepts_namespace(client):
+async def test_rag_search_api_accepts_namespace(client, rag_persist_dir):
     """/api/rag/search 支持 namespace 参数，默认行为不破坏现有调用方。"""
     # 不带 namespace（现有调用方）→ 默认公共命名空间
     resp = await client.post("/api/rag/search", json={"query": "黄果树瀑布"})
@@ -460,13 +473,14 @@ async def test_rag_search_api_accepts_namespace(client):
     assert resp.json()["namespaces"] == ["knowledge", "documents"]
 
 
-async def test_rag_index_api_accepts_namespace(client):
+async def test_rag_index_api_accepts_namespace(client, rag_persist_dir):
     """/api/rag/index 支持 namespace 参数（无 body 的旧调用方式仍兼容）。"""
     # 不带 body（现有调用方）→ 默认 documents
     resp = await client.post("/api/rag/index")
     assert resp.status_code == 200
-    assert resp.json()["namespace"] == "documents"
-    assert resp.json()["status"] in ("ok", "empty", "error")
+    data = resp.json()
+    assert data["namespace"] == "documents"
+    assert data["status"] in ("ok", "empty")
 
     # 带 namespace body
     resp = await client.post(
