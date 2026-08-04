@@ -52,6 +52,13 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - 前端：`digitalHumanVue/src/views/admin/KnowledgeView.vue`，token 存 `localStorage` 的 `admin_api_token`
 - 导入支持 `.json` 数组和按 `# ` 标题切分的 `.md` 文件
 
+## 用户体系（注册/登录/JWT/游客）
+
+- 模型 `app/models/user.py`（users 表：username 唯一、password_hash、nickname、last_login_at）+ `app/core/security.py`（pwdlib[bcrypt] 哈希 + PyJWT 签发/校验）+ `app/routers/auth.py`（`/api/v1/auth/register|login|me|guest`）+ `app/services/auth_service.py`
+- 密码绝不落明文/日志；`JWT_SECRET` 未配置时启动生成随机临时密钥（重启后 token 失效，生产必须设置）
+- **对话接口用户标识**：`/api/v1/dialogue/chat` 优先从 `Authorization: Bearer` token 解析（登录用户→用户 id、游客→guest-xxx），无 token 回退请求体 `user`（默认 `visitor`，向后兼容）；token 无效时降级 `visitor` 并告警（不阻断对话），认证接口严格 401（决策注释见 `security.py resolve_dialogue_user`）
+- 配置：`JWT_SECRET`、`JWT_EXPIRES_MINUTES`（默认 1440）、`GUEST_TOKEN_EXPIRES_MINUTES`（默认 30），见 `.env.example`
+
 ## AI 运营分析（LangChain + OpenAI，可回退）
 
 - `app/services/analytics_service.py` + `app/routers/analysis.py` — `GET /api/v1/analysis/overview`、`/trends`、`POST /run-now`
@@ -71,7 +78,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 - **Visitor 端**: 访客通过数字人 iframe 对话（Dify Chat Agent），系统后台轮询抓取对话内容
 - **Admin 端**: 管理后台展示情感趋势、满意度、热点关注和景点热度（数据来自 Dify Workflow 量化分析），以及知识库管理（讲解词/FAQ/资料 CRUD + 批量导入）
-- **数据隔离**: 当前仅支持单一虚拟访客（`DIFY_LIGHT4AI_USER`），无多租户/认证
+- **数据隔离**: 轮询/量化仍仅跟踪单一虚拟访客（`DIFY_LIGHT4AI_USER`），无多租户、无按用户的数据隔离（JWT 认证仅标记对话 user，不隔离数据，见上方「用户体系」）
 
 # 开发指南
 

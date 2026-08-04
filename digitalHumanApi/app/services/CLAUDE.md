@@ -22,6 +22,7 @@ services/
   knowledge_service.py # CRUD + import — 知识库条目管理
   dify_client.py      # DifyClient 类 + dify_client 单例 — Dify API 封装
   recommend_agent.py  # LangChain Tool Calling 个性化路线推荐 Agent
+  auth_service.py     # register_user/authenticate_user/签发 user+guest token — 用户体系
 ```
 
 ## Service Function Pattern (聚合/统计 — 推荐)

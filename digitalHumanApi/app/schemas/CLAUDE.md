@@ -23,6 +23,7 @@ schemas/
   dialogue.py   # DialogueItem — 预留未来对话列表 API
   analysis.py   # AnalysisResultItem — 预留未来分析结果 API
   recommend.py  # RecommendRequest / RecommendResponse + RouteRecommendation
+  auth.py       # RegisterRequest / LoginRequest / UserResponse / AuthResponse / GuestResponse
 ```
 
 ## Request/Response Pair Pattern

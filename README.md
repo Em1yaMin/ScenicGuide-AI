@@ -314,6 +314,10 @@ docker-compose up -d --build
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/health` | 健康检查 |
+| POST | `/auth/register` | 用户注册（用户名唯一，密码至少 6 位） |
+| POST | `/auth/login` | 登录（返回 JWT + 用户信息） |
+| GET | `/auth/me` | 当前登录用户（Bearer token，无效 token 401） |
+| POST | `/auth/guest` | 签发短期游客 token（匿名，30 分钟） |
 | GET | `/visitor/recommended-questions` | 获取动态推荐问句（后台每 5 分钟从 Dify 刷新） |
 | POST | `/visitor/register` | 游客注册 |
 | POST | `/visitor/refresh-recommend` | 手动刷新推荐问句缓存 |
@@ -334,6 +338,16 @@ docker-compose up -d --build
 | PUT | `/api/admin/knowledge/{id}` | 编辑知识库条目 |
 | DELETE | `/api/admin/knowledge/{id}` | 删除知识库条目 |
 | POST | `/api/admin/knowledge/import` | 批量导入（JSON/Markdown 文件） |
+
+## 用户体系（注册/登录/JWT）
+
+后端提供最小可用用户体系，游客免登录可继续使用对话功能：
+
+- **注册/登录**：`POST /api/v1/auth/register`、`POST /api/v1/auth/login`（凭据校验失败返回 401，登录成功签发 JWT，有效期默认 24 小时）
+- **游客身份**：`POST /api/v1/auth/guest` 签发短期 token（默认 30 分钟，匿名、无持久化记录）
+- **对话接口用户标识**：`POST /api/v1/dialogue/chat` 优先从 `Authorization: Bearer <token>` 解析用户（登录用户 → 用户 id；游客 token → 游客 id）；无 token 时向后兼容回退请求体 `user` 字段（默认 `visitor`）；token 无效时降级为 `visitor` 并写告警日志（不阻断对话）。`/auth/me` 等认证接口对无效 token 严格返回 401
+- **安全**：密码使用 pwdlib[bcrypt] 哈希存储，绝不落明文；日志不打印 token/密码
+- **配置**：`JWT_SECRET`（生产必须设置，留空时启动生成随机临时密钥、重启后 token 失效）、`JWT_EXPIRES_MINUTES`（默认 1440）、`GUEST_TOKEN_EXPIRES_MINUTES`（默认 30），见 `digitalHumanApi/.env.example`
 
 ## 测试
 
