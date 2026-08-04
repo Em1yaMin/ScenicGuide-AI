@@ -552,9 +552,9 @@ class SimpleVectorStore:
 # 全局单例
 # ---------------------------------------------------------------------------
 
-_vectorstore: Optional[SimpleVectorStore] = None
-_vectorstore_collection: Optional[str] = None
-_vectorstore_dir: Optional[Path] = None
+# 全局向量存储缓存：以 (collection_name, persist_dir) 为键，
+# 每个命名空间每进程只构建一次，避免跨命名空间检索时反复重建与重新向量化。
+_vectorstores: dict = {}
 _vectorstore_lock = threading.Lock()
 
 
@@ -562,31 +562,20 @@ def get_vectorstore(
     collection_name: str = "scenic_knowledge",
     persist_dir: Optional[Path] = None,
 ) -> SimpleVectorStore:
-    """获取全局向量存储单例。
-
-    当 collection_name 或 persist_dir 变化时自动重建实例，
-    以支持未来扩展多知识库场景。
-    """
-    global _vectorstore, _vectorstore_collection, _vectorstore_dir
-    effective_dir = persist_dir or RAG_DATA_DIR
-    if (
-        _vectorstore is None
-        or _vectorstore_collection != collection_name
-        or _vectorstore_dir != effective_dir
-    ):
+    """获取全局向量存储单例（按 collection_name + persist_dir 缓存）。"""
+    effective_dir = str(Path(persist_dir)) if persist_dir else str(RAG_DATA_DIR)
+    key = (collection_name, effective_dir)
+    store = _vectorstores.get(key)
+    if store is None:
         with _vectorstore_lock:
-            if (
-                _vectorstore is None
-                or _vectorstore_collection != collection_name
-                or _vectorstore_dir != effective_dir
-            ):
-                _vectorstore = SimpleVectorStore(
+            store = _vectorstores.get(key)
+            if store is None:
+                store = SimpleVectorStore(
                     collection_name=collection_name,
-                    persist_dir=effective_dir,
+                    persist_dir=Path(effective_dir),
                 )
-                _vectorstore_collection = collection_name
-                _vectorstore_dir = effective_dir
-    return _vectorstore
+                _vectorstores[key] = store
+    return store
 
 
 def get_vectorstore_for_namespace(namespace: str = NAMESPACE_DOCUMENTS) -> SimpleVectorStore:
@@ -616,7 +605,8 @@ def normalize_namespaces(namespace: Optional[str]) -> List[str]:
     for item in raw.split(","):
         ns = item.strip()
         if ns in NAMESPACE_COLLECTIONS:
-            namespaces.append(ns)
+            if ns not in namespaces:
+                namespaces.append(ns)
         else:
             logger.warning("忽略未知 RAG 命名空间: %r", ns)
     if not namespaces:
