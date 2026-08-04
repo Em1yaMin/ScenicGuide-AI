@@ -115,13 +115,20 @@ class MinimaxEmbeddings(Embeddings):
             data = response.json()
 
         # OpenAI 兼容响应: {"data": [{"embedding": [...], "index": i}, ...]}
+        # index 字段允许服务端乱序返回，按 index 恢复输入顺序，防止向量错位
         data_items = data.get("data") or []
-        embeddings = [item["embedding"] for item in data_items]
-        if len(embeddings) != len(texts):
+        if len(data_items) != len(texts):
             raise RuntimeError(
                 "Minimax Embedding 响应条数不符: "
-                f"请求 {len(texts)} 条，返回 {len(embeddings)} 条"
+                f"请求 {len(texts)} 条，返回 {len(data_items)} 条"
             )
+        if all("index" in item for item in data_items):
+            sorted_items = sorted(data_items, key=lambda item: item["index"])
+            if [item["index"] for item in sorted_items] == list(
+                range(len(sorted_items))
+            ):
+                data_items = sorted_items
+        embeddings = [item["embedding"] for item in data_items]
         return embeddings
 
 
