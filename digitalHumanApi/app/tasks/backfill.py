@@ -30,7 +30,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 from sqlalchemy import select
@@ -70,21 +70,20 @@ async def _request_with_retry(
     headers: Optional[Dict[str, str]] = None,
     max_retries: int = 3,
     backoff_base: float = 0.5,
+    interval: float = 0.0,
     label: str = "",
 ) -> Optional[Dict[str, Any]]:
-    """带指数退避的 HTTP 请求，返回 JSON dict；重试耗尽返回 None。"""
+    """带指数退避与限流的 HTTP 请求，返回 JSON dict；重试耗尽返回 None。"""
     for attempt in range(max_retries):
+        if interval > 0:
+            await asyncio.sleep(interval)
         try:
             response = await client.request(
                 method, url, params=params, headers=headers
             )
             response.raise_for_status()
             return response.json()
-        except (
-            httpx.HTTPStatusError,
-            httpx.TimeoutException,
-            httpx.ConnectError,
-        ) as exc:
+        except (httpx.HTTPStatusError, httpx.RequestError) as exc:
             if attempt < max_retries - 1:
                 wait = backoff_base * (2**attempt)
                 logger.warning(
@@ -147,6 +146,7 @@ async def fetch_conversations_paginated(
             headers=headers,
             max_retries=max_retries,
             backoff_base=backoff_base,
+            interval=interval,
             label=f"Dify conversations (user={user})",
         )
         if data is None:
@@ -164,8 +164,6 @@ async def fetch_conversations_paginated(
                 f"(user={user}): has_more=true but no cursor/items in "
                 f"response; refusing to truncate history"
             )
-        if interval > 0:
-            await asyncio.sleep(interval)
     return collected, complete
 
 
@@ -206,6 +204,7 @@ async def fetch_messages_paginated(
             headers=headers,
             max_retries=max_retries,
             backoff_base=backoff_base,
+            interval=interval,
             label=f"Dify messages (conv={conversation_id})",
         )
         if data is None:
@@ -225,8 +224,6 @@ async def fetch_messages_paginated(
                 f"(conversation={conversation_id}): has_more=true but no "
                 f"cursor/items in response; refusing to truncate history"
             )
-        if interval > 0:
-            await asyncio.sleep(interval)
     return collected, complete
 
 
@@ -368,10 +365,6 @@ async def backfill_user(
                 db.add(dialogue)
                 known_ids.add(dialogue.external_message_id)
                 stats.inserted += 1
-        # 页间限流由 fetch 内部处理；conversation 之间也保持间隔
-        if interval > 0:
-            await asyncio.sleep(interval)
-
     if stats.inserted > 0:
         try:
             await db.commit()
