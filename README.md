@@ -137,6 +137,8 @@ cp .env.example .env
 | `VITE_LIVE2D_MODEL` | Live2D 模型名称（可选，默认 `hiyori`） |
 | `VITE_ADH_IFRAME_ORIGIN` | 数字人 iframe 的 origin，用于 postMessage 安全校验（可选，默认 `*`） |
 
+> **用户认证**（前端）：登录/注册页为顶层路由 `/login`、`/register`，访客端与管理后台均可直达；游客模式免登录直接使用。token 持久化于浏览器 `localStorage`（`auth_token`/`auth_user`），对话页自动携带 token（iframe `auth_token` 参数透传 ADH）。**无需新增前端环境变量**；后端 JWT 相关配置（`JWT_SECRET`、`JWT_EXPIRES_MINUTES`、`GUEST_TOKEN_EXPIRES_MINUTES`）见 `digitalHumanApi/.env.example`。
+
 ### 2. 快速启动（一键后台）
 
 以下命令在 PowerShell 中执行，将所有服务以后台窗口启动：

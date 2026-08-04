@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { RouterLink, RouterView } from 'vue-router'
+import { RouterLink, RouterView, useRoute } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
+
+const auth = useAuthStore()
+const route = useRoute()
+
+/** 登录/注册链接携带当前路径，登录后可跳回原页面。 */
+function withRedirect(path: string) {
+  return { path, query: { redirect: route.fullPath } }
+}
 </script>
 
 <template>
@@ -13,6 +22,17 @@ import { RouterLink, RouterView } from 'vue-router'
         <RouterLink to="/visitor">首页</RouterLink>
         <RouterLink to="/visitor/chat">数字人</RouterLink>
       </nav>
+      <div class="auth-area">
+        <template v-if="auth.isLoggedIn">
+          <span class="auth-user">{{ auth.displayName }}</span>
+          <button type="button" class="auth-btn" @click="auth.logout()">退出</button>
+        </template>
+        <template v-else>
+          <span v-if="auth.isGuest" class="auth-user">游客</span>
+          <RouterLink :to="withRedirect('/login')" class="auth-link">登录</RouterLink>
+          <RouterLink :to="withRedirect('/register')" class="auth-link">注册</RouterLink>
+        </template>
+      </div>
     </header>
 
     <main class="visitor-main">
@@ -97,6 +117,49 @@ nav a.router-link-active {
 .visitor-main {
   flex: 1;
   width: 100%;
+}
+
+/* ── Auth area ── */
+.auth-area {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  margin-left: var(--space-xl);
+  white-space: nowrap;
+}
+
+.auth-user {
+  font-size: var(--text-small);
+  color: var(--color-ink-secondary);
+}
+
+.auth-link {
+  font-size: var(--text-small);
+  color: var(--color-ink-secondary);
+  text-decoration: none;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+
+.auth-link:hover {
+  color: var(--color-accent);
+}
+
+.auth-btn {
+  padding: 2px var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-ink-secondary);
+  font-size: var(--text-caption);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.auth-btn:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
 }
 
 .visitor-footer {

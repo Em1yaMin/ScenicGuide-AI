@@ -43,6 +43,13 @@ export const useVisitorStore = defineStore('visitor', () => {
 })
 ```
 
+## Auth Store Pattern（stores/auth.ts）
+```ts
+// token 持久化 localStorage：auth_token（JWT）+ auth_user（用户信息 JSON）
+// 游客兜底：enterGuestMode() 签发短期游客 token；App.vue 启动时 restoreSession() 校验 /auth/me
+// 注入请求头：authHeaders() → { Authorization: 'Bearer <token>' }（未登录返回空对象，保持向后兼容）
+```
+
 ## Router Pattern
 ```ts
 // router/index.ts — 嵌套布局路由

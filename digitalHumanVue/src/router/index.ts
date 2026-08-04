@@ -23,6 +23,9 @@ const router = createRouter({
         { path: 'knowledge', name: 'admin-knowledge', component: () => import('@/views/admin/KnowledgeView.vue') },
       ],
     },
+    // 认证页为顶层路由：访客端与管理后台均可直达
+    { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue') },
+    { path: '/register', name: 'register', component: () => import('@/views/RegisterView.vue') },
   ],
 })
 
