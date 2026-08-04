@@ -284,16 +284,19 @@ async def search_documents(
         return []
 
 
-def get_rag_meta() -> dict:
+def get_rag_meta(namespaces: Optional[List[str]] = None) -> dict:
     """当前 RAG 检索链路的可观测元信息（embedding 后端与降级状态）。
 
-    遍历默认公共命名空间，汇总 embedding 后端与降级标记，
-    供检索/索引接口透出（降级时响应中带可观测标记）。
+    按给定命名空间（默认公共命名空间 knowledge+documents）汇总
+    embedding 后端与降级标记，供检索/索引接口透出
+    （降级时响应中带可观测标记）。
     """
+    if namespaces is None:
+        namespaces = normalize_namespaces(None)
     backends = set()
     degraded = False
     degraded_reason = ""
-    for ns in normalize_namespaces(None):
+    for ns in namespaces:
         try:
             vectorstore = get_vectorstore_for_namespace(ns)
             backends.add(vectorstore.embedding_backend)

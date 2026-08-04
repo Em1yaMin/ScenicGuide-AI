@@ -46,8 +46,8 @@ async def rag_search(request: RagSearchRequest) -> RagSearchResponse:
         namespace=request.namespace,
     )
     context = build_rag_context(results)
-    meta = get_rag_meta()
     searched_namespaces = normalize_namespaces(request.namespace)
+    meta = get_rag_meta(namespaces=searched_namespaces)
 
     logger.info(
         "RAG search: query='%s', top_k=%d, found=%d, backend=%s, degraded=%s",
