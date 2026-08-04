@@ -56,6 +56,7 @@ async def register_user(db: AsyncSession, request: RegisterRequest) -> User:
         await db.flush()
     except IntegrityError:
         # 并发注册竞态兜底：唯一约束冲突
+        await db.rollback()
         logger.warning("用户名注册竞态冲突（唯一约束）: %s", request.username)
         raise AuthError("用户名已存在", 409)
     logger.info("新用户注册成功: %s (id=%s)", request.username, user.id)
