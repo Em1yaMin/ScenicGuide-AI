@@ -18,7 +18,7 @@ digitalHumanApi/          # Python FastAPI 后端
     schemas/              # Pydantic v2 请求/响应模型 → schemas/CLAUDE.md
     services/             # 业务逻辑、外部 API 客户端 → services/CLAUDE.md
     routers/              # FastAPI HTTP 端点 → routers/CLAUDE.md
-    tasks/                # 后台 asyncio 循环（polling、analysis）
+    tasks/                # 后台 asyncio 循环（polling、analysis）+ 一次性补拉 CLI（backfill，详见 doc/dify-data-migration-report.md）
   tests/                  # pytest 测试套件 → tests/CLAUDE.md
 
 digitalHumanVue/          # Vue 3 + TypeScript + Vite 前端

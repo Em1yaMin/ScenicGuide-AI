@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.dialogue import Dialogue
 from app.models.visitor import Visitor
 from app.tasks.backfill import (
-    BackfillStats,
     backfill_user,
     fetch_conversations_paginated,
     fetch_messages_paginated,
