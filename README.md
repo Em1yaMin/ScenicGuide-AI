@@ -118,6 +118,9 @@ cp .env.example .env
 | `OPENAI_API_KEY` | OpenAI API Key（用于 LangChain AI 运营分析，不配置时回退到纯 DB 统计） |
 | `OPENAI_API_BASE` | OpenAI API 基础地址（可选，默认官方地址） |
 | `OPENAI_MODEL` | OpenAI 模型名（默认 `gpt-4o-mini`） |
+| `EMBEDDING_API_KEY` | Minimax Embedding API Key（RAG 向量化，与 OPENAI_* 独立；不配置时自动降级本地 TF-IDF，详见 AGENTS.md「本地 RAG 知识库」） |
+| `EMBEDDING_API_BASE` | Minimax OpenAI 兼容端点（默认 `https://api.minimaxi.com/v1`，参考官方 Embedding 文档） |
+| `EMBEDDING_MODEL` | Embedding 模型名（默认 `embedding-1`） |
 | `SSH_HOST` / `SSH_PORT` / `SSH_USER` / `SSH_PASSWORD` | 部署 Dify 的远程服务器（可选） |
 
 **前端** — 复制并填写 `digitalHumanVue/.env`：

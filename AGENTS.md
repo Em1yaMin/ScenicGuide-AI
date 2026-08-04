@@ -12,7 +12,7 @@
 digitalHumanApi/          # Python FastAPI 后端
   app/
     main.py               # 应用入口（lifespan、CORS、全局异常处理、router 注册）
-    core/                 # config.py (Settings) + database.py + rag.py (轻量 TF-IDF + numpy 矩阵检索)
+    core/                 # config.py (Settings) + database.py + embedding.py (Embedding 工厂/Minimax) + rag.py (命名空间向量存储)
     data/                 # 本地 JSON 数据源（景点、路线）
     models/               # SQLAlchemy 2.0 ORM 实体 → models/CLAUDE.md
     schemas/              # Pydantic v2 请求/响应模型 → schemas/CLAUDE.md
@@ -40,9 +40,10 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 ## 本地 RAG 知识库（无外部向量库依赖）
 
-- `app/core/rag.py` — 轻量 TF-IDF 向量化（检索阶段用 numpy 矩阵乘法加速余弦相似度）+ 文件持久化，兼容 langchain_core `Document`/`Embeddings` 接口；向量持久化到 `rag_data/`（已 gitignore），文档源为根目录 `doc/`
-- `app/services/rag_service.py` — 文档加载、分块、向量化、检索；`RAG_MAX_CONTEXT_LEN`（默认 2000）控制注入上下文长度
-- `app/routers/rag.py` — `POST /api/rag/search`、`POST /api/rag/index`、`GET /api/rag/status`
+- `app/core/embedding.py` — Embedding 选择工厂 + `MinimaxEmbeddings`（OpenAI 兼容 `/embeddings` 端点，httpx 实现，配置 `EMBEDDING_API_KEY` 启用，与对话 LLM 的 `OPENAI_*` 完全独立）；未配置 key 或 API 失败时自动降级本地 TF-IDF（日志告警，`degraded` 标记透出到检索响应）
+- `app/core/rag.py` — 命名空间隔离向量存储（knowledge / documents / user_memory，各自独立索引与 `rag_data/` 持久化文件；documents 复用旧集合名 `scenic_knowledge` 兼容升级前数据）；检索阶段 numpy 矩阵乘法加速余弦相似度；兼容 langchain_core `Document`/`Embeddings` 接口
+- `app/services/rag_service.py` — 文档加载、分块、向量化、检索；`RAG_MAX_CONTEXT_LEN`（默认 2000）控制注入上下文长度；`search_documents`/`index_documents` 均接受 `namespace` 参数（默认检索 knowledge+documents 公共命名空间）
+- `app/routers/rag.py` — `POST /api/rag/search`（`namespace` 参数，响应含 `namespaces`/`embedding_backend`/`degraded` 标记）、`POST /api/rag/index`（默认写入 documents 命名空间）、`GET /api/rag/status`（各命名空间状态）
 - `app/routers/dialogue.py` — `POST /api/v1/dialogue/chat` 支持 RAG 增强（`use_rag`、`rag_top_k` 参数；RAG 无结果时回退正常 Dify 调用）；另有 `/api/v1/dialogue/rag-context` 供 ADH 调用
 
 ## 知识库管理（X-Admin-Token 认证）
@@ -99,7 +100,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 <important if="you are writing or modifying tests">
 ## 测试
-- 后端: pytest + 内存 SQLite（见 tests/CLAUDE.md），不使用 mock 库
+- 后端: pytest + 内存 SQLite（见 tests/CLAUDE.md），不使用第三方 mock 库（允许 pytest 内置 monkeypatch 与 httpx.MockTransport）
 - 前端: 暂无测试基础设施
 </important>
 
