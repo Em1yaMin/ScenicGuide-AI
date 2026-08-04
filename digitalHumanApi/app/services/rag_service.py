@@ -2,8 +2,9 @@
 RAG 服务层：文档加载、分块、向量化、存储、检索。
 
 支持从 doc/ 目录加载景区资料（.md、.txt 文件），
-使用纯 Python TF-IDF 向量化 + 文件持久化存储，
-无需 chromadb、sentence-transformers 等外部依赖。
+向量化后端由 app/core/embedding.py 工厂选择（Minimax Embedding API，
+不可用时自动降级本地 TF-IDF），文件持久化存储，
+无需 chromadb、sentence-transformers 等外部向量库服务。
 """
 
 import logging
