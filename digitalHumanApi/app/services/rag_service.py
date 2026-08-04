@@ -18,7 +18,8 @@ from app.core.rag import (
     CHUNK_SIZE,
     DEFAULT_DOC_DIR,
     DEFAULT_TOP_K,
-    get_vectorstore,
+    get_vectorstore_for_namespace,
+    normalize_namespaces,
 )
 
 logger = logging.getLogger(__name__)
@@ -173,24 +174,37 @@ def _split_by_separators(text: str, separators: List[str]) -> List[str]:
 
 def _index_documents_sync(
     doc_dir: Optional[Path] = None,
-    collection_name: str = "scenic_knowledge",
+    namespace: Optional[str] = None,
 ) -> dict:
     """同步执行全量文档索引。
 
     流程: 加载 → 分块 → 向量化 → 存储
+
+    Args:
+        doc_dir: 文档目录，默认 doc/
+        namespace: 目标命名空间（默认 documents；索引 doc/ 文档）
+
+    Returns:
+        {"status", "documents", "chunks", "namespace", "embedding_backend",
+         "degraded", "degraded_reason"}
     """
     doc_dir = doc_dir or DEFAULT_DOC_DIR
+    namespaces = normalize_namespaces(namespace)
+    if len(namespaces) != 1:
+        # 索引接口只接受单一命名空间，避免同一批 doc/ 文档写入多个命名空间
+        raise ValueError(f"索引接口的 namespace 参数需为单一命名空间，收到: {namespaces}")
+    ns = namespaces[0]
 
     # 加载
     documents = _load_documents(doc_dir)
     if not documents:
-        return {"status": "empty", "documents": 0, "chunks": 0}
+        return {"status": "empty", "documents": 0, "chunks": 0, "namespace": ns}
 
     # 分块
     chunks = _split_documents(documents)
 
     # 构建向量库
-    vectorstore = get_vectorstore(collection_name=collection_name)
+    vectorstore = get_vectorstore_for_namespace(ns)
     vectorstore.clear()  # 全量重建
     vectorstore.add_documents(chunks)
 
@@ -198,12 +212,16 @@ def _index_documents_sync(
         "status": "ok",
         "documents": len(documents),
         "chunks": len(chunks),
+        "namespace": ns,
+        "embedding_backend": vectorstore.embedding_backend,
+        "degraded": vectorstore.degraded,
+        "degraded_reason": vectorstore.degraded_reason,
     }
 
 
 async def index_documents(
     doc_dir: Optional[Path] = None,
-    collection_name: str = "scenic_knowledge",
+    namespace: Optional[str] = None,
 ) -> dict:
     """执行全量文档索引。
 
@@ -211,48 +229,78 @@ async def index_documents(
 
     Args:
         doc_dir: 文档目录，默认 doc/
-        collection_name: 集合名称
+        namespace: 目标命名空间（默认 documents）
 
     Returns:
-        {"status": str, "documents": int, "chunks": int}
+        {"status": str, "documents": int, "chunks": int, "namespace": str}
     """
     import asyncio
     return await asyncio.get_running_loop().run_in_executor(
-        None, _index_documents_sync, doc_dir, collection_name
+        None, _index_documents_sync, doc_dir, namespace
     )
 
 
 async def search_documents(
     query: str,
     top_k: int = DEFAULT_TOP_K,
-    collection_name: str = "scenic_knowledge",
+    namespace: Optional[str] = None,
 ) -> List[dict]:
-    """检索与查询最相关的文档片段。
+    """检索与查询最相关的文档片段（可在多个命名空间内联合检索）。
 
     Args:
         query: 查询文本
         top_k: 返回结果数量
-        collection_name: 集合名称
+        namespace: 命名空间（逗号分隔多个），默认 knowledge+documents
 
     Returns:
-        [{"content": str, "source": str, "score": float}, ...]
+        [{"content": str, "source": str, "score": float, "namespace": str}, ...]
     """
     try:
-        vectorstore = get_vectorstore(collection_name=collection_name)
+        namespaces = normalize_namespaces(namespace)
+        all_results: List[dict] = []
 
-        results = vectorstore.similarity_search_with_score(query, k=top_k)
+        for ns in namespaces:
+            vectorstore = get_vectorstore_for_namespace(ns)
+            results = vectorstore.similarity_search_with_score(query, k=top_k)
+            for doc, score in results:
+                all_results.append({
+                    "content": doc.page_content,
+                    "source": doc.metadata.get("filename", doc.metadata.get("source", "")),
+                    "score": float(score),
+                    "namespace": ns,
+                })
 
-        return [
-            {
-                "content": doc.page_content,
-                "source": doc.metadata.get("filename", doc.metadata.get("source", "")),
-                "score": float(score),
-            }
-            for doc, score in results
-        ]
+        # 跨命名空间合并：按分数降序取 top_k（分数并列时保持稳定顺序）
+        all_results.sort(key=lambda r: -r["score"])
+        return all_results[:top_k]
     except Exception as e:
         logger.warning("RAG search failed: %s", e)
         return []
+
+
+def get_rag_meta() -> dict:
+    """当前 RAG 检索链路的可观测元信息（embedding 后端与降级状态）。
+
+    遍历默认公共命名空间，汇总 embedding 后端与降级标记，
+    供检索/索引接口透出（降级时响应中带可观测标记）。
+    """
+    backends = set()
+    degraded = False
+    degraded_reason = ""
+    for ns in normalize_namespaces(None):
+        try:
+            vectorstore = get_vectorstore_for_namespace(ns)
+            backends.add(vectorstore.embedding_backend)
+            if vectorstore.degraded:
+                degraded = True
+                degraded_reason = vectorstore.degraded_reason
+        except Exception as e:
+            logger.warning("get_rag_meta failed for namespace %s: %s", ns, e)
+    return {
+        "embedding_backend": ",".join(sorted(backends)) or "unknown",
+        "degraded": degraded,
+        "degraded_reason": degraded_reason,
+    }
 
 
 def build_rag_context(search_results: List[dict]) -> str:

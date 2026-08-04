@@ -1,7 +1,11 @@
 """
 RAG 核心配置与向量存储。
 
-使用轻量 TF-IDF 向量化 + 文件持久化（无需外部向量库），
+向量化支持两种后端（由 app/core/embedding.py 的工厂选择）：
+- Minimax Embedding API（配置 EMBEDDING_API_KEY 时启用）
+- 轻量 TF-IDF（默认/降级路径，无外部依赖）
+
+存储为命名空间隔离的文件持久化（无需外部向量库），
 检索阶段用 numpy 矩阵乘法加速余弦相似度计算。
 兼容 langchain_core 的 Document 和 Embeddings 接口。
 """
@@ -22,6 +26,8 @@ import numpy as np
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
+from app.core.embedding import get_embedding_model
+
 logger = logging.getLogger(__name__)
 
 # 持久化目录
@@ -37,6 +43,35 @@ CHUNK_OVERLAP: int = int(os.environ.get("RAG_CHUNK_OVERLAP", "50"))
 
 
 # ---------------------------------------------------------------------------
+# 命名空间定义
+# ---------------------------------------------------------------------------
+
+# 命名空间：每个命名空间拥有独立向量索引与独立持久化文件，检索互不命中。
+# - knowledge:   知识库条目（管理后台录入，预留索引接入）
+# - documents:   doc/ 目录文档（现有全量索引）
+# - user_memory: 用户长期记忆（预留，本阶段仅保留接口与持久化目录）
+NAMESPACE_KNOWLEDGE = "knowledge"
+NAMESPACE_DOCUMENTS = "documents"
+NAMESPACE_USER_MEMORY = "user_memory"
+ALL_NAMESPACES: Tuple[str, ...] = (
+    NAMESPACE_KNOWLEDGE,
+    NAMESPACE_DOCUMENTS,
+    NAMESPACE_USER_MEMORY,
+)
+# 默认公共检索命名空间
+DEFAULT_SEARCH_NAMESPACES: Tuple[str, ...] = (NAMESPACE_KNOWLEDGE, NAMESPACE_DOCUMENTS)
+
+# 命名空间 → 持久化集合名（即 rag_data/ 下的文件前缀）。
+# documents 复用旧集合名 "scenic_knowledge"，保证升级前已持久化的
+# doc/ 文档数据（rag_data/scenic_knowledge_*.json）无需重建即可继续命中。
+NAMESPACE_COLLECTIONS: dict = {
+    NAMESPACE_KNOWLEDGE: "knowledge",
+    NAMESPACE_DOCUMENTS: "scenic_knowledge",
+    NAMESPACE_USER_MEMORY: "user_memory",
+}
+
+
+# ---------------------------------------------------------------------------
 # 轻量 TF-IDF Embeddings
 # ---------------------------------------------------------------------------
 
@@ -47,7 +82,10 @@ class TFIDFEmbeddings(Embeddings):
     - 无需 scikit-learn、sentence-transformers 等外部向量库依赖
     - 支持中文分词（基于字符 bigram + unigram）
     - 支持增量添加文档
+    - 作为 Embedding API 不可用时的降级路径
     """
+
+    backend_name: str = "tfidf"
 
     def __init__(self):
         self._vocabulary: dict = {}          # token → id
@@ -209,28 +247,48 @@ class TFIDFEmbeddings(Embeddings):
 class SimpleVectorStore:
     """简单的文件持久化向量存储。
 
-    使用 TF-IDF 向量 + 余弦相似度进行检索；
+    使用 Embeddings 接口向量化（Minimax API 或本地 TF-IDF）+ 余弦相似度检索；
     检索时向量以 numpy 矩阵形态一次性做矩阵乘法（X @ q），
     避免逐向量 Python 循环，大幅提升检索速度。
     持久化到 JSON 文件，兼容离线环境。
+
+    Embedding API 不可用（未配置 key / 网络失败）时自动降级为本地 TF-IDF：
+    - 记录告警日志，并通过 `degraded` / `degraded_reason` / `embedding_backend`
+      暴露可观测标记（检索接口会透出）。
+    - 降级后向量化/检索继续可用，对话链路不中断。
     """
 
     def __init__(
         self,
         collection_name: str = "scenic_knowledge",
         persist_dir: Optional[Path] = None,
+        embedding: Optional[Embeddings] = None,
     ):
         self.collection_name = collection_name
         self.persist_dir = Path(persist_dir) if persist_dir else RAG_DATA_DIR
         self.persist_dir.mkdir(parents=True, exist_ok=True)
 
-        self.embedding = TFIDFEmbeddings()
+        # 主 embedding（工厂按配置选择 Minimax API 或 TF-IDF）
+        self.embedding: Embeddings = embedding or get_embedding_model()
+        # 当前生效的 embedding（API 失败降级后指向 TF-IDF 备份）
+        self._active_embedding: Embeddings = self.embedding
+        # TF-IDF 降级备份（仅在主 embedding 为 API 且失败时惰性构建）
+        self._tfidf_backup: Optional[TFIDFEmbeddings] = None
+        # 降级标记（可观测）
+        self.degraded: bool = False
+        self.degraded_reason: str = ""
+
         self._documents: List[Document] = []
         self._vectors: List[List[float]] = []
         self._vector_matrix: Optional[np.ndarray] = None  # float32 矩阵缓存
 
         # 尝试加载已有数据
         self._load()
+
+    @property
+    def embedding_backend(self) -> str:
+        """当前生效的 embedding 后端（minimax / tfidf），用于可观测标记。"""
+        return getattr(self._active_embedding, "backend_name", "unknown")
 
     @property
     def _docs_path(self) -> Path:
@@ -257,8 +315,9 @@ class SimpleVectorStore:
         """从磁盘加载向量存储。"""
         lock = self._acquire_file_lock()
         try:
-            # 加载词汇表
-            self.embedding.load(self._vocab_path)
+            # 本地 TF-IDF 时加载词汇表（API embedding 无词汇表概念）
+            if isinstance(self.embedding, TFIDFEmbeddings):
+                self.embedding.load(self._vocab_path)
 
             # 加载文档
             if self._docs_path.exists():
@@ -272,19 +331,23 @@ class SimpleVectorStore:
                         )
                         for d in data
                     ]
-                    # 重新向量化
-                    if self._documents and self.embedding.is_fitted:
-                        texts = [d.page_content for d in self._documents]
-                        self._vectors = self.embedding.embed_documents(texts)
-                        self._refresh_matrix()
-                    elif self._documents and not self.embedding.is_fitted:
-                        logger.warning(
-                            "Documents loaded but vocabulary missing; "
-                            "clearing documents to avoid silent inconsistency. "
-                            "Run /index to rebuild."
-                        )
-                        self._documents = []
-                        self._vectors = []
+                    # 重新向量化（API embedding 失败时自动降级 TF-IDF）
+                    if self._documents:
+                        if (
+                            isinstance(self.embedding, TFIDFEmbeddings)
+                            and not self.embedding.is_fitted
+                        ):
+                            logger.warning(
+                                "Documents loaded but vocabulary missing; "
+                                "clearing documents to avoid silent inconsistency. "
+                                "Run /index to rebuild."
+                            )
+                            self._documents = []
+                            self._vectors = []
+                        else:
+                            texts = [d.page_content for d in self._documents]
+                            self._vectors = self._embed_documents_safe(texts)
+                            self._refresh_matrix()
                     logger.info(
                         "Loaded %d documents from %s",
                         len(self._documents),
@@ -301,8 +364,8 @@ class SimpleVectorStore:
         """持久化到磁盘。"""
         lock = self._acquire_file_lock()
         try:
-            # 保存词汇表
-            if self.embedding.is_fitted:
+            # 保存词汇表（仅本地 TF-IDF 后端需要）
+            if isinstance(self.embedding, TFIDFEmbeddings) and self.embedding.is_fitted:
                 self.embedding.save(self._vocab_path)
 
             # 保存文档
@@ -323,14 +386,18 @@ class SimpleVectorStore:
         if not documents:
             return
 
-        # 拟合/更新 TF-IDF
+        # 拟合/更新 TF-IDF 词汇表（仅本地后端需要）
         all_docs = self._documents + documents
-        self.embedding.fit(all_docs)
-
-        # 重新向量化全部文档
-        texts = [d.page_content for d in all_docs]
-        self._vectors = self.embedding.embed_documents(texts)
         self._documents = all_docs
+        if isinstance(self.embedding, TFIDFEmbeddings):
+            self.embedding.fit(all_docs)
+        # 已降级到 TF-IDF 备份时，用全量文档重新拟合词汇表（包含新增文档）
+        if self._tfidf_backup is not None:
+            self._tfidf_backup.fit(all_docs)
+
+        # 重新向量化全部文档（API 失败自动降级 TF-IDF）
+        texts = [d.page_content for d in all_docs]
+        self._vectors = self._embed_documents_safe(texts)
         self._refresh_matrix()
 
         self._save()
@@ -357,7 +424,7 @@ class SimpleVectorStore:
         if not self._documents:
             return []
 
-        query_vec = self.embedding.embed_query(query)
+        query_vec = self._embed_query_safe(query)
 
         # 惰性重建矩阵（防止外部直接改动 _vectors 导致不一致）
         if self._vector_matrix is None or len(self._vector_matrix) != len(
@@ -429,13 +496,56 @@ class SimpleVectorStore:
             self._documents = []
             self._vectors = []
             self._vector_matrix = None
-            self.embedding = TFIDFEmbeddings()
+            # 重置 embedding（重新走工厂，可能恢复为 API 后端）
+            self.embedding = get_embedding_model()
+            self._active_embedding = self.embedding
+            self._tfidf_backup = None
+            self.degraded = False
+            self.degraded_reason = ""
             if self._docs_path.exists():
                 self._docs_path.unlink()
             if self._vocab_path.exists():
                 self._vocab_path.unlink()
         finally:
             self._release_file_lock(lock)
+
+    # -- Embedding 降级支持 --
+
+    def _embed_documents_safe(self, texts: List[str]) -> List[List[float]]:
+        """向量化文档列表；API 失败时降级到本地 TF-IDF。"""
+        try:
+            return self._active_embedding.embed_documents(texts)
+        except Exception as e:
+            backup = self._activate_tfidf_fallback("文档向量化", e)
+            return backup.embed_documents(texts)
+
+    def _embed_query_safe(self, text: str) -> List[float]:
+        """向量化查询；API 失败时降级到本地 TF-IDF。"""
+        try:
+            return self._active_embedding.embed_query(text)
+        except Exception as e:
+            backup = self._activate_tfidf_fallback("查询向量化", e)
+            return backup.embed_query(text)
+
+    def _activate_tfidf_fallback(self, operation: str, error: Exception) -> TFIDFEmbeddings:
+        """激活 TF-IDF 降级路径（幂等）：惰性构建备份并标记降级。
+
+        降级后立即用备份重新向量化已存文档，保证文档向量与查询向量
+        同源同维度（API 向量与 TF-IDF 向量维度不同，混用会导致矩阵乘法失败）。
+        """
+        if self._tfidf_backup is None:
+            self._tfidf_backup = TFIDFEmbeddings()
+            if self._documents:
+                self._tfidf_backup.fit(self._documents)
+        self._active_embedding = self._tfidf_backup
+        if self._documents:
+            texts = [d.page_content for d in self._documents]
+            self._vectors = self._tfidf_backup.embed_documents(texts)
+            self._refresh_matrix()
+        self.degraded = True
+        self.degraded_reason = f"Embedding API 不可用（{operation}）: {error}"
+        logger.warning("RAG 降级为本地 TF-IDF（%s）: %s", operation, error)
+        return self._tfidf_backup
 
 
 # ---------------------------------------------------------------------------
@@ -479,6 +589,37 @@ def get_vectorstore(
     return _vectorstore
 
 
-def get_embedding_model() -> TFIDFEmbeddings:
-    """获取当前向量存储的 embedding 模型。"""
-    return get_vectorstore().embedding
+def get_vectorstore_for_namespace(namespace: str = NAMESPACE_DOCUMENTS) -> SimpleVectorStore:
+    """获取指定命名空间的向量存储单例（每个命名空间独立索引与持久化）。
+
+    Args:
+        namespace: 命名空间，可选 knowledge / documents / user_memory
+
+    Raises:
+        ValueError: 未知命名空间
+    """
+    if namespace not in NAMESPACE_COLLECTIONS:
+        raise ValueError(
+            f"未知 RAG 命名空间: {namespace!r}，可选: {', '.join(ALL_NAMESPACES)}"
+        )
+    return get_vectorstore(collection_name=NAMESPACE_COLLECTIONS[namespace])
+
+
+def normalize_namespaces(namespace: Optional[str]) -> List[str]:
+    """解析 namespace 参数（逗号分隔的字符串）。
+
+    未传或为空时返回默认公共命名空间（knowledge + documents）；
+    非法命名空间告警剔除；全部非法时回退默认值。
+    """
+    raw = namespace or ",".join(DEFAULT_SEARCH_NAMESPACES)
+    namespaces: List[str] = []
+    for item in raw.split(","):
+        ns = item.strip()
+        if ns in NAMESPACE_COLLECTIONS:
+            namespaces.append(ns)
+        else:
+            logger.warning("忽略未知 RAG 命名空间: %r", ns)
+    if not namespaces:
+        logger.warning("namespace 参数无有效值（%r），回退默认命名空间", raw)
+        namespaces = list(DEFAULT_SEARCH_NAMESPACES)
+    return namespaces
