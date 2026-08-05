@@ -26,6 +26,7 @@ import json
 import logging
 import threading
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -53,8 +54,12 @@ SYSTEM_PROMPT = """你是「景区导览」的 AI 数字人助手，运行在景
 
 # 对话输出上限（token）：经 llm.py 工厂 extra_body 注入，DeepSeek 系端点生效
 _CHAT_MAX_TOKENS = 2048
+# LLM 调用超时（秒），与 Dify 兜底路径的 60s 超时一致，挂起时尽快触发回落
+_CHAT_TIMEOUT = 60
 # 进程内会话保留的最大消息数（超限丢弃最早的，按 20 条 ≈ 10 轮）
 _MAX_HISTORY_MESSAGES = 20
+# 进程内会话总数上限（超限 LRU 淘汰最久未活跃会话，防长跑进程内存无限增长）
+_MAX_CONVERSATIONS = 1000
 # 知识检索工具的调用名（用于从 agent 返回中提取 RAG 来源）
 _KNOWLEDGE_TOOL_NAME = "search_knowledge"
 
@@ -97,8 +102,15 @@ _TOOLS: List[Any] = [
 
 # ── 进程内会话存储（阶段1：不持久化） ─────────────────────────────────────
 
-_conversations: Dict[str, List[BaseMessage]] = {}
+_conversations: "OrderedDict[str, List[BaseMessage]]" = OrderedDict()
 _conversations_lock = threading.Lock()
+
+
+def _evict_locked() -> None:
+    """LRU 淘汰最久未活跃会话（须在持有 _conversations_lock 时调用）。"""
+    while len(_conversations) > _MAX_CONVERSATIONS:
+        oldest_id, _ = _conversations.popitem(last=False)
+        logger.info("会话数超限，淘汰最久未活跃会话: conversation_id=%s", oldest_id)
 
 
 def _get_or_create_conversation(conversation_id: str) -> str:
@@ -107,14 +119,23 @@ def _get_or_create_conversation(conversation_id: str) -> str:
         if not conversation_id or conversation_id not in _conversations:
             conversation_id = conversation_id or uuid.uuid4().hex
             _conversations[conversation_id] = []
+            _evict_locked()
             logger.info("新建对话会话: conversation_id=%s", conversation_id)
+        else:
+            _conversations.move_to_end(conversation_id)
         return conversation_id
 
 
 def _append_history(conversation_id: str, query: str, answer: str) -> None:
     """追加一轮问答到会话历史，超限丢弃最早消息。"""
     with _conversations_lock:
-        history = _conversations.setdefault(conversation_id, [])
+        history = _conversations.get(conversation_id)
+        if history is None:
+            history = []
+            _conversations[conversation_id] = history
+            _evict_locked()
+        else:
+            _conversations.move_to_end(conversation_id)
         history.append(HumanMessage(content=query))
         history.append(AIMessage(content=answer))
         if len(history) > _MAX_HISTORY_MESSAGES:
@@ -133,7 +154,7 @@ def clear_conversation(conversation_id: str) -> None:
 def _build_agent(*, use_rag: bool, llm: Optional[Any] = None) -> Any:
     """构建 LangChain tool-calling agent（create_agent，langchain 1.x 状态图）。"""
     if llm is None:
-        llm = get_chat_llm(max_tokens=_CHAT_MAX_TOKENS)
+        llm = get_chat_llm(max_tokens=_CHAT_MAX_TOKENS, timeout=_CHAT_TIMEOUT)
     tools = list(_TOOLS) if use_rag else [
         t for t in _TOOLS if t.name != _KNOWLEDGE_TOOL_NAME
     ]
