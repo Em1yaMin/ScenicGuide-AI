@@ -24,7 +24,7 @@
 **引擎配置**:
 - **ASR**: 腾讯云实时语音识别 (TencentAPI)
 - **TTS**: MiniMax API (`speech-2.8-hd` + `Chinese_sweet_girl_nv1` 音色)
-- **Agent**: Dify Chat Agent（与主项目共用 Dify 实例 `YOUR_DIFY_SERVER_IP`）
+- **Agent**: LangChainAgent（默认，走本后端 `POST /api/v1/dialogue/chat` LangChain 主链路，后端侧异常自动回落 Dify）；DifyAgent（直连 Dify Chat Agent）保留可切换
 
 启动步骤见上方「**4. 启动本地数字人服务**」。详细部署步骤与故障排查见 `AGENTS.md`（ADH 专节）或 `doc/local-digital-human-deploy-plan.md`。
 

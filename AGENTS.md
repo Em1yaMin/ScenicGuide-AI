@@ -142,12 +142,14 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 | 引擎 | 类型 | 配置 | 状态 |
 |------|------|------|------|
 | **TencentAPI** | ASR | `configs/engines/asr/tencentAPI.yaml` | 引擎可用，麦克风录音链路调试中 |
-| **DifyAgent** | Agent | `configs/agents/difyAgent.yaml` | 流式对话正常 |
+| **LangChainAgent** | Agent | `configs/agents/langchainAgent.yaml` | **默认引擎**，走本后端 `/api/v1/dialogue/chat`（LangChain 主链路，后端侧异常自动回落 Dify）；SSE 流式正常 |
+| **DifyAgent** | Agent | `configs/agents/difyAgent.yaml` | 保留可切换（fallback 不丢），直连 Dify Chat Agent |
 | **MiniMaxAPI** | TTS | `configs/engines/tts/minimaxTTS.yaml` | `Chinese_sweet_girl_nv1` 音色，替代 difyTTSWorkflow |
 
 ### 凭证位置（不存真实值）
 - **腾讯云 ASR**: AK/SK 来自腾讯云控制台下载的 SecretKey.csv；APPID、REGION `ap-guangzhou` 配置在 tencentAPI.yaml
-- **Dify Agent**: URL `http://<dify-server-ip>/v1` + `app-` 开头的 Key + User，由 Dify 部署方提供
+- **LangChainAgent**: `LLM_API_URL` 指向本后端（默认 `http://127.0.0.1:8000`），无鉴权场景可不填 token；`LLM_API_USER` 默认 `visitor`（可选 JWT token 走 Bearer 透传，见下方 SSE 契约）
+- **Dify Agent**: URL `http://<dify-server-ip>/v1` + `app-` 开头的 Key + User，由 Dify 部署方提供（切换回 DifyAgent 时填写）
 - **MiniMax TTS**: API Key 与 Group ID 来自 MiniMax 开放平台，Model `speech-2.8-hd`
 
 ### 启动命令
@@ -162,13 +164,15 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 ```
 
 ### 关键修改文件（相对于 ADH 根目录）
-- `configs/config_template.yaml` — SUPPORT_LIST 精简为仅目标引擎
-- `configs/engines/asr/tencentAPI.yaml`、`configs/engines/tts/minimaxTTS.yaml`（新建）、`configs/agents/difyAgent.yaml` — 引擎凭证
+- `configs/config_template.yaml` — SUPPORT_LIST 精简为仅目标引擎；AGENTS 默认 LangChainAgent（DifyAgent 保留可切换）
+- `configs/engines/asr/tencentAPI.yaml`、`configs/engines/tts/minimaxTTS.yaml`（新建）、`configs/agents/difyAgent.yaml`、`configs/agents/langchainAgent.yaml`（新建）— 引擎凭证/参数
 - `digitalHuman/engine/tts/minimaxTTS.py`（新建）+ `digitalHuman/engine/tts/__init__.py` — MiniMax TTS 引擎及注册
 - `digitalHuman/engine/asr/tencentASR.py` — 已移除 `req.AppId` 行
+- `digitalHuman/agent/core/langchainAgent.py`（新建）— LangChain 引擎：调本后端 `/api/v1/dialogue/chat`，SSE 解析（message 增量/step 忽略/conversation 事件），复用 `ThinkFilter` 过滤思考块；SSE 事件契约：`conversation`（含 conversation_id）/`message`（含 answer 增量）/`step`（忽略）/`error`/`[DONE]`，见代码头注释
 - `digitalHuman/agent/core/difyAgent.py` — 新增 `ThinkFilter`，流式过滤 `<think>` 标签
 - `digitalHuman/server/asrApi.py` — DEBUG 音频保存到 `debug_audio/`
 - `web/app/ui/home/chatbot.tsx` — 录音改用原生 `MediaRecorder` + 客户端 webm→WAV（16kHz 重采样）
+- `scripts/smoke_langchain_agent.py`（新建）— LangChainAgent 链路冒烟（需本后端已启动，`PYTHONPATH=. ./venv/bin/python scripts/smoke_langchain_agent.py`）
 
 ### ASR 已知问题
 - `tencentcloud-sdk-python-asr` v3.1.130 的 `SentenceRecognitionRequest` 无 `AppId` 字段，设置会序列化为 `PpId` 导致 `UnknownParameter` 错误 → 已移除该行
@@ -181,7 +185,8 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 - **嵌套 git**: ADH 为独立 git 仓库，改动不影响主仓库 `git status`
 - **前端启动**: 不要用 `pnpm dev`（会触发失败的依赖检查），直接用 `node node_modules/next/dist/bin/next dev -p 3000`
 - **Live2D 默认模型**: 已改为 Hiyori，首次访问需清 localStorage `character-storage`
-- **Agent think 过滤**: `difyAgent.py` 的 `ThinkFilter` 实时过滤 `<think>...</think>`，TTS 不会读思考内容
+- **Agent think 过滤**: `difyAgent.py`/`langchainAgent.py` 的 `ThinkFilter` 实时过滤 `<think>...</think>`，TTS 不会读思考内容
+- **LangChainAgent 依赖本后端**: 默认引擎 `langchainAgent.yaml` 的 `LLM_API_URL` 指向主后端 8000，主后端未启动时对话不可用（可临时切回 DifyAgent 直连 Dify）；引擎切换在数字人前端设置页
 - **重启后端**: 改 yaml 或 Python 代码后必须重启后端；前端代码由 Next HMR 自动热更
 </important>
 
