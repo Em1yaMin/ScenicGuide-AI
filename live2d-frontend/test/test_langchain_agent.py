@@ -233,6 +233,51 @@ class Test_LangChainAgent_Engine:
         outputs = [text async for text in agent.run(TextMessage(data="你好"), True, **settings())]
         assert "".join(outputs) == "最终回答"
 
+    # ---------- 新契约（type: token/step/done，阶段1 T3 实测，2026-08-06 修正） ----------
+
+    @pytest.mark.asyncio(scope="session")
+    async def test_new_contract_tokens_assembled(self, fake_client, agent):
+        """type=token 增量拼接、step 忽略、done 结束（本后端实际 SSE 契约）。"""
+        fake_client.response = FakeResponse(lines=sse_lines(
+            {"type": "step", "tool": "search_spots", "label": "正在查询景点…"},
+            {"type": "token", "text": "你好，"},
+            {"type": "token", "text": "欢迎来到景区"},
+            {"type": "done", "conversation_id": "conv-new", "rag_context": "", "rag_sources": []},
+        ))
+        outputs = [text async for text in agent.run(TextMessage(data="你好"), True, **settings())]
+        assert "".join(outputs) == "你好，欢迎来到景区"
+
+    @pytest.mark.asyncio(scope="session")
+    async def test_new_contract_conversation_id_from_done(self, fake_client, agent):
+        """createConversation：会话 ID 随 done 事件透出（新契约无独立 conversation 事件）。"""
+        fake_client.response = FakeResponse(lines=sse_lines(
+            {"type": "step", "tool": "search_knowledge", "label": "正在检索知识库…"},
+            {"type": "token", "text": "你好"},
+            {"type": "done", "conversation_id": "conv-new-42", "rag_context": "", "rag_sources": []},
+        ))
+        cid = await agent.createConversation(streaming=True, **settings())
+        assert cid == "conv-new-42"
+
+    @pytest.mark.asyncio(scope="session")
+    async def test_new_contract_error_fallback_true_continues(self, fake_client, agent):
+        """error(fallback=true)：仅告警不中断，继续消费 Dify 兜底流式输出。"""
+        fake_client.response = FakeResponse(lines=sse_lines(
+            {"type": "error", "message": "主链路异常，已自动切换备用服务。", "fallback": True},
+            {"type": "token", "text": "备用回答"},
+            {"type": "done", "conversation_id": "dify-cid", "rag_context": "", "rag_sources": []},
+        ))
+        outputs = [text async for text in agent.run(TextMessage(data="你好"), True, **settings())]
+        assert "".join(outputs) == "备用回答"
+
+    @pytest.mark.asyncio(scope="session")
+    async def test_new_contract_error_fallback_false_yields_error(self, fake_client, agent):
+        """error(fallback=false)：双链路均失败，产出错误提示文本。"""
+        fake_client.response = FakeResponse(lines=sse_lines(
+            {"type": "error", "message": "抱歉，AI 服务暂时不可用", "fallback": False},
+        ))
+        outputs = [text async for text in agent.run(TextMessage(data="你好"), True, **settings())]
+        assert "错误" in "".join(outputs)
+
     @pytest.mark.asyncio(scope="session")
     async def test_conversation_id_forwarded(self, fake_client, agent):
         """settings 中的 conversation_id 透传到请求体。"""

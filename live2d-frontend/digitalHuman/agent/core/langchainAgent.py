@@ -21,12 +21,17 @@ CHAT_ROUTE = "/api/v1/dialogue/chat"
 # SSE 数据行：data: {json}；兼容无 "data: " 前缀的裸 JSON 行
 DATA_PATTERN = re.compile(r'data:\s*({.*})')
 
-# 后端流式事件类型（契约见服务端 /api/v1/dialogue/chat streaming 实现）
-EVENT_CONVERSATION = "conversation"   # 携带 conversation_id 的会话事件
-EVENT_MESSAGE = "message"             # 携带 answer 的文本增量事件
-EVENT_STEP = "step"                   # agent 步骤事件（忽略/透出日志）
-EVENT_ERROR = "error"                 # 携带 message 的错误事件
-DONE_MARK = "[DONE]"                  # 流结束标记
+# 后端流式事件类型（契约见服务端 app/routers/dialogue.py 的 _sse，阶段1 T3）：
+#   {"type": "step", "tool", "label"}   工具调用步骤（忽略/透出日志）
+#   {"type": "token", "text"}           回答增量
+#   {"type": "done", "conversation_id", ...}  流式完成（会话 ID 在此事件）
+#   {"type": "error", "message", "fallback"}  链路错误（fallback=true 已切换 Dify）
+# 兼容旧契约（Dify 风格）：{"event": "message", "answer": ...}
+EVENT_TOKEN = "token"         # 回答增量（text 字段）
+EVENT_STEP = "step"           # agent 步骤事件（忽略）
+EVENT_DONE = "done"           # 流式完成（携带 conversation_id）
+EVENT_ERROR = "error"         # 携带 message 的错误事件
+DONE_MARK = "[DONE]"          # 流结束标记（兼容）
 
 
 @AGENTS.register("LangChainAgent")
@@ -36,14 +41,13 @@ class LangChainAgent(BaseAgent):
     请求 POST {LLM_API_URL}/api/v1/dialogue/chat（streaming=true 时后端返回 SSE）：
     - 主链路为本后端 LangChain agent（后端侧 DIALOGUE_ENGINE=langchain 默认，
       异常自动回落 Dify），ADH 侧只需对接这一个端点
-    - SSE 事件契约：
-        data: {"event": "conversation", "conversation_id": "xxx"}   # 会话事件（首帧）
-        data: {"event": "message", "answer": "增量文本"}            # 文本增量
-        data: {"event": "step", ...}                                 # 步骤事件（忽略）
-        data: {"event": "error", "message": "..."}                   # 错误事件
-        data: [DONE]                                                 # 流结束
-    - 兼容无 event 的 {"answer": "..."} 形态；非流式响应为标准
-      ChatResponse JSON（answer/conversation_id）
+    - SSE 事件契约（阶段1 T3，type 字段与 ChatResponse 对齐）：
+        data: {"type": "step", "tool": "search_knowledge", "label": "正在检索知识库…"}
+        data: {"type": "token", "text": "回答增量"}          # 逐字回答
+        data: {"type": "done", "conversation_id": "xxx", ...}  # 流式完成（会话 ID）
+        data: {"type": "error", "message": "...", "fallback": true}  # 错误（已回落 Dify）
+    - 兼容旧形态 {"event": "message", "answer": "..."}（Dify 风格）
+    - 非流式响应为标准 ChatResponse JSON（answer/conversation_id）
     """
 
     async def createConversation(self, streaming: bool, **kwargs) -> str:
@@ -99,11 +103,26 @@ class LangChainAgent(BaseAgent):
                         body = await response.aread()
                         raise RuntimeError(f"status_code: {response.status_code}, body: {body.decode('utf-8', 'ignore')[:200]}")
                     async for event in self._iter_sse(response):
-                        event_type = event.get("event", "")
+                        event_type = event.get("type", event.get("event", ""))
                         if event_type == EVENT_ERROR:
-                            raise RuntimeError(event.get("message", "unknown error"))
-                        answer = event.get("answer", "")
-                        if event_type == EVENT_STEP or not answer:
+                            # fallback=true：主链路异常已切换 Dify，后端将继续
+                            # 流出备用回答，仅提示不中断；fallback=false：双链路
+                            # 均失败，抛错结束
+                            if event.get("fallback") is not True:
+                                raise RuntimeError(event.get("message", "unknown error"))
+                            logger.warning(
+                                f"[AGENT] 主链路异常已切换备用服务: {event.get('message', '')}"
+                            )
+                            continue
+                        if event_type == EVENT_DONE:
+                            # 流式完成：会话 ID 随 done 事件透出，供多轮对话续接
+                            break
+                        if event_type == EVENT_STEP:
+                            logger.debug(f"[AGENT] Engine step: {event.get('tool', '')}")
+                            continue
+                        # 新契约 token/text 或旧契约 message/answer 均可
+                        answer = event.get("text", event.get("answer", ""))
+                        if not answer:
                             continue
                         logger.debug(f"[AGENT] Engine response: {event}")
                         filtered = thinkFilter.feed(answer)

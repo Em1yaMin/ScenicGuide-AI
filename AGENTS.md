@@ -40,7 +40,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 ## 本地 RAG 知识库（无外部向量库依赖）
 
-- `app/core/embedding.py` — Embedding 选择工厂 + `MinimaxEmbeddings`（OpenAI 兼容 `/embeddings` 端点，httpx 实现，配置 `EMBEDDING_API_KEY` 启用，与对话 LLM（`LLM_*`）及运营分析（`OPENAI_*`）完全独立）；未配置 key 或 API 失败时自动降级本地 TF-IDF（日志告警，`degraded` 标记透出到检索响应）
+- `app/core/embedding.py` — Embedding 选择工厂 + `MinimaxEmbeddings`（**原生** `/embeddings` 端点，httpx 实现，配置 `EMBEDDING_API_KEY` 启用，与对话 LLM（`LLM_*`）及运营分析（`OPENAI_*`）完全独立）；**原生 API 格式（实测 embo-01，2026-08-06 联调修正）**：请求体 `{"model", "texts", "type"}`（`embed_documents` 传 `type=db`、`embed_query` 传 `type=query`，两者向量空间不同混用会降低检索质量），响应 `{"vectors": [...]}`；响应解析兼容 OpenAI 兼容格式（`data` 数组）便于未来切换；未配置 key 或 API 失败时自动降级本地 TF-IDF（日志告警，`degraded` 标记透出到检索响应）
 - `app/core/rag.py` — 命名空间隔离向量存储（knowledge / documents / user_memory，各自独立索引与 `rag_data/` 持久化文件；documents 复用旧集合名 `scenic_knowledge` 兼容升级前数据）；检索阶段 numpy 矩阵乘法加速余弦相似度；兼容 langchain_core `Document`/`Embeddings` 接口；**默认文档目录 `DEFAULT_DOC_DIR` 限定到 `doc/景区知识库/`**（三份景区知识 md，git 已纳入），不索引 doc/ 下架构/设计/部署文档
 - `app/services/rag_service.py` — 文档加载、分块、向量化、检索；`RAG_MAX_CONTEXT_LEN`（默认 2000）控制注入上下文长度；`search_documents`/`index_documents` 均接受 `namespace` 参数（默认检索 knowledge+documents 公共命名空间）；`search_documents` 为**统一检索入口**（对话/后台/推荐 Agent 共用），同步实现 `_search_documents_sync` 供推荐 Agent 工具调用；另有 `index_knowledge_entries` 将知识库条目（DB 行）重建到 knowledge 命名空间，供 CRUD 变更后同步
 - `app/routers/rag.py` — `POST /api/rag/search`（`namespace` 参数，响应含 `namespaces`/`embedding_backend`/`degraded` 标记）、`POST /api/rag/index`（默认写入 documents 命名空间，文档源 `doc/景区知识库/`）、`GET /api/rag/status`（各命名空间状态）
@@ -170,7 +170,7 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 - `configs/engines/asr/tencentAPI.yaml`、`configs/engines/tts/minimaxTTS.yaml`（新建）、`configs/agents/difyAgent.yaml`、`configs/agents/langchainAgent.yaml`（新建）— 引擎凭证/参数
 - `digitalHuman/engine/tts/minimaxTTS.py`（新建）+ `digitalHuman/engine/tts/__init__.py` — MiniMax TTS 引擎及注册
 - `digitalHuman/engine/asr/tencentASR.py` — 已移除 `req.AppId` 行
-- `digitalHuman/agent/core/langchainAgent.py`（新建）— LangChain 引擎：调本后端 `/api/v1/dialogue/chat`，SSE 解析（message 增量/step 忽略/conversation 事件），复用 `ThinkFilter` 过滤思考块；SSE 事件契约：`conversation`（含 conversation_id）/`message`（含 answer 增量）/`step`（忽略）/`error`/`[DONE]`，见代码头注释
+- `digitalHuman/agent/core/langchainAgent.py`（新建，2026-08-06 联调修正 SSE 契约）— LangChain 引擎：调本后端 `/api/v1/dialogue/chat`，SSE 解析 **`type` 字段**（`token`（text 增量，经 `ThinkFilter` 过滤后产出）/`step`（忽略，透出日志）/`done`（携带 conversation_id，作流结束）/`error`（`fallback=true` 时仅告警不中断、继续消费 Dify 兜底输出；`fallback=false` 抛错）），兼容旧 `event: message/answer` 形态；非流式解析 ChatResponse JSON（answer/conversation_id），见代码头注释
 - `digitalHuman/agent/core/difyAgent.py` — 新增 `ThinkFilter`，流式过滤 `<think>` 标签
 - `digitalHuman/server/asrApi.py` — DEBUG 音频保存到 `debug_audio/`
 - `web/app/ui/home/chatbot.tsx` — 录音改用原生 `MediaRecorder` + 客户端 webm→WAV（16kHz 重采样）

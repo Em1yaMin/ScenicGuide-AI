@@ -69,13 +69,17 @@ async def smoke_stream_http(url: str, token: str, user: str, query: str) -> bool
                     if not line.startswith("data:"):
                         continue
                     data = json.loads(line[5:].strip())
-                    event = data.get("event", "")
+                    event_type = data.get("type", data.get("event", ""))
                     if data.get("conversation_id"):
                         conversation_id = data["conversation_id"]
-                    if event == "message" and data.get("answer"):
+                    if event_type == "token" and data.get("text"):
+                        text_parts.append(data["text"])
+                    elif event_type == "message" and data.get("answer"):
                         text_parts.append(data["answer"])
-                    elif event == "step":
-                        print(f"  [step] {data.get('name', '')}")
+                    elif event_type == "step":
+                        print(f"  [step] {data.get('tool') or data.get('name', '')}")
+                    elif event_type == "error":
+                        print(f"  [error] {data.get('message', '')} fallback={data.get('fallback')}")
     except Exception as e:
         return _report("后端流式调用", False, str(e))
     answer = "".join(text_parts)

@@ -3,7 +3,7 @@ Embedding 模型选择与 Minimax Embedding 客户端。
 
 设计:
 - `MinimaxEmbeddings` 实现 langchain_core 的 `Embeddings` 接口，
-  通过 Minimax 的 OpenAI 兼容端点（`{base}/embeddings`）向量化文本，
+  通过 Minimax 原生 Embedding 端点（`{base}/embeddings`）向量化文本，
   仅依赖 httpx，不引入额外 SDK。
 - `get_embedding_model()` 工厂按配置决定使用远端 API 还是本地 TF-IDF：
   - 配置了 `EMBEDDING_API_KEY` → Minimax Embedding
@@ -11,7 +11,13 @@ Embedding 模型选择与 Minimax Embedding 客户端。
   运行时 API 失败的进一步降级由 `SimpleVectorStore` 处理（见 app/core/rag.py）。
 
 Minimax Embedding 官方文档: https://platform.minimaxi.com/document/embeddings
-OpenAI 兼容端点形如 https://api.minimaxi.com/v1，模型名如 embedding-1。
+
+注意（2026-08-06 联调实测）：Minimax 当前 Embedding 模型 embo-01 走**原生
+API 格式**（非 OpenAI 兼容）：请求体 `{"model", "texts", "type"}`，`type` 为
+`query`（检索查询）/ `db`（文档库）；响应为 `{"vectors": [[...], ...]}`。
+`embed_documents` 传 `type=db`、`embed_query` 传 `type=query`（两者向量
+空间不同，混用会显著降低检索质量）。响应解析同时兼容 OpenAI 兼容格式
+（`{"data": [{"embedding"}]}`），便于未来切换兼容端点。
 """
 
 import logging
@@ -32,10 +38,11 @@ DEFAULT_TIMEOUT: float = 30.0
 
 
 class MinimaxEmbeddings(Embeddings):
-    """OpenAI 兼容的 Minimax Embedding 客户端。
+    """Minimax Embedding 客户端（原生 API 格式，实测 embo-01）。
 
     调用 `POST {api_base}/embeddings`，请求体为
-    `{"model": ..., "input": [...]}`，鉴权头 `Authorization: Bearer <key>`。
+    `{"model": ..., "texts": [...], "type": "query"|"db"}`，
+    鉴权头 `Authorization: Bearer <key>`。
 
     与对话 LLM（LLM_*）及运营分析（OPENAI_*）配置完全独立，使用单独的 EMBEDDING_* 配置项。
     """
@@ -71,26 +78,30 @@ class MinimaxEmbeddings(Embeddings):
     # -- langchain_core Embeddings 接口 --
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        """批量向量化文档文本（自动分批）。"""
+        """批量向量化文档文本（自动分批；type=db，文档库向量）。"""
         if not texts:
             return []
         results: List[List[float]] = []
         for i in range(0, len(texts), self.batch_size):
             batch = texts[i : i + self.batch_size]
-            results.extend(self._request(batch))
+            results.extend(self._request(batch, type_="db"))
         return results
 
     def embed_query(self, text: str) -> List[float]:
-        """向量化查询文本。"""
-        return self._request([text])[0]
+        """向量化查询文本（type=query，检索查询向量）。"""
+        return self._request([text], type_="query")[0]
 
     # -- 内部实现 --
 
-    def _request(self, texts: List[str]) -> List[List[float]]:
-        """调用 OpenAI 兼容 /embeddings 端点。
+    def _request(self, texts: List[str], type_: str) -> List[List[float]]:
+        """调用 Minimax 原生 Embedding 端点。
+
+        Args:
+            texts: 待向量化文本列表
+            type_: "db"（文档库向量）或 "query"（检索查询向量）
 
         Raises:
-            RuntimeError: 未配置 API Key
+            RuntimeError: 未配置 API Key / 响应格式异常
             httpx.HTTPError: 网络/鉴权/服务端错误（由上层降级处理）
         """
         if not self.api_key:
@@ -99,7 +110,7 @@ class MinimaxEmbeddings(Embeddings):
             )
 
         url = f"{self.api_base}/embeddings"
-        payload = {"model": self.model, "input": texts}
+        payload = {"model": self.model, "texts": texts, "type": type_}
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
@@ -114,7 +125,18 @@ class MinimaxEmbeddings(Embeddings):
             response.raise_for_status()
             data = response.json()
 
-        # OpenAI 兼容响应: {"data": [{"embedding": [...], "index": i}, ...]}
+        # 原生 Minimax 响应: {"vectors": [[...], ...]}（按请求顺序返回）
+        vectors = data.get("vectors")
+        if isinstance(vectors, list):
+            if len(vectors) != len(texts):
+                raise RuntimeError(
+                    "Minimax Embedding 响应条数不符: "
+                    f"请求 {len(texts)} 条，返回 {len(vectors)} 条"
+                )
+            return vectors
+
+        # OpenAI 兼容响应（兼容未来切换兼容端点）:
+        # {"data": [{"embedding": [...], "index": i}, ...]}
         # index 字段允许服务端乱序返回，按 index 恢复输入顺序，防止向量错位
         data_items = data.get("data") or []
         if len(data_items) != len(texts):
@@ -128,8 +150,7 @@ class MinimaxEmbeddings(Embeddings):
                 range(len(sorted_items))
             ):
                 data_items = sorted_items
-        embeddings = [item["embedding"] for item in data_items]
-        return embeddings
+        return [item["embedding"] for item in data_items]
 
 
 def get_embedding_model() -> Embeddings:

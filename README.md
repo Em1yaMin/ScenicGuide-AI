@@ -125,8 +125,8 @@ cp .env.example .env
 | `LLM_TEMPERATURE` | 对话 LLM 默认采样温度（默认 `0.7`） |
 | `DIALOGUE_ENGINE` | 对话引擎开关（默认 `langchain`：LangChain agent 主链路，异常自动回落 Dify；`dify`：强制走 Dify Chat Agent），见 `app/services/chat_agent.py` |
 | `EMBEDDING_API_KEY` | Minimax Embedding API Key（RAG 向量化，与 OPENAI_*/LLM_* 独立；不配置时自动降级本地 TF-IDF，详见 AGENTS.md「本地 RAG 知识库」） |
-| `EMBEDDING_API_BASE` | Minimax OpenAI 兼容端点（默认 `https://api.minimaxi.com/v1`，参考官方 Embedding 文档） |
-| `EMBEDDING_MODEL` | Embedding 模型名（默认 `embedding-1`） |
+| `EMBEDDING_API_BASE` | Minimax Embedding 端点（默认 `https://api.minimaxi.com/v1`，**原生 API 格式**：请求 `texts`+`type`（query/db）、响应 `vectors`，实测模型 `embo-01`，见 `doc/phase1-e2e-verification.md`） |
+| `EMBEDDING_MODEL` | Embedding 模型名（默认 `embo-01`） |
 | `SSH_HOST` / `SSH_PORT` / `SSH_USER` / `SSH_PASSWORD` | 部署 Dify 的远程服务器（可选） |
 
 **前端** — 复制并填写 `digitalHumanVue/.env`：
@@ -420,6 +420,7 @@ pytest -v
 | 手动触发端点 | ✅ 正常（`POST /sync-now` + `/run-now` 手动触发后台逻辑） |
 | 本地数字人部署 | ✅ 已部署（TencentAPI ASR + LangChainAgent + MiniMax TTS） |
 | 动态推荐问句 | ✅ 正常（每 5 分钟从 Dify 刷新，缓存 stale-while-revalidate） |
+| 阶段1 双轨联调 | ✅ 通过（LangChain 新链路全流程 + 故障回落 Dify + ADH 接入 + 前端流式渲染；联调发现并修复 3 个缺陷：Minimax Embedding 原生 API 格式、ADH SSE 事件契约、回落错误处理，详见 [`doc/phase1-e2e-verification.md`](doc/phase1-e2e-verification.md)） |
 | Docker Compose | 已配置，未在本次验收中实际构建 |
 
 ## 常见问题
