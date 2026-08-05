@@ -48,8 +48,8 @@ CHUNK_OVERLAP: int = int(os.environ.get("RAG_CHUNK_OVERLAP", "50"))
 # ---------------------------------------------------------------------------
 
 # 命名空间：每个命名空间拥有独立向量索引与独立持久化文件，检索互不命中。
-# - knowledge:   知识库条目（管理后台录入，预留索引接入）
-# - documents:   doc/ 目录文档（现有全量索引）
+# - knowledge:   知识库条目（管理后台录入，CRUD/导入变更后同步重建索引）
+# - documents:   doc/景区知识库/ 文档（全量索引）
 # - user_memory: 用户长期记忆（预留，本阶段仅保留接口与持久化目录）
 NAMESPACE_KNOWLEDGE = "knowledge"
 NAMESPACE_DOCUMENTS = "documents"
@@ -64,7 +64,7 @@ DEFAULT_SEARCH_NAMESPACES: Tuple[str, ...] = (NAMESPACE_KNOWLEDGE, NAMESPACE_DOC
 
 # 命名空间 → 持久化集合名（即 rag_data/ 下的文件前缀）。
 # documents 复用旧集合名 "scenic_knowledge"，保证升级前已持久化的
-# doc/ 文档数据（rag_data/scenic_knowledge_*.json）无需重建即可继续命中。
+# doc/景区知识库/ 文档数据（rag_data/scenic_knowledge_*.json）无需重建即可继续命中。
 NAMESPACE_COLLECTIONS: dict = {
     NAMESPACE_KNOWLEDGE: "knowledge",
     NAMESPACE_DOCUMENTS: "scenic_knowledge",

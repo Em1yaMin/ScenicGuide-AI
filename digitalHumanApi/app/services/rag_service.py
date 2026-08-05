@@ -201,7 +201,7 @@ def _index_documents_sync(
     else:
         namespaces = normalize_namespaces(namespace)
         if len(namespaces) != 1:
-            # 索引接口只接受单一命名空间，避免同一批 doc/ 文档写入多个命名空间
+            # 索引接口只接受单一命名空间，避免同一批 doc/景区知识库/ 文档写入多个命名空间
             raise ValueError(f"索引接口的 namespace 参数需为单一命名空间，收到: {namespaces}")
         ns = namespaces[0]
 
