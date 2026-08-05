@@ -123,6 +123,7 @@ cp .env.example .env
 | `LLM_MODEL` | 对话 LLM 主模型（默认 `deepseek-v4-flash`） |
 | `LLM_FALLBACK_API_KEY` / `LLM_FALLBACK_API_BASE` / `LLM_FALLBACK_MODEL` | 对话 LLM 备用端点（默认官方 DeepSeek API `https://api.deepseek.com/v1` + `deepseek-chat`），主端点未配置 key 时自动切换 |
 | `LLM_TEMPERATURE` | 对话 LLM 默认采样温度（默认 `0.7`） |
+| `DIALOGUE_ENGINE` | 对话引擎开关（默认 `langchain`：LangChain agent 主链路，异常自动回落 Dify；`dify`：强制走 Dify Chat Agent），见 `app/services/chat_agent.py` |
 | `EMBEDDING_API_KEY` | Minimax Embedding API Key（RAG 向量化，与 OPENAI_*/LLM_* 独立；不配置时自动降级本地 TF-IDF，详见 AGENTS.md「本地 RAG 知识库」） |
 | `EMBEDDING_API_BASE` | Minimax OpenAI 兼容端点（默认 `https://api.minimaxi.com/v1`，参考官方 Embedding 文档） |
 | `EMBEDDING_MODEL` | Embedding 模型名（默认 `embedding-1`） |
@@ -332,6 +333,7 @@ docker-compose up -d --build
 | POST | `/visitor/register` | 游客注册 |
 | POST | `/visitor/refresh-recommend` | 手动刷新推荐问句缓存 |
 | POST | `/recommend` | 个性化路线推荐（接收偏好描述，返回匹配路线） |
+| POST | `/dialogue/chat` | 对话（**双轨**：默认 LangChain agent 主链路，结构化工具直查景点/路线 + 知识检索 + 规则推荐，进程内多轮会话；异常自动回落 Dify；`DIALOGUE_ENGINE=dify` 强制走 Dify，响应字段兼容 `answer/conversation_id/rag_context/rag_sources`） |
 | POST | `/dialogue/sync-now` | 手动触发对话抓取 |
 | POST | `/analysis/run-now` | 手动触发量化分析 |
 | GET | `/analysis/overview` | AI 运营分析概览（支持 `?days=7/30/90`） |
