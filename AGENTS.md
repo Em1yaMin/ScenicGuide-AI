@@ -73,17 +73,17 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - **对话接口用户标识**：`/api/v1/dialogue/chat` 优先从 `Authorization: Bearer` token 解析（登录用户→用户 id、游客→guest-xxx），无 token 回退请求体 `user`（默认 `visitor`，向后兼容）；token 无效时降级 `visitor` 并告警（不阻断对话），认证接口严格 401（决策注释见 `security.py resolve_dialogue_user`）
 - 配置：`JWT_SECRET`、`JWT_EXPIRES_MINUTES`（默认 1440）、`GUEST_TOKEN_EXPIRES_MINUTES`（默认 30），见 `.env.example`
 
-## 对话 LLM 接入层（阶段1，LangChain 工厂，未接对话链路）
+## 对话 LLM 接入层（阶段1，LangChain 工厂）
 
 - `app/core/llm.py` — ChatOpenAI（langchain-openai）工厂：`get_chat_llm()`（按 `LLM_*` 配置构造，主端点缺 key 自动降级备用端点，都缺抛 `LLMConfigError`）、`create_chat_llm()`（显式参数底层构造）、`resolve_endpoint()`；主/备用双端点：`LLM_API_*`（默认 opencode-go `https://opencode.ai/zen/go/v1` + `deepseek-v4-flash`）与 `LLM_FALLBACK_*`（默认官方 DeepSeek API），与 Embedding（`EMBEDDING_*`）、运营分析（`OPENAI_*`）配置完全独立
 - **DeepSeek 思考格式兼容性**（实测结论，详见 `doc/llm-adapter-smoke-test.md`）：`reasoning_content` 被 langchain-openai 自动剥离（流式思考 chunk 为空串、content 为最终回答、不报错）→ 无需自定义处理；**max_tokens 必须经工厂 `extra_body` 注入原生 `max_tokens` 字段**（langchain-openai 1.4.1 硬编码改名为 `max_completion_tokens`，DeepSeek 系端点静默忽略致长度限制失效）；**不要在 `invoke()` 显式传 max_tokens**
-- 备用通道官方 DeepSeek API 多轮对话要求历史 assistant 消息回传 `reasoning_content`（opencode-go 网关不强制）→ 对话链路任务需自定义消息转换
+- 备用通道官方 DeepSeek API 多轮对话要求历史 assistant 消息回传 `reasoning_content`（opencode-go 网关不强制）；对话链路（chat_agent）尚未实现该自定义转换，备用端点多轮对话受限（主端点 opencode-go 容错不受影响）
 - 冒烟脚本：`digitalHumanApi/scripts/smoke_llm.py`（`LLM_API_KEY=... python -m scripts.smoke_llm`；`--fallback` 测备用端点）；单测 `tests/test_llm.py`（MockTransport 模拟，不发真实请求）
 
 ## 对话 agent（阶段1 T2：LangChain 主链路 + Dify 双轨）
 
-- `app/services/chat_agent.py` — LangChain tool-calling agent（**langchain 1.x 新 API `create_agent`**，返回 langgraph 状态图，`ainvoke({"messages": [...]})`；旧的 `create_tool_calling_agent`/`AgentExecutor` 在 1.x 已移除）：结构化工具直查景点/路线（复用 `recommend_agent` 的 `search_spots`/`search_routes`/`get_spot_detail`/`get_route_detail`/`filter_by_tags`，零幻觉）、`search_knowledge`（复用统一检索入口）、`recommend_routes`（包装 `recommend_agent.recommend`，工具内 `asyncio.run` 安全——langgraph 经线程池执行同步工具）；进程内多轮会话（`conversation_id` → 消息历史 dict + 线程锁，阶段1 不持久化）；RAG 来源从返回消息中最后一条 `search_knowledge` 的 ToolMessage 提取透出
-- 双轨开关：`DIALOGUE_ENGINE=langchain`（**默认**，异常自动回落 Dify，演示不翻车）`|dify`（强制原链路）；`app/routers/dialogue.py` 的 `/api/v1/dialogue/chat` 先走 `chat_agent.chat`，任何异常（含 `LLMConfigError`）回落 `_call_dify_chat`（保留原 RAG 预检索逻辑）；响应契约不变（answer/conversation_id/rag_context/rag_sources）
+- `app/services/chat_agent.py` — LangChain tool-calling agent（**langchain 1.x 新 API `create_agent`**，返回 langgraph 状态图，`ainvoke({"messages": [...]})`；旧的 `create_tool_calling_agent`/`AgentExecutor` 在 1.x 已移除）：结构化工具直查景点/路线（复用 `recommend_agent` 的 `search_spots`/`search_routes`/`get_spot_detail`/`get_route_detail`/`filter_by_tags`，零幻觉）、`search_knowledge`（复用统一检索入口）、`recommend_routes`（包装 `recommend_agent.recommend`，工具内 `asyncio.run` 安全——langgraph 经线程池执行同步工具）；进程内多轮会话（`conversation_id` → 消息历史 dict + 线程锁；LLM 调用 60s 超时、会话上限 1000 个 LRU 淘汰；阶段1 不持久化）；RAG 来源从返回消息中最后一条 `search_knowledge` 的 ToolMessage 提取透出
+- 双轨开关：`DIALOGUE_ENGINE=langchain`（**默认**，异常自动回落 Dify，演示不翻车）`|dify`（强制原链路）；`app/routers/dialogue.py` 的 `/api/v1/dialogue/chat` 先走 `chat_agent.chat`，任何异常（含 `LLMConfigError`）回落 `_call_dify_chat`（保留原 RAG 预检索逻辑）；回落时经 `has_conversation` 判定，不把 LangChain 生成的进程内会话 ID 透传给 Dify（未知 id 会 400 conversation_not_exist），改传空串让 Dify 新建会话；响应契约不变（answer/conversation_id/rag_context/rag_sources）
 - 测试注意：agent 经 `ainvoke` 调用时走 openai SDK **async client**，MockTransport 需同时注入 `http_client`（httpx.Client）与 `http_async_client`（httpx.AsyncClient）两个参数（`async_client` 字段是 openai 资源对象，不可直接传）
 - 单测：`tests/test_chat_agent.py`（工具调用链路/多轮上下文/RAG 来源/use_rag 开关，MockTransport 模拟 DeepSeek tool-calling 响应）、`tests/test_dialogue_engine.py`（双轨/回落/双链路失败礼貌报错）
 

@@ -23,7 +23,7 @@ class ChatRequest(BaseModel):
     """RAG 增强对话请求。"""
     query: str = Field(..., description="用户输入", min_length=1, max_length=5000)
     user: str = Field(default="visitor", description="用户标识")
-    conversation_id: str = Field(default="", description="Dify 会话 ID（留空则新建）")
+    conversation_id: str = Field(default="", description="会话 ID（LangChain 进程内会话或 Dify 会话；留空则新建）")
     use_rag: bool = Field(default=True, description="是否启用本地 RAG 检索")
     rag_top_k: int = Field(default=3, description="RAG 检索结果数", ge=1, le=10)
     streaming: bool = Field(default=False, description="是否流式返回")
@@ -32,7 +32,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     """对话响应。"""
     answer: str = Field(default="", description="回复内容")
-    conversation_id: str = Field(default="", description="Dify 会话 ID")
+    conversation_id: str = Field(default="", description="会话 ID（LangChain 进程内会话或 Dify 会话）")
     rag_context: str = Field(default="", description="注入的 RAG 上下文（调试用）")
     rag_sources: list = Field(default_factory=list, description="RAG 检索来源")
 

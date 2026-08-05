@@ -9,7 +9,7 @@
 | 后端 | Python 3.9+ · FastAPI · SQLAlchemy 2.0 (async) · SQLite (aiosqlite) · httpx · LangChain |
 | 前端 | Vue 3 · TypeScript · Vite 8 · Pinia · Vue Router · ECharts |
 | 部署 | Docker Compose · Nginx |
-| 外部服务 | Dify AI 平台（Chat Agent 对话 + Workflow 量化分析）、LangChain + OpenAI（AI 运营分析）、对话 LLM（阶段1 接入层，opencode-go DeepSeek，见 `doc/llm-adapter-smoke-test.md`）、本地 Live2D 数字人（live2d-frontend） |
+| 外部服务 | Dify AI 平台（Chat Agent 对话兜底 + Workflow 量化分析）、LangChain agent（对话主链路）+ OpenAI（AI 运营分析）、对话 LLM（opencode-go DeepSeek，见 `doc/llm-adapter-smoke-test.md`）、本地 Live2D 数字人（live2d-frontend） |
 
 ## 本地数字人依赖
 

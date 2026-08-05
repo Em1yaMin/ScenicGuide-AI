@@ -20,7 +20,7 @@ routers/
   auth.py      # /api/v1/auth/register|login|me|guest — 注册/登录/JWT/游客 token
   admin.py     # GET /api/v1/admin/dashboard、/report — 纯聚合委托
   knowledge.py # /api/admin/knowledge CRUD + import — X-Admin-Token 认证
-  dialogue.py  # POST /api/v1/dialogue/sync-now — 任务触发器（绕过服务层）
+  dialogue.py  # POST /api/v1/dialogue/chat（双轨：LangChain agent 主链路 + Dify 回落）、/rag-context（ADH 用）、/sync-now（任务触发器，绕过服务层）
   analysis.py  # POST /api/v1/analysis/run-now — 任务触发器
   recommend.py # POST /api/v1/recommend — 个性化路线推荐
 ```
