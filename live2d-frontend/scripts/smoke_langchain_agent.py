@@ -2,13 +2,13 @@
 """LangChainAgent 引擎冒烟脚本 — 验证 ADH 数字人走本后端 LangChain 链路（T4 验收证据）。
 
 对本后端 /api/v1/dialogue/chat 执行一轮真实对话（流式），验证：
-  1. SSE 流式响应可解析出文本增量（message 事件）
-  2. conversation_id 事件可获取会话 ID
+  1. SSE 流式响应可解析出文本增量（type=token 的 text 字段）
+  2. done 事件携带 conversation_id 可获取会话 ID
   3. 非流式 ChatResponse JSON 兼容
   4. LangChainAgent 引擎类可正常驱动上述链路（与 /adh/agent/infer 同路径）
 
-注意：后端流式端点（T3）未落地时第 1 步将 FAIL（后端返回阻塞 JSON 而非 SSE），
-属预期；引擎侧第 2 步因内置阻塞 JSON 回退解析仍应 PASS——链路在 T3 前后均可用。
+注意：流式端点（阶段1 T3）已落地并通过联调验证；引擎侧仍保留阻塞 JSON 回退
+解析（后端非流式/异常返回 ChatResponse JSON 时链路依旧可用）。
 
 用法（复用 ADH venv 运行，需本后端已启动）:
     ./venv/Scripts/python.exe scripts/smoke_langchain_agent.py                      # 默认 http://127.0.0.1:8000
@@ -85,7 +85,7 @@ async def smoke_stream_http(url: str, token: str, user: str, query: str) -> bool
     answer = "".join(text_parts)
     print(f"  answer: {answer[:200]!r}")
     ok &= _report("流式文本增量非空", bool(answer), f"{len(text_parts)} chunks")
-    ok &= _report("conversation_id 事件可取", bool(conversation_id), conversation_id)
+    ok &= _report("done 事件可取会话 ID", bool(conversation_id), conversation_id)
     return ok
 
 

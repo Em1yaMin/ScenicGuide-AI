@@ -1,7 +1,7 @@
 """Embedding 升级（Minimax）与命名空间隔离测试。
 
 覆盖：
-1. MinimaxEmbeddings 客户端：OpenAI 兼容请求格式（httpx.MockTransport）、
+1. MinimaxEmbeddings 客户端：Minimax 原生请求格式 texts+type（httpx.MockTransport）、
    批量分批、未配置 key 时报错。
 2. get_embedding_model 工厂：配置 key → Minimax；未配置 → TF-IDF 降级。
 3. 自定义 embedding（确定性向量）接入 SimpleVectorStore：向量化、检索、持久化重载。
