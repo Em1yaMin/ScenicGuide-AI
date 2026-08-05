@@ -166,7 +166,7 @@ async function fetchRecommendedQuestions() {
   questionsLoading.value = true
   try {
     const data = await fetchWithCodeEnvelope<{ questions: string[] }>(
-      API_VISITOR_RECOMMENDED_QUESTIONS
+      API_VISITOR_RECOMMENDED_QUESTIONS,
     )
     if (data.questions && Array.isArray(data.questions)) {
       suggestedQuestions.value = data.questions
@@ -184,13 +184,8 @@ function onQuestionClick(text: string) {
   void send(text)
   // 同时预填 ADH 数字人 iframe 输入框（保留原行为，不自动发送）
   const targetOrigin = import.meta.env.VITE_ADH_IFRAME_ORIGIN || '*'
-  const iframe = document.querySelector(
-    '.digital-human-frame'
-  ) as HTMLIFrameElement | null
-  iframe?.contentWindow?.postMessage(
-    { type: 'SET_INPUT', text },
-    targetOrigin
-  )
+  const iframe = document.querySelector('.digital-human-frame') as HTMLIFrameElement | null
+  iframe?.contentWindow?.postMessage({ type: 'SET_INPUT', text }, targetOrigin)
 }
 </script>
 
@@ -234,11 +229,7 @@ function onQuestionClick(text: string) {
             <div v-if="!isLoading && loadingError" class="placeholder-panel">
               <div class="placeholder-icon">⚠</div>
               <p>数字人服务加载失败</p>
-              <button
-                v-if="retryCount < MAX_RETRIES"
-                class="retry-btn"
-                @click="reloadIframe"
-              >
+              <button v-if="retryCount < MAX_RETRIES" class="retry-btn" @click="reloadIframe">
                 重新加载
               </button>
               <p v-else class="retry-note">已超过最大重试次数，请稍后再试</p>
@@ -280,11 +271,13 @@ function onQuestionClick(text: string) {
                   :key="i"
                   class="msg-step"
                   :class="{
-                    'msg-step--active':
-                      turn.streaming && turn.currentStep === step.label,
+                    'msg-step--active': turn.streaming && turn.currentStep === step.label,
                   }"
                 >
-                  <span v-if="turn.streaming && turn.currentStep === step.label" class="step-spinner" />
+                  <span
+                    v-if="turn.streaming && turn.currentStep === step.label"
+                    class="step-spinner"
+                  />
                   <span v-else class="step-check">✓</span>
                   {{ step.label }}
                 </div>
@@ -428,7 +421,9 @@ function onQuestionClick(text: string) {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .retry-btn {
@@ -471,7 +466,7 @@ function onQuestionClick(text: string) {
 }
 
 .status-dot--live {
-  background: #6B9E6D;
+  background: #6b9e6d;
   box-shadow: 0 0 0 3px rgba(107, 158, 109, 0.15);
 }
 
@@ -590,7 +585,7 @@ function onQuestionClick(text: string) {
 
 .step-check {
   font-size: 10px;
-  color: #6B9E6D;
+  color: #6b9e6d;
   font-weight: 700;
 }
 
@@ -651,7 +646,9 @@ function onQuestionClick(text: string) {
 }
 
 @keyframes blink {
-  to { visibility: hidden; }
+  to {
+    visibility: hidden;
+  }
 }
 
 /* ── Composer（推荐问句 + 输入框） ── */

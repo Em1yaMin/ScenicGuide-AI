@@ -87,7 +87,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - **recursion_limit 坑（实测）**：langchain 1.3 的 `create_agent` 把 `recursion_limit` 硬编码为 **9999**，异常 LLM 反复请求工具会循环执行近万次才报错——`chat`/`chat_stream` 必须显式传 `config={"recursion_limit": 25}`（超限抛 GraphRecursionError → 路由层回落 Dify，不挂起）
 - **SSE 流式（T3）**：`streaming=true` 时 `/dialogue/chat` 返回 SSE，事件格式 `data: {json}`：`{"type":"step","tool","label"}`（工具调用步骤）/ `{"type":"token","text"}`（回答增量）/ `{"type":"done","conversation_id","rag_context","rag_sources"}`（与 ChatResponse 对齐）/ `{"type":"error","message","fallback"}`（fallback=true 表示已切换 Dify 兜底）；`chat_agent.chat_stream` 经 `agent.astream(stream_mode="messages")` 逐块产出（langgraph 1.2 的 messages 流模式**同时产出 ToolMessage**，可从中提取 RAG 来源；工具调用消息拆为多个带 `tool_call_chunks` 的 chunk，按调用 id 去重 step、用布尔标志抑制工具消息内联 content）；Dify 兜底链路同样流式（`app/services/dify_stream.py`，ThinkFilter 过滤 `<think>` 块，参考 live2d-frontend 实现）；前端消费见 `digitalHumanVue/src/composables/useDialogueStream.ts` + `ChatView.vue` 右侧聊天面板；SSE 响应头含 `X-Accel-Buffering: no`（防 nginx 缓冲）
 - 测试注意：agent 经 `ainvoke` 调用时走 openai SDK **async client**，MockTransport 需同时注入 `http_client`（httpx.Client）与 `http_async_client`（httpx.AsyncClient）两个参数（`async_client` 字段是 openai 资源对象，不可直接传）
-- 单测：`tests/test_chat_agent.py`（工具调用链路/多轮上下文/RAG 来源/use_rag 开关，MockTransport 模拟 DeepSeek tool-calling 响应）、`tests/test_dialogue_engine.py`（双轨/回落/双链路失败礼貌报错）
+- 单测：`tests/test_chat_agent.py`（工具调用链路/多轮上下文/RAG 来源/use_rag 开关，MockTransport 模拟 DeepSeek tool-calling 响应）、`tests/test_chat_agent_stream.py`（流式 step 去重/token/done/RAG 来源/recursion_limit 断环）、`tests/test_dialogue_engine.py`（双轨/回落/双链路失败礼貌报错）、`tests/test_dialogue_stream.py`（SSE 事件序列/回落/会话 ID 移交）、`tests/test_dify_stream.py`（ThinkFilter 分块过滤/SSE 解析/错误上抛）
 
 ## AI 运营分析（LangChain + OpenAI，可回退）
 
