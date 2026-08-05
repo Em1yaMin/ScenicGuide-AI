@@ -62,7 +62,7 @@ digitalHuman/
 │   └── .env                  # 前端环境变量（需自行创建）
 ├── AGENTS.md                  # 项目记忆（唯一权威源；CLAUDE.md 为指向它的 symlink）
 ├── .pi/                       # pi 编码助手配置与扩展
-├── doc/                       # 设计文档目录（Dify 工作流、部署计划等）
+├── doc/                       # 设计文档目录（Dify 工作流、部署计划等）；景区知识库/ 为 RAG 索引文档源
 ├── live2d-frontend/           # 本地 Live2D 数字人（awesome-digital-human-live2d）
 ├── docker-compose.yml
 ├── Dockerfile.api             # 后端容器镜像构建
