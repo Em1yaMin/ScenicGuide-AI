@@ -125,6 +125,51 @@ async def test_langchain_failure_falls_back_to_dify(client, monkeypatch):
     assert calls == {"langchain": 1, "dify": 1}
 
 
+async def test_fallback_blank_cid_for_langchain_owned_session(client, monkeypatch):
+    """跨轮回落：id 由 LangChain 进程内管理时，Dify 收到空 conversation_id
+    （避免 400 conversation_not_exist，让 Dify 新建会话兜底回答）。"""
+    dify_calls = []
+
+    async def boom(**kwargs):
+        raise RuntimeError("LLM 服务故障")
+
+    async def fake_dify(query, user, conversation_id):
+        dify_calls.append(conversation_id)
+        return {"answer": "dify 兜底回答", "conversation_id": "cid-new"}
+
+    monkeypatch.setattr(chat_agent, "chat", boom)
+    monkeypatch.setattr(chat_agent, "has_conversation", lambda cid: cid == "lc-uuid")
+    monkeypatch.setattr(dialogue, "_call_dify_chat", fake_dify)
+    resp = await _chat(client, conversation_id="lc-uuid")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["answer"] == "dify 兜底回答"
+    assert data["conversation_id"] == "cid-new"
+    assert dify_calls == [""]
+
+
+async def test_fallback_keeps_dify_owned_conversation_id(client, monkeypatch):
+    """跨轮回落：id 由 Dify 生成（非 LangChain 管理）时原样透传，
+    保证 Dify 侧多轮上下文延续。"""
+    dify_calls = []
+
+    async def boom(**kwargs):
+        raise RuntimeError("LLM 服务故障")
+
+    async def fake_dify(query, user, conversation_id):
+        dify_calls.append(conversation_id)
+        return {"answer": "dify 兜底回答", "conversation_id": conversation_id}
+
+    monkeypatch.setattr(chat_agent, "chat", boom)
+    monkeypatch.setattr(chat_agent, "has_conversation", lambda cid: False)
+    monkeypatch.setattr(dialogue, "_call_dify_chat", fake_dify)
+    resp = await _chat(client, conversation_id="dify-cid")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["conversation_id"] == "dify-cid"
+    assert dify_calls == ["dify-cid"]
+
+
 async def test_dify_fallback_failure_returns_polite_error(client, monkeypatch):
     """双链路均失败 → 礼貌错误文案，接口仍 200（演示不翻车）。"""
     async def boom(**kwargs):

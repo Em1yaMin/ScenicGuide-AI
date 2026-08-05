@@ -144,11 +144,17 @@ async def chat_with_rag(
             logger.warning("RAG retrieval failed, proceeding without RAG: %s", e)
 
     # Step B2: 调用 Dify Chat Agent
+    # 会话 ID 移交：LangChain 链路生成的进程内 uuid 对 Dify 未知（透传会
+    # 触发 400 conversation_not_exist），回落时传空串让 Dify 新建会话；
+    # 仅透传 Dify 自己生成的 id，保证跨引擎切换后多轮对话可继续。
+    fallback_conversation_id = request.conversation_id
+    if chat_agent.has_conversation(request.conversation_id):
+        fallback_conversation_id = ""
     try:
         dify_response = await _call_dify_chat(
             query=modified_query,
             user=effective_user,
-            conversation_id=request.conversation_id,
+            conversation_id=fallback_conversation_id,
         )
         answer = dify_response.get("answer", "")
         conversation_id = dify_response.get("conversation_id", "")

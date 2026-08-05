@@ -148,6 +148,19 @@ def clear_conversation(conversation_id: str) -> None:
         _conversations.pop(conversation_id, None)
 
 
+def has_conversation(conversation_id: str) -> bool:
+    """判断会话 ID 是否由本模块（LangChain 链路）进程内管理。
+
+    供路由层双轨回落使用：LangChain 生成的 uuid 会话 ID 对 Dify 未知
+    （透传会触发 400 conversation_not_exist），需先经此判断决定是否
+    移交空 ID 让 Dify 新建会话。
+    """
+    if not conversation_id:
+        return False
+    with _conversations_lock:
+        return conversation_id in _conversations
+
+
 # ── Agent 构建（缓存） ────────────────────────────────────────────────────
 
 
