@@ -37,7 +37,7 @@ class MinimaxEmbeddings(Embeddings):
     调用 `POST {api_base}/embeddings`，请求体为
     `{"model": ..., "input": [...]}`，鉴权头 `Authorization: Bearer <key>`。
 
-    与对话 LLM（OPENAI_*）配置完全独立，使用单独的 EMBEDDING_* 配置项。
+    与对话 LLM（LLM_*）及运营分析（OPENAI_*）配置完全独立，使用单独的 EMBEDDING_* 配置项。
     """
 
     backend_name: str = "minimax"

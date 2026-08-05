@@ -58,7 +58,7 @@ class Settings(BaseModel):
     # 对话默认温度（工厂层默认值，可按调用覆盖）
     LLM_TEMPERATURE: float = float(os.environ.get("LLM_TEMPERATURE", "0.7"))
 
-    # RAG 向量化 Embedding（Minimax OpenAI 兼容端点，与对话 LLM 的 OPENAI_* 完全独立）
+    # RAG 向量化 Embedding（Minimax OpenAI 兼容端点，与对话 LLM 的 LLM_* 及运营分析的 OPENAI_* 完全独立）
     # 不配置 EMBEDDING_API_KEY 时自动降级为本地 TF-IDF 向量化（见 app/core/embedding.py）
     EMBEDDING_API_BASE: str = os.environ.get(
         "EMBEDDING_API_BASE", "https://api.minimaxi.com/v1"
