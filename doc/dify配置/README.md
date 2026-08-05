@@ -74,7 +74,7 @@ DIFY_LIGHT4AI_USER=YOUR_DIFY_USER,Admin
 默认引擎为 LangChainAgent（`configs/agents/langchainAgent.yaml`，`LLM_API_URL` 指向本后端，无需 Dify 凭据）；以下 `difyAgent.yaml` 仅切回直连时生效：
 
 ```yaml
-# 当前生效配置（路径：configs/agents/difyAgent.yaml）
+# 仅切回 DifyAgent 直连时生效（路径：configs/agents/difyAgent.yaml）
 PARAMETERS:
   - NAME: "DIFY_API_URL"
     DEFAULT: "http://YOUR_DIFY_SERVER_IP/v1"

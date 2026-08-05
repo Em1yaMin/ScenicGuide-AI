@@ -167,7 +167,7 @@ Start-Process -WindowStyle Hidden -WorkingDirectory "$PWD/live2d-frontend/web" -
 > - 命令中的 `$PWD` 需替换为项目根目录绝对路径（如 `E:/project_file/digitalHuman`），或将终端 cd 到项目根目录后执行。
 > - 数字人后端端口已在 `config_template.yaml` 中改为 **8001**（原 8000 被主后端占用）。
 > - 数字人前端需在 `web/.env` 中设置 `NEXT_PUBLIC_ADH_SERVER_PORT=8001`，否则心跳连错端口导致 "Soul is death!"。
-> - 存在两个配置文件：`config_template.yaml`（端口 8001，使用腾讯云 ASR + Dify Agent + MiniMax TTS）和 `config_all_in_dify.yaml`（端口 8000，引擎全部走 Dify API）。默认使用 `config_template.yaml`，切换配置时注意端口变化。
+> - 存在两个配置文件：`config_template.yaml`（端口 8001，使用腾讯云 ASR + LangChainAgent（默认，走本后端对话链路）+ MiniMax TTS）和 `config_all_in_dify.yaml`（端口 8000，引擎全部走 Dify API）。默认使用 `config_template.yaml`，切换配置时注意端口变化。
 
 ### 3. 启动后端（手动）
 

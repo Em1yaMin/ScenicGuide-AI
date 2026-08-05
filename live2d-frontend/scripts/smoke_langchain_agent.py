@@ -87,7 +87,7 @@ async def smoke_stream_http(url: str, token: str, user: str, query: str) -> bool
 
 async def smoke_agent_engine(url: str, token: str, user: str, query: str) -> bool:
     """经 LangChainAgent 引擎（ADH 实际路径）驱动一轮流式对话。"""
-    print(f"\n=== 2) LangChainAgent 引擎流式对话（/adh/agent 同路径）===")
+    print("\n=== 2) LangChainAgent 引擎流式对话（/adh/agent 同路径）===")
     cfg = parseConfig(f"{CONFIG_ROOT_PATH}/agents/langchainAgent.yaml")
     agent = LangChainAgent(cfg)
     settings = {
@@ -99,10 +99,10 @@ async def smoke_agent_engine(url: str, token: str, user: str, query: str) -> boo
     }
     ok = True
     try:
-        print(f"  createConversation...")
+        print("  createConversation...")
         conversation_id = await agent.createConversation(streaming=True, **settings)
         ok &= _report("createConversation 返回会话 ID", bool(conversation_id), conversation_id)
-        print(f"  run(streaming=True)...")
+        print("  run(streaming=True)...")
         outputs = []
         async for text in agent.run(TextMessage(data=query), streaming=True,
                                     conversation_id=conversation_id, **settings):
@@ -117,7 +117,7 @@ async def smoke_agent_engine(url: str, token: str, user: str, query: str) -> boo
 
 async def smoke_blocking(url: str, token: str, user: str, query: str) -> bool:
     """非流式 ChatResponse JSON 兼容。"""
-    print(f"\n=== 3) 非流式响应（streaming=false）===")
+    print("\n=== 3) 非流式响应（streaming=false）===")
     headers = {"Content-Type": "application/json"}
     if token:
         headers["Authorization"] = f"Bearer {token}"
