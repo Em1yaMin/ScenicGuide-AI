@@ -1,12 +1,37 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useVisitorStore } from '@/stores/visitor'
 import { useAuthStore } from '@/stores/auth'
+import { useDialogueStream } from '@/composables/useDialogueStream'
 import { API_VISITOR_RECOMMENDED_QUESTIONS } from '@/api'
 import { fetchWithCodeEnvelope } from '@/utils/fetchWithCodeEnvelope'
 
 const store = useVisitorStore()
 const auth = useAuthStore()
+
+// ── SSE 流式对话（步骤可视化 + 逐字回答） ──
+const { turns, isStreaming, send } = useDialogueStream()
+const draft = ref('')
+const messagesEl = ref<HTMLElement | null>(null)
+
+function submitDraft() {
+  const text = draft.value.trim()
+  if (!text || isStreaming.value) return
+  draft.value = ''
+  void send(text)
+}
+
+// 新内容到达时自动滚动到底部
+watch(
+  turns,
+  async () => {
+    await nextTick()
+    if (messagesEl.value) {
+      messagesEl.value.scrollTop = messagesEl.value.scrollHeight
+    }
+  },
+  { deep: true },
+)
 
 const iframeSrc = computed(() => {
   const base = import.meta.env.VITE_LIGHT4AI_URL
@@ -123,6 +148,9 @@ async function fetchRecommendedQuestions() {
 }
 
 function onQuestionClick(text: string) {
+  // 发送到 SSE 聊天面板（步骤可视化 + 逐字回答）
+  void send(text)
+  // 同时预填 ADH 数字人 iframe 输入框（保留原行为，不自动发送）
   const targetOrigin = import.meta.env.VITE_ADH_IFRAME_ORIGIN || '*'
   const iframe = document.querySelector(
     '.digital-human-frame'
@@ -193,7 +221,7 @@ function onQuestionClick(text: string) {
         </div>
       </div>
 
-      <!-- Right: Welcome / Guide Panel -->
+      <!-- Right: SSE Streaming Chat Panel -->
       <div class="chat-guide">
         <div class="guide-inner">
           <div class="guide-header">
@@ -201,25 +229,84 @@ function onQuestionClick(text: string) {
             <p>我是您的景区 AI 数字人导览助手</p>
           </div>
           <div class="guide-divider" />
-          <div class="guide-questions">
+
+          <!-- Messages (SSE streaming: steps + typewriter answer) -->
+          <div ref="messagesEl" class="chat-messages">
+            <div v-if="turns.length === 0" class="chat-empty">
+              <p>在下方输入问题开始对话，AI 将展示思考过程并逐字回答</p>
+            </div>
+            <div
+              v-for="turn in turns"
+              :key="turn.id"
+              class="msg-row"
+              :class="`msg-row--${turn.role}`"
+            >
+              <!-- Agent 思考过程/步骤可视化（仅助手消息） -->
+              <div v-if="turn.role === 'assistant'" class="msg-steps">
+                <div
+                  v-for="(step, i) in turn.steps"
+                  :key="i"
+                  class="msg-step"
+                  :class="{
+                    'msg-step--active':
+                      turn.streaming && turn.currentStep === step.label,
+                  }"
+                >
+                  <span v-if="turn.streaming && turn.currentStep === step.label" class="step-spinner" />
+                  <span v-else class="step-check">✓</span>
+                  {{ step.label }}
+                </div>
+              </div>
+
+              <div class="msg-bubble">
+                <span v-if="turn.fallback" class="msg-fallback">
+                  ⚠ 主链路异常，已自动切换备用服务
+                </span>
+                <span v-if="turn.error" class="msg-error">{{ turn.error }}</span>
+                <template v-else>
+                  {{ turn.content }}<span v-if="turn.streaming" class="msg-cursor" />
+                </template>
+              </div>
+            </div>
+          </div>
+
+          <!-- Composer: suggested questions + input -->
+          <div class="chat-composer">
             <p v-if="questionsLoading" class="guide-hint">推荐问句加载中…</p>
             <p v-else-if="suggestedQuestions.length > 0" class="guide-hint">您可以这样问我：</p>
-            <p v-else class="guide-hint">暂无推荐问句</p>
-            <div class="question-list">
+            <div v-if="suggestedQuestions.length > 0" class="question-list">
               <div
                 v-for="q in suggestedQuestions"
                 :key="q"
                 class="question-chip"
+                :class="{ 'is-disabled': isStreaming }"
                 @click="onQuestionClick(q)"
               >
                 {{ q }}
               </div>
             </div>
+            <div class="chat-input-row">
+              <input
+                v-model="draft"
+                class="chat-input"
+                placeholder="输入您的问题，Enter 发送…"
+                :disabled="isStreaming"
+                @keyup.enter="submitDraft"
+              />
+              <button
+                class="chat-send"
+                :disabled="isStreaming || !draft.trim()"
+                @click="submitDraft"
+              >
+                {{ isStreaming ? '…' : '发送' }}
+              </button>
+            </div>
           </div>
+
           <div class="guide-footer">
             <div class="mic-hint">
               <span class="mic-icon">🎤</span>
-              <span>点击麦克风图标开始语音对话</span>
+              <span>点击左侧数字人麦克风开始语音对话</span>
             </div>
           </div>
         </div>
@@ -402,6 +489,196 @@ function onQuestionClick(text: string) {
 
 .guide-questions {
   flex: 1;
+}
+
+/* ── Chat messages（SSE 流式渲染：步骤可视化 + 逐字回答） ── */
+.chat-messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-xs) 2px;
+  scroll-behavior: smooth;
+}
+
+.chat-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-ink-secondary);
+  font-size: var(--text-small);
+  text-align: center;
+  padding: var(--space-lg);
+}
+
+.msg-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.msg-row--user {
+  align-items: flex-end;
+}
+
+.msg-row--assistant {
+  align-items: flex-start;
+}
+
+/* Agent 思考过程/步骤 chips */
+.msg-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 100%;
+}
+
+.msg-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--text-caption);
+  color: var(--color-ink-secondary);
+  background: var(--color-accent-light);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.msg-step--active {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.step-check {
+  font-size: 10px;
+  color: #6B9E6D;
+  font-weight: 700;
+}
+
+.step-spinner {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--color-accent-light);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+/* 消息气泡 */
+.msg-bubble {
+  max-width: 88%;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: 12px;
+  font-size: var(--text-small);
+  line-height: 1.6;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.msg-row--user .msg-bubble {
+  background: var(--color-ink);
+  color: var(--color-paper);
+  border-bottom-right-radius: 4px;
+}
+
+.msg-row--assistant .msg-bubble {
+  background: var(--color-paper);
+  border: 1px solid var(--color-border);
+  border-bottom-left-radius: 4px;
+}
+
+.msg-fallback {
+  display: block;
+  font-size: var(--text-caption);
+  color: var(--color-accent);
+  margin-bottom: 4px;
+}
+
+.msg-error {
+  display: block;
+  color: var(--color-accent);
+}
+
+/* 逐字显示光标 */
+.msg-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background: var(--color-accent);
+  animation: blink 0.9s steps(2, start) infinite;
+}
+
+@keyframes blink {
+  to { visibility: hidden; }
+}
+
+/* ── Composer（推荐问句 + 输入框） ── */
+.chat-composer {
+  padding-top: var(--space-md);
+}
+
+.chat-input-row {
+  display: flex;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.chat-input {
+  flex: 1;
+  min-width: 0;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-paper);
+  font-size: var(--text-small);
+  font-family: var(--font-body);
+  color: var(--color-ink);
+  outline: none;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+.chat-input:focus {
+  border-color: var(--color-accent);
+}
+
+.chat-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.chat-send {
+  flex-shrink: 0;
+  padding: var(--space-sm) var(--space-lg);
+  background: var(--color-ink);
+  color: var(--color-paper);
+  border: none;
+  border-radius: 8px;
+  font-size: var(--text-small);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.chat-send:hover:not(:disabled) {
+  background: var(--color-accent);
+}
+
+.chat-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.question-chip.is-disabled {
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 .guide-hint {

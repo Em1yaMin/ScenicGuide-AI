@@ -1,14 +1,17 @@
 import asyncio
+import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 import httpx
 from fastapi import APIRouter, Header, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.core.security import resolve_dialogue_user
 from app.services import chat_agent
+from app.services.dify_stream import stream_dify_chat as _call_dify_chat_stream
 from app.services.rag_service import build_rag_context, search_documents
 from app.tasks.polling import poll_once
 
@@ -70,7 +73,7 @@ async def chat_with_rag(
         description="Bearer token（可选）：登录用户/游客 token 优先于请求体 user 字段；"
         "无 token 时向后兼容，使用请求体 user（默认 visitor）",
     ),
-) -> ChatResponse:
+) -> Any:
     """RAG 增强的对话接口（双轨：LangChain agent 主链路，Dify 兜底）。
 
     流程（DIALOGUE_ENGINE=langchain，默认）:
@@ -82,12 +85,28 @@ async def chat_with_rag(
 
     DIALOGUE_ENGINE=dify 时强制走 Dify（原链路）。
     RAG 作为补充：即使 RAG 无结果，仍会正常调用 Dify。
+
+    streaming=true 时返回 SSE（text/event-stream），事件格式见 _stream_chat；
+    streaming=false（默认）返回 ChatResponse JSON，行为与历史版本一致。
     """
     # 用户标识来源：优先 Authorization Bearer token（登录用户 → 用户 id；
     # 游客 token → 游客 id；无效 token 降级为 "visitor" 并告警，见
     # security.resolve_dialogue_user 决策注释）；无 token 时回退请求体 user
     # 字段（默认 "visitor"），保持向后兼容。
     effective_user = resolve_dialogue_user(authorization) or request.user
+
+    # 流式模式：SSE（agent 步骤 → 回答 token → done；错误回落 Dify 时带标记）
+    if request.streaming:
+        return StreamingResponse(
+            _stream_chat(request=request, user=effective_user),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                # 禁用 nginx 缓冲，保证事件逐帧到达前端（Vite dev proxy 原生透传）
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     # Step A: LangChain 对话 agent 主链路（默认引擎；异常自动回落 Dify）
     if settings.DIALOGUE_ENGINE != "dify":
@@ -115,33 +134,11 @@ async def chat_with_rag(
             )
 
     # Step B: Dify 链路（原逻辑，LangChain 回落路径 / DIALOGUE_ENGINE=dify）
-    rag_context = ""
-    rag_sources = []
-    modified_query = request.query
-
-    # Step B1: RAG 检索
-    if request.use_rag:
-        try:
-            results = await search_documents(
-                query=request.query,
-                top_k=request.rag_top_k,
-            )
-            if results:
-                rag_context = build_rag_context(results)
-                rag_sources = [
-                    {"source": r["source"], "score": r["score"]}
-                    for r in results
-                ]
-                # 将 RAG 上下文注入 query
-                modified_query = (
-                    f"{rag_context}\n\n"
-                    f"【用户问题】\n{request.query}\n\n"
-                    f"请基于以上知识库内容回答用户问题。"
-                    f"如果知识库内容不足以回答，请根据你的知识诚实告知。"
-                )
-                logger.info("RAG context injected, %d sources", len(rag_sources))
-        except Exception as e:
-            logger.warning("RAG retrieval failed, proceeding without RAG: %s", e)
+    rag_context, rag_sources, modified_query = await _prepare_rag_context(
+        query=request.query,
+        use_rag=request.use_rag,
+        rag_top_k=request.rag_top_k,
+    )
 
     # Step B2: 调用 Dify Chat Agent
     # 会话 ID 移交：LangChain 链路生成的进程内 uuid 对 Dify 未知（透传会
@@ -200,6 +197,139 @@ async def get_rag_context(request: RagContextRequest) -> RagContextResponse:
 
 
 # --- Helpers ---
+
+def _sse(event: Dict[str, Any]) -> str:
+    """序列化为 SSE data 帧（text/event-stream）。
+
+    事件格式（type 字段与 ChatResponse 字段对齐）：
+
+    - {"type": "step", "tool": str, "label": str}：agent 工具调用步骤
+      （正在检索知识库/查询景点/推荐路线…，LangChain 链路）
+    - {"type": "token", "text": str}：最终回答增量（逐字输出）
+    - {"type": "done", "conversation_id": str, "rag_context": str,
+       "rag_sources": list}：流式完成（与 ChatResponse 字段一致）
+    - {"type": "error", "message": str, "fallback": bool}：链路错误；
+      fallback=true 表示已切换 Dify 兜底继续输出，false 表示双链路均失败
+    """
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+
+async def _stream_chat(
+    request: ChatRequest,
+    user: str,
+) -> AsyncIterator[str]:
+    """流式对话事件生成器（双轨：LangChain 主链路，Dify 兜底）。
+
+    事件序列：LangChain 链路 step → token → done；链路异常时先发
+    error(fallback=true) 事件（前端据此清空部分回答）再切换 Dify 流式
+    输出；双链路均失败时发 error(fallback=false) 礼貌报错并结束。
+    """
+    # Step A: LangChain 对话 agent 主链路（默认引擎；异常自动回落 Dify）
+    if settings.DIALOGUE_ENGINE != "dify":
+        try:
+            async for event in chat_agent.chat_stream(
+                query=request.query,
+                user=user,
+                conversation_id=request.conversation_id,
+                use_rag=request.use_rag,
+                rag_top_k=request.rag_top_k,
+            ):
+                yield _sse(event)
+            return
+        except Exception as e:
+            # 故障回落：agent 链路任何异常（含 LLM 未配置）都不阻断对话，
+            # 自动降级到 Dify 原链路（演示不翻车）；error 事件告知前端
+            logger.exception(
+                "LangChain 对话链路失败，自动回落 Dify (engine=%s): %s",
+                settings.DIALOGUE_ENGINE,
+                e,
+            )
+            yield _sse(
+                {
+                    "type": "error",
+                    "message": "主链路异常，已自动切换备用服务。",
+                    "fallback": True,
+                }
+            )
+            yield _sse(
+                {
+                    "type": "step",
+                    "tool": "fallback",
+                    "label": "正在连接备用服务…",
+                }
+            )
+
+    # Step B: Dify 流式链路（LangChain 回落路径 / DIALOGUE_ENGINE=dify）
+    rag_context, rag_sources, modified_query = await _prepare_rag_context(
+        query=request.query,
+        use_rag=request.use_rag,
+        rag_top_k=request.rag_top_k,
+    )
+    # 会话 ID 移交：LangChain 链路生成的进程内 uuid 对 Dify 未知（透传会
+    # 触发 400 conversation_not_exist），回落时传空串让 Dify 新建会话；
+    # 仅透传 Dify 自己生成的 id，保证跨引擎切换后多轮对话可继续。
+    fallback_conversation_id = request.conversation_id
+    if chat_agent.has_conversation(request.conversation_id):
+        fallback_conversation_id = ""
+    try:
+        async for event in _call_dify_chat_stream(
+            query=modified_query,
+            user=user,
+            conversation_id=fallback_conversation_id,
+        ):
+            if event.get("type") == "done":
+                # 与 ChatResponse 契约对齐：透出 RAG 来源信息
+                event = {
+                    **event,
+                    "rag_context": rag_context,
+                    "rag_sources": rag_sources,
+                }
+            yield _sse(event)
+    except Exception:
+        logger.exception("Dify 流式对话失败")
+        yield _sse(
+            {
+                "type": "error",
+                "message": "抱歉，AI 服务暂时不可用，请稍后再试。",
+                "fallback": False,
+            }
+        )
+
+
+async def _prepare_rag_context(
+    query: str,
+    use_rag: bool,
+    rag_top_k: int,
+) -> Tuple[str, List[Dict[str, Any]], str]:
+    """RAG 预检索：返回 (rag_context, rag_sources, modified_query)。
+
+    RAG 检索失败或未启用时返回原始 query（不阻断对话）；检索成功时将
+    知识库上下文注入 query 供 Dify 回答。流式与非流式链路共用。
+    """
+    if not use_rag:
+        return "", [], query
+    try:
+        results = await search_documents(query=query, top_k=rag_top_k)
+    except Exception as e:
+        logger.warning("RAG retrieval failed, proceeding without RAG: %s", e)
+        return "", [], query
+    if not results:
+        return "", [], query
+    rag_context = build_rag_context(results)
+    rag_sources = [
+        {"source": r["source"], "score": r["score"]}
+        for r in results
+    ]
+    # 将 RAG 上下文注入 query
+    modified_query = (
+        f"{rag_context}\n\n"
+        f"【用户问题】\n{query}\n\n"
+        f"请基于以上知识库内容回答用户问题。"
+        f"如果知识库内容不足以回答，请根据你的知识诚实告知。"
+    )
+    logger.info("RAG context injected, %d sources", len(rag_sources))
+    return rag_context, rag_sources, modified_query
+
 
 async def _call_dify_chat(
     query: str,

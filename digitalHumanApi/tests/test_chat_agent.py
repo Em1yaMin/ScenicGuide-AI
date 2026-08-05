@@ -384,3 +384,31 @@ async def test_llm_config_error_propagates(monkeypatch):
 
     with pytest.raises(LLMConfigError):
         await chat_agent.chat("你好")
+
+
+async def test_chat_recursion_limit_breaks_tool_loop(monkeypatch):
+    """异常 LLM 反复请求工具时 agent 步数超限抛 GraphRecursionError
+    （回归：langchain 1.3 的 create_agent 默认 recursion_limit=9999，
+    不加显式限制会循环执行工具近万次而非快速失败回落 Dify）。"""
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        body = json.loads(request.content)
+        if body.get("stream"):
+            raise AssertionError("非流式请求不应发生")
+        return httpx.Response(
+            200,
+            json=_completion(
+                [_tool_call_choice("search_spots", {"query": "自然"})]
+            ),
+        )
+
+    _patch_agent(monkeypatch, handler, use_rag=False)
+    from langgraph.errors import GraphRecursionError
+
+    with pytest.raises(GraphRecursionError):
+        await chat_agent.chat("你好")
+    # 步数上限 25 ≈ 12 轮工具调用，LLM 调用次数远小于 9999
+    assert calls < 30

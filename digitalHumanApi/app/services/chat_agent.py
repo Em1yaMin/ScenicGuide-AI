@@ -28,10 +28,10 @@ import threading
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 from langchain.agents import create_agent
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
 from langchain_core.tools import tool
 
 from app.core.llm import get_chat_llm
@@ -60,8 +60,23 @@ _CHAT_TIMEOUT = 60
 _MAX_HISTORY_MESSAGES = 20
 # 进程内会话总数上限（超限 LRU 淘汰最久未活跃会话，防长跑进程内存无限增长）
 _MAX_CONVERSATIONS = 1000
+# agent 图执行步数上限：langchain 1.3 的 create_agent 把 recursion_limit
+# 硬编码为 9999，异常 LLM 反复请求工具时会循环执行近万次才报错——对话场景
+# 必须显式收紧，超限抛 GraphRecursionError 由路由层快速回落 Dify（不挂起）
+_MAX_AGENT_STEPS = 25
 # 知识检索工具的调用名（用于从 agent 返回中提取 RAG 来源）
 _KNOWLEDGE_TOOL_NAME = "search_knowledge"
+
+# 工具名 → 步骤展示文案（SSE step 事件透出到前端，思考过程可视化）
+_STEP_LABELS: Dict[str, str] = {
+    "search_knowledge": "正在检索知识库…",
+    "search_spots": "正在查询景点…",
+    "search_routes": "正在查询路线…",
+    "get_spot_detail": "正在查询景点详情…",
+    "get_route_detail": "正在查询路线详情…",
+    "filter_by_tags": "正在筛选路线…",
+    "recommend_routes": "正在为您推荐路线…",
+}
 
 
 # ── 推荐工具（包装 recommend_agent.recommend 供 agent 调用） ─────────────
@@ -292,7 +307,10 @@ async def chat(
 
     # 2. 调用 agent（历史 + 当前消息；create_agent 内部循环执行工具）
     agent = _get_agent(use_rag=use_rag)
-    result = await agent.ainvoke({"messages": history + [HumanMessage(content=query)]})
+    result = await agent.ainvoke(
+        {"messages": history + [HumanMessage(content=query)]},
+        config={"recursion_limit": _MAX_AGENT_STEPS},
+    )
     all_messages: List[BaseMessage] = result.get("messages", [])
 
     # 3. 提取最终回答（最后一条非工具消息）
@@ -322,3 +340,97 @@ async def chat(
         rag_context=rag_context,
         rag_sources=rag_sources,
     )
+
+
+async def chat_stream(
+    query: str,
+    *,
+    user: str = "visitor",
+    conversation_id: str = "",
+    use_rag: bool = True,
+    rag_top_k: int = 3,
+) -> AsyncIterator[Dict[str, Any]]:
+    """LangChain 流式对话（SSE 事件源，阶段1 T3）。
+
+    经 `agent.astream(stream_mode="messages")` 逐块产出 LLM 输出：
+
+    - AIMessageChunk：携带 `tool_call_chunks` 的块 → step 事件（工具调用开始）；
+      携带内容增量的块 → token 事件（回答逐字输出；DeepSeek 思考块为空串，
+      langchain-openai 已剥离 reasoning_content，天然不会输出思考过程）
+    - ToolMessage（type="tool"）：工具执行结果 → 收集 search_knowledge 的
+      结果，供 done 事件的 rag_context/rag_sources 透出（与 chat() 契约一致）
+
+    Yields（事件 dict，路由层序列化为 SSE data 帧）：
+
+        {"type": "step", "tool": str, "label": str}   工具调用开始（按调用 id 去重）
+        {"type": "token", "text": str}                回答增量
+        {"type": "done", "conversation_id": str,
+         "rag_context": str, "rag_sources": list}     流式完成
+
+    Raises:
+        LLMConfigError / 网络 / API 异常：由路由层捕获并自动回落 Dify
+    """
+    # 1. 会话管理（进程内，与 chat() 一致）
+    conversation_id = _get_or_create_conversation(conversation_id)
+    with _conversations_lock:
+        history = list(_conversations.get(conversation_id, []))
+
+    # 2. 流式调用 agent（多轮上下文 + 当前消息）
+    agent = _get_agent(use_rag=use_rag)
+    seen_call_ids: "set[str]" = set()
+    # 当前模型消息是否为工具调用消息：是则抑制其内联 content 作为回答输出
+    # （工具调用消息拆分为多个 chunk，须用消息级布尔标志而非计数）
+    suppress_tokens = False
+    rag_tool_messages: List[BaseMessage] = []  # search_knowledge 的 ToolMessage
+    answer_parts: List[str] = []
+
+    async for chunk, _meta in agent.astream(
+        {"messages": history + [HumanMessage(content=query)]},
+        stream_mode="messages",
+        config={"recursion_limit": _MAX_AGENT_STEPS},
+    ):
+        if isinstance(chunk, AIMessageChunk):
+            tool_calls = chunk.tool_call_chunks or []
+            if tool_calls:
+                suppress_tokens = True
+                for call in tool_calls:
+                    call_id = call.get("id")
+                    name = call.get("name")
+                    if name and call_id and call_id not in seen_call_ids:
+                        seen_call_ids.add(call_id)
+                        yield {
+                            "type": "step",
+                            "tool": name,
+                            "label": _STEP_LABELS.get(
+                                name, f"正在调用工具 {name}…"
+                            ),
+                        }
+            text = chunk.content
+            if not suppress_tokens and isinstance(text, str) and text:
+                answer_parts.append(text)
+                yield {"type": "token", "text": text}
+        elif getattr(chunk, "type", "") == "tool":
+            # 工具执行结果（langgraph 1.2 的 messages 流模式亦产出 ToolMessage）
+            suppress_tokens = False
+            if getattr(chunk, "name", "") == _KNOWLEDGE_TOOL_NAME:
+                rag_tool_messages.append(chunk)
+
+    # 3. 追加历史（进程内，阶段2 再做持久化记忆）
+    answer = "".join(answer_parts)
+    _append_history(conversation_id, query, answer)
+
+    # 4. RAG 来源透出（最后一次 search_knowledge 调用，与 chat() 一致）
+    rag_context, rag_sources = _extract_rag_info(rag_tool_messages, rag_top_k)
+    logger.info(
+        "对话完成(流式): engine=langchain user=%s conversation=%s steps=%d answer_len=%d",
+        user,
+        conversation_id,
+        len(seen_call_ids),
+        len(answer),
+    )
+    yield {
+        "type": "done",
+        "conversation_id": conversation_id,
+        "rag_context": rag_context,
+        "rag_sources": rag_sources,
+    }
