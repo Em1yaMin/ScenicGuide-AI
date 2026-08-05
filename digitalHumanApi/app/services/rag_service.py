@@ -12,6 +12,7 @@ CRUD/导入变更后重建 knowledge 命名空间向量索引。
 
 import logging
 import os
+import threading
 from pathlib import Path
 from typing import List, Optional
 
@@ -32,6 +33,11 @@ logger = logging.getLogger(__name__)
 
 # 检索上下文最大长度
 MAX_CONTEXT_LEN: int = int(os.environ.get("RAG_MAX_CONTEXT_LEN", "2000"))
+
+# 向量库共享内存态（_documents/_vectors/_vector_matrix/embedding）互斥锁：
+# 重建（clear+add_documents）与检索共用同一锁边界，避免并发交错导致
+# 索引与 DB 不一致或检索期间向量维度不匹配。
+_vector_index_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -215,8 +221,9 @@ def _index_documents_sync(
 
     # 构建向量库
     vectorstore = get_vectorstore_for_namespace(ns)
-    vectorstore.clear()  # 全量重建
-    vectorstore.add_documents(chunks)
+    with _vector_index_lock:
+        vectorstore.clear()  # 全量重建
+        vectorstore.add_documents(chunks)
 
     return {
         "status": "ok",
@@ -311,15 +318,15 @@ def _index_knowledge_entries_sync(
         ns = namespaces[0]
 
     documents = _build_knowledge_documents(entries)
-    if not documents:
-        # 库已清空：清空向量存储，避免残留旧条目可被检索
-        vectorstore = get_vectorstore_for_namespace(ns)
-        vectorstore.clear()
-        return {"status": "empty", "documents": 0, "namespace": ns}
-
     vectorstore = get_vectorstore_for_namespace(ns)
-    vectorstore.clear()  # 全量重建
-    vectorstore.add_documents(documents)
+    with _vector_index_lock:
+        if not documents:
+            # 库已清空：清空向量存储，避免残留旧条目可被检索
+            vectorstore.clear()
+            return {"status": "empty", "documents": 0, "namespace": ns}
+
+        vectorstore.clear()  # 全量重建
+        vectorstore.add_documents(documents)
 
     return {
         "status": "ok",
@@ -390,7 +397,8 @@ def _search_documents_sync(
 
         for ns in namespaces:
             vectorstore = get_vectorstore_for_namespace(ns)
-            results = vectorstore.similarity_search_with_score(query, k=top_k)
+            with _vector_index_lock:
+                results = vectorstore.similarity_search_with_score(query, k=top_k)
             for doc, score in results:
                 all_results.append({
                     "content": doc.page_content,
