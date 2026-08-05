@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useVisitorStore } from '@/stores/visitor'
+import { useAuthStore } from '@/stores/auth'
 import { API_VISITOR_RECOMMENDED_QUESTIONS } from '@/api'
 import { fetchWithCodeEnvelope } from '@/utils/fetchWithCodeEnvelope'
 
 const store = useVisitorStore()
+const auth = useAuthStore()
 
 const iframeSrc = computed(() => {
   const base = import.meta.env.VITE_LIGHT4AI_URL
@@ -12,6 +14,10 @@ const iframeSrc = computed(() => {
   const params = new URLSearchParams()
   params.set('visitor_id', store.visitorId)
   params.set('live2d_model', import.meta.env.VITE_LIVE2D_MODEL || 'hiyori')
+  // 登录用户 / 游客 token：供数字人端透传对话接口（Bearer），实现「对话携带 token」
+  if (auth.token) {
+    params.set('auth_token', auth.token)
+  }
   const separator = base.includes('?') ? '&' : '?'
   return `${base}${separator}${params.toString()}`
 })
@@ -21,6 +27,7 @@ const MAX_RETRIES = 3
 
 // ── iframe fault tolerance state ──
 const iframeKey = ref(0)
+const iframeReady = ref(false)
 const isLoading = ref(true)
 const loadingError = ref(false)
 const retryCount = ref(0)
@@ -76,6 +83,11 @@ function reloadIframe() {
 }
 
 onMounted(async () => {
+  // 游客兜底：未登录时自动签发短期游客 token（失败静默降级，不阻塞对话使用）
+  if (!auth.isAuthenticated) {
+    await auth.enterGuestMode()
+  }
+  iframeReady.value = true
   await Promise.all([store.registerVisitor(), fetchRecommendedQuestions()])
   if (iframeSrc.value) {
     startLoadingTimeout()
@@ -132,6 +144,11 @@ function onQuestionClick(text: string) {
           <div v-if="!iframeSrc" class="placeholder-panel">
             <div class="placeholder-icon">⚙</div>
             <p>请在 .env 中配置 VITE_LIGHT4AI_URL</p>
+          </div>
+
+          <div v-else-if="!iframeReady" class="placeholder-panel loading-overlay">
+            <div class="loading-spinner" />
+            <p>数字人加载中，请稍候…</p>
           </div>
 
           <!-- iframe (always in DOM for @load/@error) -->

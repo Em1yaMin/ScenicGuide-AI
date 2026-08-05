@@ -12,6 +12,8 @@
 | `DashboardView.vue` | `/admin` | API 数据+ECharts | fetch(API_ADMIN_DASHBOARD) |
 | `ReportView.vue` | `/admin/report` | API 数据+ECharts | fetch(API_ADMIN_REPORT) |
 | `admin/KnowledgeView.vue` | `/admin/knowledge` | API 数据+CRUD 弹窗 | fetch(API_ADMIN_KNOWLEDGE) |
+| `LoginView.vue` | `/login`（顶层路由） | 表单+游客模式 | Pinia auth store |
+| `RegisterView.vue` | `/register`（顶层路由） | 表单校验+自动登录 | Pinia auth store |
 
 ## Data-Fetching View Pattern (三态模板)
 

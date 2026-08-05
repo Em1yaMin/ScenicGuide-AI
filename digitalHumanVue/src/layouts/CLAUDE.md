@@ -1,10 +1,11 @@
 # Layout Components
 
 ## Responsibility
-页面布局壳组件。作为 Vue Router 的父路由 `component`，提供导航 + `<RouterView />` 内容出口。纯展示，无数据获取。
+页面布局壳组件。作为 Vue Router 的父路由 `component`，提供导航 + `<RouterView />` 内容出口。不直接 fetch 数据，但消费 auth store 渲染登录态（昵称显示、登录/注册入口、退出按钮）。
 
 ## Dependencies
-- **vue-router**: `RouterLink`、`RouterView`（唯一导入）
+- **vue-router**: `RouterLink`、`RouterView`、`useRoute`（登录/注册链接携带 `redirect` 回跳参数）
+- **stores/auth**: `useAuthStore`（渲染 auth 区域；登录态判定、`logout()`）
 
 ## Consumers
 - **router/index.ts**: 作为父路由的 `component` 属性
@@ -22,6 +23,7 @@
         <RouterLink to="/admin/report">感受度报告</RouterLink>
         <RouterLink to="/admin/knowledge">知识库</RouterLink>
       </nav>
+      <!-- auth 区域：useAuthStore 渲染登录态 + 登录/注册链接 + 退出（见下方 Dependencies） -->
     </aside>
     <main class="admin-main">
       <RouterView />                   <!-- 子路由渲染 -->
@@ -41,6 +43,7 @@ CSS: `display: flex`（行向）、`border-right` 分隔线
         <RouterLink to="/visitor">首页</RouterLink>
         <RouterLink to="/visitor/chat">数字人</RouterLink>
       </nav>
+      <!-- auth 区域：useAuthStore 渲染登录态 + 登录/注册链接 + 退出（见下方 Dependencies） -->
     </header>
     <main class="visitor-main">
       <RouterView />                   <!-- 子路由渲染 -->
@@ -59,7 +62,7 @@ nav a.router-link-active {
 ```
 
 ## Architectural Boundaries
-- **NO 数据获取** — 仅导航+内容出口
+- **NO 数据获取** — 仅导航+内容出口；auth 区域只消费 store 状态与 `logout()`，不直接 fetch
 - **NO `<slot>`** — 子内容通过嵌套 RouterView 渲染，不用 slots
 - **NO props/emits** — 布局不接收也不发出数据
 - 所有样式用 `<style scoped>` + `var(--*)` 令牌

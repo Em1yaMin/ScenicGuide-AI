@@ -283,7 +283,7 @@ const aiSatisfactionTrendOption = computed(() => {
     tooltip: {
       trigger: 'axis' as const,
       textStyle: { fontSize: 13 },
-      formatter: (params: any) => {
+      formatter: (params: unknown) => {
         const p = Array.isArray(params) ? params[0] : params
         return `${p.axisValue}<br/>满意度均分: <strong>${p.value}</strong>`
       },
@@ -339,7 +339,7 @@ const aiPeakHoursOption = computed(() => {
     tooltip: {
       trigger: 'axis' as const,
       textStyle: { fontSize: 13 },
-      formatter: (params: any) => {
+      formatter: (params: unknown) => {
         const p = Array.isArray(params) ? params[0] : params
         return `${p.axisValue}<br/>对话量: <strong>${p.value}</strong>`
       },

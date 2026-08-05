@@ -70,8 +70,11 @@ export async function fetchWithCodeEnvelope<T = unknown>(
   }
 
   if (!response.ok) {
+    // FastAPI HTTPException 返回 { detail }；解析出消息以提供友好错误提示
+    // （如 401 "用户名或密码错误"、409 "用户名已存在"、422 字段校验）。
+    const detail = await extractErrorDetail(response)
     throw new FetchError(
-      `服务器返回错误 (${response.status})`,
+      detail || `服务器返回错误 (${response.status})`,
       response.status,
     )
   }
@@ -92,4 +95,45 @@ export async function fetchWithCodeEnvelope<T = unknown>(
   }
 
   return body as T
+}
+
+/**
+ * 从非 OK 响应中提取后端错误消息（FastAPI 的 { detail } 字段）。
+ *
+ * 兼容三种形态：
+ * - 字符串：HTTPException(detail="...") → 直接使用
+ * - 数组：422 校验错误 [{ loc, msg }] → 拼接为可读消息
+ * - 无法解析 / 无 detail：返回空串，由调用方回退通用消息
+ */
+async function extractErrorDetail(response: Response): Promise<string> {
+  let body: unknown
+  try {
+    body = await response.json()
+  } catch {
+    return ''
+  }
+  if (typeof body !== 'object' || body === null) return ''
+
+  const detail = (body as CodeEnvelope).detail
+  if (typeof detail === 'string' && detail.trim()) {
+    return detail
+  }
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (typeof item !== 'object' || item === null) return null
+        const { msg, loc } = item as { msg?: unknown; loc?: unknown }
+        if (typeof msg !== 'string' || !msg.trim()) return null
+        if (Array.isArray(loc)) {
+          const field = loc
+            .filter((part): part is string => typeof part === 'string' && part !== 'body')
+            .join('.')
+          return field ? `${field}: ${msg}` : msg
+        }
+        return msg
+      })
+      .filter((m): m is string => m !== null)
+    return messages.join('；')
+  }
+  return ''
 }
