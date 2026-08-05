@@ -22,13 +22,24 @@ function submitDraft() {
 }
 
 const isComposing = ref(false)
+let compositionResetTimer: ReturnType<typeof setTimeout> | null = null
 
 function onCompositionStart() {
+  if (compositionResetTimer) {
+    clearTimeout(compositionResetTimer)
+    compositionResetTimer = null
+  }
   isComposing.value = true
 }
 
 function onCompositionEnd() {
-  isComposing.value = false
+  if (compositionResetTimer) {
+    clearTimeout(compositionResetTimer)
+  }
+  compositionResetTimer = setTimeout(() => {
+    isComposing.value = false
+    compositionResetTimer = null
+  }, 0)
 }
 
 function onInputKeydown(e: KeyboardEvent) {
@@ -140,6 +151,10 @@ onUnmounted(() => {
   if (timeoutId) {
     clearTimeout(timeoutId)
     timeoutId = null
+  }
+  if (compositionResetTimer) {
+    clearTimeout(compositionResetTimer)
+    compositionResetTimer = null
   }
 })
 
