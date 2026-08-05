@@ -13,7 +13,6 @@ import json
 import os
 import pytest
 from httpx import AsyncClient
-from yacs.config import CfgNode as CN
 
 from digitalHuman.agent.core import langchainAgent as langchainAgent_mod
 from digitalHuman.agent.core.langchainAgent import LangChainAgent

@@ -9,7 +9,7 @@ from ..agentBase import BaseAgent
 from .difyAgent import ThinkFilter
 import re
 import json
-from typing import List, Union
+from typing import Union
 from digitalHuman.utils import httpxAsyncClient
 from digitalHuman.utils import logger
 from digitalHuman.utils import AudioMessage, TextMessage

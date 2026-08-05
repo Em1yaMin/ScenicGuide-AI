@@ -213,7 +213,7 @@ pnpm run dev    # 或 node node_modules\next\dist\bin\next dev -p 3000
 
 > **两个命令需分别在各自的终端窗口中运行**（不要关掉）。首次启动前端可能需要清 localStorage `character-storage` 键以加载默认 Hiyori 模型。
 >
-> 引擎配置详见 `AGENTS.md`（ADH 专节）或 `doc/local-digital-human-deploy-plan.md`。当前已配置：腾讯云 ASR + Dify Agent + MiniMax TTS（`Chinese_sweet_girl_nv1` 音色）。
+> 引擎配置详见 `AGENTS.md`（ADH 专节）或 `doc/local-digital-human-deploy-plan.md`。当前已配置：腾讯云 ASR + LangChainAgent（默认，走本后端 LangChain 主链路，异常自动回落 Dify）+ MiniMax TTS（`Chinese_sweet_girl_nv1` 音色）。
 
 ### 6. 访问应用
 
@@ -391,7 +391,7 @@ pytest -v
 | Dify Workflow 量化分析 | ✅ 正常（16 条对话全部评估完成，大屏/报告有真实数据） |
 | 数据大屏 | ✅ 正常（sentiment_trend 全量连续查询，从最早对话日到今天、缺失日零值回填 / satisfaction / hot_issues 均有数据） |
 | 手动触发端点 | ✅ 正常（`POST /sync-now` + `/run-now` 手动触发后台逻辑） |
-| 本地数字人部署 | ✅ 已部署（TencentAPI ASR + DifyAgent + MiniMax TTS） |
+| 本地数字人部署 | ✅ 已部署（TencentAPI ASR + LangChainAgent + MiniMax TTS） |
 | 动态推荐问句 | ✅ 正常（每 5 分钟从 Dify 刷新，缓存 stale-while-revalidate） |
 | Docker Compose | 已配置，未在本次验收中实际构建 |
 
@@ -438,7 +438,7 @@ A: 语音功能需要**安全上下文**（HTTPS 或 localhost）。ADH 数字�
 管理后台等非语音功能不受此限制。本项目已内置 `crypto.randomUUID` 的 fallback（见 `digitalHumanVue/src/utils/uuid.ts`），因此访客端非语音页面可在明文 HTTP 下正常运行，仅语音输入受限。
 
 **Q: ADH 数字人凭据在哪里配置？**
-A: 凭据不写入代码库，配置在 ADH 引擎配置文件中：`live2d-frontend/configs/engines/tts/minimaxTTS.yaml`（MiniMax TTS）、`live2d-frontend/configs/engines/asr/tencentAPI.yaml`（腾讯云 ASR）、`live2d-frontend/configs/agents/difyAgent.yaml`（Dify Agent）。修改后需重启 ADH 后端生效。
+A: 凭据不写入代码库，配置在 ADH 引擎配置文件中：`live2d-frontend/configs/engines/tts/minimaxTTS.yaml`（MiniMax TTS）、`live2d-frontend/configs/engines/asr/tencentAPI.yaml`（腾讯云 ASR）、`live2d-frontend/configs/agents/langchainAgent.yaml`（默认引擎，`LLM_API_URL` 指向本后端，可选 Bearer token）、`live2d-frontend/configs/agents/difyAgent.yaml`（Dify Agent，保留可切换直连）。修改后需重启 ADH 后端生效。
 
 ## Dify Workflow 量化分析规格
 

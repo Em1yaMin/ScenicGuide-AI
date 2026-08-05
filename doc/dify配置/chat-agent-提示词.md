@@ -169,7 +169,7 @@ Dify 聊天助手中使用 `{{}}` 定义变量，在提示词中通过变量动�
 - [ ] 模型参数已配置（见 2.3 节）
 - [ ] 已发布应用并获取 API Key（即 `DIFY_API_KEY`）
 - [ ] 后端 `.env` 中 `DIFY_API_URL` 和 `DIFY_API_KEY` 已填入
-- [ ] ADH `difyAgent.yaml` 中 `DIFY_API_KEY` 已更新（live2d-frontend）
+- [ ] 若 ADH 切回 DifyAgent 直连：`difyAgent.yaml` 中 `DIFY_API_KEY` 已更新（live2d-frontend；默认 LangChainAgent 走本后端，无需此 Key）
 
 ---
 
@@ -177,17 +177,17 @@ Dify 聊天助手中使用 `{{}}` 定义变量，在提示词中通过变量动�
 
 ### 6.1 主后端（FastAPI）
 
-主后端**不直接**调用 Chat Agent。对话由数字人前端（ADH）直接调用 Dify Chat API。主后端仅通过**轮询 Dify API** 抓取对话记录用于统计分析。
+主后端通过 `/api/v1/dialogue/chat` **直接提供对话**（默认 LangChain agent 主链路，异常自动回落本 Chat Agent）。数字人前端（ADH）默认经 LangChainAgent 调用该端点，不再直连 Dify；DifyAgent 直连仅作保留可切换。主后端另通过**轮询 Dify API** 抓取对话记录用于统计分析。最新链路状态以 `AGENTS.md`（ADH 专节）为准。
 
 ```
-游客 → 数字人前端(ADH) → Dify Chat Agent（本应用）
+游客 → 数字人前端(ADH) → 本后端 /api/v1/dialogue/chat（LangChain 主链路，异常回落 Dify Chat Agent）
                               ↓ (旁路轮询)
                          FastAPI → 对话入库 → 量化工作流 → 数据大屏
 ```
 
 ### 6.2 数字人 live2d-frontend（ADH）
 
-live2d-frontend 中的 `configs/agents/difyAgent.yaml` 配置了 Chat Agent 的连接参数：
+live2d-frontend 中的 `configs/agents/difyAgent.yaml` 配置了 Chat Agent 的连接参数（仅切回 DifyAgent 直连时使用；默认引擎为 LangChainAgent，见 `AGENTS.md` ADH 专节）：
 
 ```yaml
 NAME: "DifyAgent"
