@@ -71,7 +71,7 @@ async def test_retry_returns_default():
 ```
 
 ## Architectural Boundaries
-- **无第三方 mock 框架** — 不使用 `unittest.mock`、`pytest-mock`；允许 pytest 内置 `monkeypatch`（固定环境变量/路径，见 conftest.py）与 `httpx.MockTransport`（模拟 Embedding API 网络层）
+- **无第三方 mock 框架** — 不使用 `unittest.mock`、`pytest-mock`；允许 pytest 内置 `monkeypatch`（固定环境变量/路径，见 conftest.py）与 `httpx.MockTransport`（模拟 Embedding/LLM API 网络层）
 - 数据库测试用真实 SQLite 内存引擎，HTTP 测试用 FastAPI `dependency_overrides` 替换 `get_db`
 - 函数级隔离 — 每个测试独立 engine/session/client，测试间数据不互相影响
 - 不测试外部 API（Dify）— 通过内联 stub 函数模拟

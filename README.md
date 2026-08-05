@@ -9,7 +9,7 @@
 | 后端 | Python 3.9+ · FastAPI · SQLAlchemy 2.0 (async) · SQLite (aiosqlite) · httpx · LangChain |
 | 前端 | Vue 3 · TypeScript · Vite 8 · Pinia · Vue Router · ECharts |
 | 部署 | Docker Compose · Nginx |
-| 外部服务 | Dify AI 平台（Chat Agent 对话 + Workflow 量化分析）、LangChain + OpenAI（AI 运营分析）、本地 Live2D 数字人（live2d-frontend） |
+| 外部服务 | Dify AI 平台（Chat Agent 对话 + Workflow 量化分析）、LangChain + OpenAI（AI 运营分析）、对话 LLM（阶段1 接入层，opencode-go DeepSeek，见 `doc/llm-adapter-smoke-test.md`）、本地 Live2D 数字人（live2d-frontend） |
 
 ## 本地数字人依赖
 
@@ -118,7 +118,12 @@ cp .env.example .env
 | `OPENAI_API_KEY` | OpenAI API Key（用于 LangChain AI 运营分析，不配置时回退到纯 DB 统计） |
 | `OPENAI_API_BASE` | OpenAI API 基础地址（可选，默认官方地址） |
 | `OPENAI_MODEL` | OpenAI 模型名（默认 `gpt-4o-mini`） |
-| `EMBEDDING_API_KEY` | Minimax Embedding API Key（RAG 向量化，与 OPENAI_* 独立；不配置时自动降级本地 TF-IDF，详见 AGENTS.md「本地 RAG 知识库」） |
+| `LLM_API_KEY` | 对话 LLM Key（主端点 opencode-go，阶段1 接入层；与 `OPENAI_*`/`EMBEDDING_*` 完全独立，见 `app/core/llm.py` 与 `doc/llm-adapter-smoke-test.md`） |
+| `LLM_API_BASE` | 对话 LLM 主端点（默认 `https://opencode.ai/zen/go/v1`） |
+| `LLM_MODEL` | 对话 LLM 主模型（默认 `deepseek-v4-flash`） |
+| `LLM_FALLBACK_API_KEY` / `LLM_FALLBACK_API_BASE` / `LLM_FALLBACK_MODEL` | 对话 LLM 备用端点（默认官方 DeepSeek API `https://api.deepseek.com/v1` + `deepseek-chat`），主端点未配置 key 时自动切换 |
+| `LLM_TEMPERATURE` | 对话 LLM 默认采样温度（默认 `0.7`） |
+| `EMBEDDING_API_KEY` | Minimax Embedding API Key（RAG 向量化，与 OPENAI_*/LLM_* 独立；不配置时自动降级本地 TF-IDF，详见 AGENTS.md「本地 RAG 知识库」） |
 | `EMBEDDING_API_BASE` | Minimax OpenAI 兼容端点（默认 `https://api.minimaxi.com/v1`，参考官方 Embedding 文档） |
 | `EMBEDDING_MODEL` | Embedding 模型名（默认 `embedding-1`） |
 | `SSH_HOST` / `SSH_PORT` / `SSH_USER` / `SSH_PASSWORD` | 部署 Dify 的远程服务器（可选） |
