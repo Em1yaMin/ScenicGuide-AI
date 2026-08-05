@@ -69,7 +69,7 @@ class Settings(BaseModel):
         "EMBEDDING_API_BASE", "https://api.minimaxi.com/v1"
     )
     EMBEDDING_API_KEY: str = os.environ.get("EMBEDDING_API_KEY", "")
-    EMBEDDING_MODEL: str = os.environ.get("EMBEDDING_MODEL", "embedding-1")
+    EMBEDDING_MODEL: str = os.environ.get("EMBEDDING_MODEL", "embo-01")
 
     SSH_HOST: str = os.environ.get("SSH_HOST", "")
     SSH_PORT: int = int(os.environ.get("SSH_PORT", "22"))

@@ -63,7 +63,7 @@ class MinimaxEmbeddings(Embeddings):
         Args:
             api_key: Minimax API Key（EMBEDDING_API_KEY）
             api_base: OpenAI 兼容端点基址，默认 https://api.minimaxi.com/v1
-            model: Embedding 模型名，默认 embedding-1
+            model: Embedding 模型名，默认 embo-01
             batch_size: 单次请求文本条数上限
             timeout: 请求超时秒数
             _transport: 仅供测试注入 httpx 传输层（如 MockTransport）
