@@ -71,7 +71,10 @@ export function useDialogueStream() {
     if (last && last.role === 'assistant' && last.streaming) return last
     const turn = newTurn('assistant')
     turns.value.push(turn)
-    return turn
+    // 返回响应式代理：push 内部存储的是 turn 的 reactive 代理，直接返回原始
+    // 对象会导致后续 handleFrame 的 content/steps 变更不触发渲染（逐字/步骤
+    // 直到流结束 isStreaming 变更才一次性出现）。从数组中重新取回代理。
+    return turns.value[turns.value.length - 1] as ChatTurn
   }
 
   /** 解析单个 SSE data 帧并应用到当前助手消息。 */
