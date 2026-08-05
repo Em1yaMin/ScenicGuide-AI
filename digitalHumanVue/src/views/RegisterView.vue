@@ -132,11 +132,7 @@ async function handleRegister() {
 
         <p v-if="formError" class="form-error">{{ formError }}</p>
 
-        <button
-          type="submit"
-          class="btn-primary"
-          :disabled="isSubmitting"
-        >
+        <button type="submit" class="btn-primary" :disabled="isSubmitting">
           {{ isSubmitting ? '注册中…' : '注册并登录' }}
         </button>
       </form>

@@ -58,6 +58,7 @@ export const useVisitorStore = defineStore('visitor', () => {
     { path: '',       component: () => import('@/views/HomeView.vue') },  // 视图懒加载
     { path: 'chat',   component: () => import('@/views/ChatView.vue') },
   ]}
+// 例外：认证页 /login /register 为顶层路由（不挂布局），访客端与管理后台均可直达（见 views/CLAUDE.md）
 ```
 
 ## Naming Conventions

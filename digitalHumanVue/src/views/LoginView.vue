@@ -93,11 +93,7 @@ async function enterAsGuest() {
 
         <p v-if="formError" class="form-error">{{ formError }}</p>
 
-        <button
-          type="submit"
-          class="btn-primary"
-          :disabled="isSubmitting"
-        >
+        <button type="submit" class="btn-primary" :disabled="isSubmitting">
           {{ isSubmitting ? '登录中…' : '登录' }}
         </button>
       </form>

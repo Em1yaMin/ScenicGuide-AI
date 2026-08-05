@@ -2,12 +2,7 @@
  * 用户认证 API 封装（对齐后端 PR #14 /api/v1/auth/* 契约）。
  * 统一走 fetchWithCodeEnvelope：HTTP 层错误（401/409/422）会携带后端 detail 消息抛出。
  */
-import {
-  API_AUTH_GUEST,
-  API_AUTH_LOGIN,
-  API_AUTH_ME,
-  API_AUTH_REGISTER,
-} from '@/api'
+import { API_AUTH_GUEST, API_AUTH_LOGIN, API_AUTH_ME, API_AUTH_REGISTER } from '@/api'
 import type {
   AuthResponse,
   GuestResponse,
