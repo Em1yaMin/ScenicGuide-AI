@@ -27,6 +27,7 @@ const MAX_RETRIES = 3
 
 // ── iframe fault tolerance state ──
 const iframeKey = ref(0)
+const iframeReady = ref(false)
 const isLoading = ref(true)
 const loadingError = ref(false)
 const retryCount = ref(0)
@@ -86,6 +87,7 @@ onMounted(async () => {
   if (!auth.isAuthenticated) {
     await auth.enterGuestMode()
   }
+  iframeReady.value = true
   await Promise.all([store.registerVisitor(), fetchRecommendedQuestions()])
   if (iframeSrc.value) {
     startLoadingTimeout()
@@ -142,6 +144,11 @@ function onQuestionClick(text: string) {
           <div v-if="!iframeSrc" class="placeholder-panel">
             <div class="placeholder-icon">⚙</div>
             <p>请在 .env 中配置 VITE_LIGHT4AI_URL</p>
+          </div>
+
+          <div v-else-if="!iframeReady" class="placeholder-panel loading-overlay">
+            <div class="loading-spinner" />
+            <p>数字人加载中，请稍候…</p>
           </div>
 
           <!-- iframe (always in DOM for @load/@error) -->

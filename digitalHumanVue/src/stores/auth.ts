@@ -110,12 +110,15 @@ export const useAuthStore = defineStore('auth', () => {
 
   /** 游客模式：签发短期游客 token（匿名）。失败时静默降级（无 token 亦可使用）。 */
   async function enterGuestMode(): Promise<boolean> {
+    const hadSession = Boolean(token.value)
     try {
       const result = await createGuestToken()
       persistSession(result.access_token, { id: result.guest_id, is_guest: true })
       return true
     } catch {
-      clearSession()
+      if (!hadSession) {
+        clearSession()
+      }
       return false
     }
   }

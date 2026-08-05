@@ -23,6 +23,7 @@ const redirectTarget = computed(() => {
 })
 
 async function handleLogin() {
+  if (isSubmitting.value) return
   formError.value = null
   const name = username.value.trim()
   if (!name) {
@@ -101,18 +102,20 @@ async function enterAsGuest() {
         </button>
       </form>
 
-      <div class="auth-divider">
-        <span>或</span>
-      </div>
+      <template v-if="!auth.isLoggedIn">
+        <div class="auth-divider">
+          <span>或</span>
+        </div>
 
-      <button
-        type="button"
-        class="btn-secondary"
-        :disabled="isEnteringGuest"
-        @click="enterAsGuest"
-      >
-        {{ isEnteringGuest ? '进入中…' : '游客模式直接进入' }}
-      </button>
+        <button
+          type="button"
+          class="btn-secondary"
+          :disabled="isEnteringGuest"
+          @click="enterAsGuest"
+        >
+          {{ isEnteringGuest ? '进入中…' : '游客模式直接进入' }}
+        </button>
+      </template>
 
       <p class="auth-switch">
         还没有账号？
