@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.core.security import resolve_dialogue_user
+from app.services import chat_agent
 from app.services.rag_service import build_rag_context, search_documents
 from app.tasks.polling import poll_once
 
@@ -22,7 +23,7 @@ class ChatRequest(BaseModel):
     """RAG 增强对话请求。"""
     query: str = Field(..., description="用户输入", min_length=1, max_length=5000)
     user: str = Field(default="visitor", description="用户标识")
-    conversation_id: str = Field(default="", description="Dify 会话 ID（留空则新建）")
+    conversation_id: str = Field(default="", description="会话 ID（LangChain 进程内会话或 Dify 会话；留空则新建）")
     use_rag: bool = Field(default=True, description="是否启用本地 RAG 检索")
     rag_top_k: int = Field(default=3, description="RAG 检索结果数", ge=1, le=10)
     streaming: bool = Field(default=False, description="是否流式返回")
@@ -31,7 +32,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     """对话响应。"""
     answer: str = Field(default="", description="回复内容")
-    conversation_id: str = Field(default="", description="Dify 会话 ID")
+    conversation_id: str = Field(default="", description="会话 ID（LangChain 进程内会话或 Dify 会话）")
     rag_context: str = Field(default="", description="注入的 RAG 上下文（调试用）")
     rag_sources: list = Field(default_factory=list, description="RAG 检索来源")
 
@@ -70,20 +71,55 @@ async def chat_with_rag(
         "无 token 时向后兼容，使用请求体 user（默认 visitor）",
     ),
 ) -> ChatResponse:
-    """RAG 增强的对话接口。
+    """RAG 增强的对话接口（双轨：LangChain agent 主链路，Dify 兜底）。
 
-    流程:
-    1. (可选) 先在本地 RAG 知识库中检索相关文档
-    2. 将检索到的上下文注入 query，调用 Dify Chat Agent
-    3. 返回增强后的回复
+    流程（DIALOGUE_ENGINE=langchain，默认）:
+    1. 走 LangChain 对话 agent（app/services/chat_agent.py）：结构化工具
+       直查景点/路线（零幻觉）+ search_knowledge 统一检索入口查知识库
+       + recommend_routes 规则推荐，进程内多轮上下文
+    2. agent 链路异常（LLM 未配置/网络/API 故障）时自动回落 Dify：
+       先本地 RAG 预检索注入 query，再调用 Dify Chat Agent
 
+    DIALOGUE_ENGINE=dify 时强制走 Dify（原链路）。
     RAG 作为补充：即使 RAG 无结果，仍会正常调用 Dify。
     """
+    # 用户标识来源：优先 Authorization Bearer token（登录用户 → 用户 id；
+    # 游客 token → 游客 id；无效 token 降级为 "visitor" 并告警，见
+    # security.resolve_dialogue_user 决策注释）；无 token 时回退请求体 user
+    # 字段（默认 "visitor"），保持向后兼容。
+    effective_user = resolve_dialogue_user(authorization) or request.user
+
+    # Step A: LangChain 对话 agent 主链路（默认引擎；异常自动回落 Dify）
+    if settings.DIALOGUE_ENGINE != "dify":
+        try:
+            result = await chat_agent.chat(
+                query=request.query,
+                user=effective_user,
+                conversation_id=request.conversation_id,
+                use_rag=request.use_rag,
+                rag_top_k=request.rag_top_k,
+            )
+            return ChatResponse(
+                answer=result.answer,
+                conversation_id=result.conversation_id,
+                rag_context=result.rag_context,
+                rag_sources=result.rag_sources,
+            )
+        except Exception as e:
+            # 故障回落：agent 链路任何异常（含 LLM 未配置）都不阻断对话，
+            # 自动降级到 Dify 原链路（演示不翻车）
+            logger.exception(
+                "LangChain 对话链路失败，自动回落 Dify (engine=%s): %s",
+                settings.DIALOGUE_ENGINE,
+                e,
+            )
+
+    # Step B: Dify 链路（原逻辑，LangChain 回落路径 / DIALOGUE_ENGINE=dify）
     rag_context = ""
     rag_sources = []
     modified_query = request.query
 
-    # Step 1: RAG 检索
+    # Step B1: RAG 检索
     if request.use_rag:
         try:
             results = await search_documents(
@@ -107,21 +143,22 @@ async def chat_with_rag(
         except Exception as e:
             logger.warning("RAG retrieval failed, proceeding without RAG: %s", e)
 
-    # Step 2: 调用 Dify Chat Agent
-    # 用户标识来源：优先 Authorization Bearer token（登录用户 → 用户 id；
-    # 游客 token → 游客 id；无效 token 降级为 "visitor" 并告警，见
-    # security.resolve_dialogue_user 决策注释）；无 token 时回退请求体 user
-    # 字段（默认 "visitor"），保持向后兼容。
-    effective_user = resolve_dialogue_user(authorization) or request.user
+    # Step B2: 调用 Dify Chat Agent
+    # 会话 ID 移交：LangChain 链路生成的进程内 uuid 对 Dify 未知（透传会
+    # 触发 400 conversation_not_exist），回落时传空串让 Dify 新建会话；
+    # 仅透传 Dify 自己生成的 id，保证跨引擎切换后多轮对话可继续。
+    fallback_conversation_id = request.conversation_id
+    if chat_agent.has_conversation(request.conversation_id):
+        fallback_conversation_id = ""
     try:
         dify_response = await _call_dify_chat(
             query=modified_query,
             user=effective_user,
-            conversation_id=request.conversation_id,
+            conversation_id=fallback_conversation_id,
         )
         answer = dify_response.get("answer", "")
         conversation_id = dify_response.get("conversation_id", "")
-    except Exception as e:
+    except Exception:
         logger.exception("Dify chat call failed")
         answer = "抱歉，AI 服务暂时不可用，请稍后再试。"
         conversation_id = request.conversation_id
@@ -157,7 +194,7 @@ async def get_rag_context(request: RagContextRequest) -> RagContextResponse:
             len(results),
         )
         return RagContextResponse(context=context, sources=sources)
-    except Exception as e:
+    except Exception:
         logger.exception("RAG context retrieval failed")
         return RagContextResponse(context="", sources=[])
 

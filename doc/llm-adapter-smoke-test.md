@@ -78,7 +78,7 @@ AIMessage `additional_kwargs` 携带 `reasoning_content` 时也会原样透传�
 |------|------|------|
 | `reasoning_content` 剥离 | LangChain 自动剥离，无需处理 | 同左（DeepSeek 兼容 OpenAI 协议） |
 | `max_tokens` 字段 | 不识别 `max_completion_tokens` | 同样只识别 `max_tokens` → 工厂 extra_body 方案通用 |
-| 多轮回传 `reasoning_content` | **不强制**（网关容错） | **强制要求**：历史 assistant 消息缺 `reasoning_content` 会报错 → 备用通道多轮对话需自定义消息转换（把上轮 reasoning 存入 AIMessage.additional_kwargs 回传），由对话链路任务实现 |
+| 多轮回传 `reasoning_content` | **不强制**（网关容错） | **强制要求**：历史 assistant 消息缺 `reasoning_content` 会报错 → 备用通道多轮对话需自定义消息转换（把上轮 reasoning 存入 AIMessage.additional_kwargs 回传）；T2 对话链路（chat_agent）尚未实现该转换，主端点 opencode-go 容错不受影响 |
 | 思考 token 统计 | `usage.completion_tokens_details.reasoning_tokens` | 同左 |
 
 ## 4. 复现方式
