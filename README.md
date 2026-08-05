@@ -123,7 +123,7 @@ cp .env.example .env
 | `LLM_MODEL` | 对话 LLM 主模型（默认 `deepseek-v4-flash`） |
 | `LLM_FALLBACK_API_KEY` / `LLM_FALLBACK_API_BASE` / `LLM_FALLBACK_MODEL` | 对话 LLM 备用端点（默认官方 DeepSeek API `https://api.deepseek.com/v1` + `deepseek-chat`），主端点未配置 key 时自动切换 |
 | `LLM_TEMPERATURE` | 对话 LLM 默认采样温度（默认 `0.7`） |
-| `EMBEDDING_API_KEY` | Minimax Embedding API Key（RAG 向量化，与 OPENAI_* 独立；不配置时自动降级本地 TF-IDF，详见 AGENTS.md「本地 RAG 知识库」） |
+| `EMBEDDING_API_KEY` | Minimax Embedding API Key（RAG 向量化，与 OPENAI_*/LLM_* 独立；不配置时自动降级本地 TF-IDF，详见 AGENTS.md「本地 RAG 知识库」） |
 | `EMBEDDING_API_BASE` | Minimax OpenAI 兼容端点（默认 `https://api.minimaxi.com/v1`，参考官方 Embedding 文档） |
 | `EMBEDDING_MODEL` | Embedding 模型名（默认 `embedding-1`） |
 | `SSH_HOST` / `SSH_PORT` / `SSH_USER` / `SSH_PASSWORD` | 部署 Dify 的远程服务器（可选） |
