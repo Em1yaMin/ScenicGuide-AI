@@ -104,6 +104,9 @@ _TOOLS: List[Any] = [
 
 _conversations: "OrderedDict[str, List[BaseMessage]]" = OrderedDict()
 _conversations_lock = threading.Lock()
+# 本模块生成的会话 ID 集合（仅 uuid.uuid4().hex 生成时登记）：
+# 判定「该 id 对 Dify 未知」用，不随 LRU 淘汰，也不登记客户端传入/复用的 id
+_generated_conversation_ids: "set[str]" = set()
 
 
 def _evict_locked() -> None:
@@ -117,7 +120,9 @@ def _get_or_create_conversation(conversation_id: str) -> str:
     """按 conversation_id 取会话；空 id 或未知 id 时新建并返回有效 id。"""
     with _conversations_lock:
         if not conversation_id or conversation_id not in _conversations:
-            conversation_id = conversation_id or uuid.uuid4().hex
+            if not conversation_id:
+                conversation_id = uuid.uuid4().hex
+                _generated_conversation_ids.add(conversation_id)
             _conversations[conversation_id] = []
             _evict_locked()
             logger.info("新建对话会话: conversation_id=%s", conversation_id)
@@ -149,16 +154,17 @@ def clear_conversation(conversation_id: str) -> None:
 
 
 def has_conversation(conversation_id: str) -> bool:
-    """判断会话 ID 是否由本模块（LangChain 链路）进程内管理。
+    """判断会话 ID 是否由本模块（LangChain 链路）生成。
 
     供路由层双轨回落使用：LangChain 生成的 uuid 会话 ID 对 Dify 未知
     （透传会触发 400 conversation_not_exist），需先经此判断决定是否
-    移交空 ID 让 Dify 新建会话。
+    移交空 ID 让 Dify 新建会话；Dify 自己生成的 id 不会登记，回落时
+    原样透传以延续 Dify 侧多轮上下文。
     """
     if not conversation_id:
         return False
     with _conversations_lock:
-        return conversation_id in _conversations
+        return conversation_id in _generated_conversation_ids
 
 
 # ── Agent 构建（缓存） ────────────────────────────────────────────────────

@@ -36,10 +36,12 @@ def _pin_llm_config(monkeypatch):
     chat_agent.reset_agent_cache()
     with chat_agent._conversations_lock:
         chat_agent._conversations.clear()
+        chat_agent._generated_conversation_ids.clear()
     yield
     chat_agent.reset_agent_cache()
     with chat_agent._conversations_lock:
         chat_agent._conversations.clear()
+        chat_agent._generated_conversation_ids.clear()
 
 
 # ── Mock 响应构造（OpenAI/DeepSeek 兼容 tool-calling 格式） ───────────────
@@ -244,6 +246,69 @@ async def test_chat_auto_generates_conversation_id(monkeypatch):
     r2 = await chat_agent.chat("你好", conversation_id=r1.conversation_id)
     assert r1.conversation_id
     assert r2.conversation_id == r1.conversation_id
+
+
+# ── 会话 ID 归属判定（双轨回落用） ───────────────────────────────────────
+
+
+async def test_has_conversation_true_only_for_generated_ids(monkeypatch):
+    """has_conversation 仅对本模块生成的 id 返回 True。
+
+    客户端传入的未知 id（如 Dify 生成的会话 id）即使被 LangChain 侧复用
+    为会话 key，也不应被判定为本模块所有——回落时须原样透传给 Dify。
+    """
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json=_completion([_text_choice("答")]))
+
+    _patch_agent(monkeypatch, handler, use_rag=False)
+    r1 = await chat_agent.chat("你好", conversation_id="")
+    assert chat_agent.has_conversation(r1.conversation_id) is True
+    # Dify 生成的 id 被 LangChain 复用建会后仍不算本模块所有
+    r2 = await chat_agent.chat("你好", conversation_id="dify-cid")
+    assert r2.conversation_id == "dify-cid"
+    assert chat_agent.has_conversation("dify-cid") is False
+    assert chat_agent.has_conversation("") is False
+
+
+async def test_has_conversation_survives_lru_eviction(monkeypatch):
+    """LRU 淘汰不改变 has_conversation 判定：被淘汰的 LangChain id 对
+    Dify 依旧未知，回落时仍需传空串而非原样透传。"""
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json=_completion([_text_choice("答")]))
+
+    _patch_agent(monkeypatch, handler, use_rag=False)
+    monkeypatch.setattr(chat_agent, "_MAX_CONVERSATIONS", 1)
+    ids = []
+    for i in range(3):
+        r = await chat_agent.chat(f"问{i}", conversation_id="")
+        ids.append(r.conversation_id)
+    # 仅最新会话留在进程内，早先的已被 LRU 淘汰
+    with chat_agent._conversations_lock:
+        assert ids[0] not in chat_agent._conversations
+    assert chat_agent.has_conversation(ids[0]) is True
+    assert chat_agent.has_conversation(ids[2]) is True
+
+
+async def test_clear_conversation_keeps_generated_id(monkeypatch):
+    """clear_conversation 仅清历史：id 仍由本模块生成，归属判定不变。"""
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(json.loads(request.content))
+        return httpx.Response(200, json=_completion([_text_choice("答")]))
+
+    _patch_agent(monkeypatch, handler, use_rag=False)
+    r1 = await chat_agent.chat("你好", conversation_id="")
+    chat_agent.clear_conversation(r1.conversation_id)
+    with chat_agent._conversations_lock:
+        assert r1.conversation_id not in chat_agent._conversations
+    assert chat_agent.has_conversation(r1.conversation_id) is True
 
 
 # ── 多轮上下文 ─────────────────────────────────────────────────────────────

@@ -15,6 +15,10 @@ from app.services import chat_agent
 def _pin_dialogue_engine(monkeypatch):
     """固定默认引擎为 langchain（与生产默认一致）。"""
     monkeypatch.setattr(settings, "DIALOGUE_ENGINE", "langchain")
+    # 清理 chat_agent 进程内会话，避免跨测试污染归属判定
+    with chat_agent._conversations_lock:
+        chat_agent._conversations.clear()
+        chat_agent._generated_conversation_ids.clear()
 
 
 async def _chat(client, query="你好", **kwargs):
@@ -126,9 +130,12 @@ async def test_langchain_failure_falls_back_to_dify(client, monkeypatch):
 
 
 async def test_fallback_blank_cid_for_langchain_owned_session(client, monkeypatch):
-    """跨轮回落：id 由 LangChain 进程内管理时，Dify 收到空 conversation_id
+    """跨轮回落：id 由 LangChain 生成时，Dify 收到空 conversation_id
     （避免 400 conversation_not_exist，让 Dify 新建会话兜底回答）。"""
     dify_calls = []
+
+    # 真实生成一个 LangChain 会话 id（登记为模块生成）
+    lc_cid = chat_agent._get_or_create_conversation("")
 
     async def boom(**kwargs):
         raise RuntimeError("LLM 服务故障")
@@ -138,9 +145,8 @@ async def test_fallback_blank_cid_for_langchain_owned_session(client, monkeypatc
         return {"answer": "dify 兜底回答", "conversation_id": "cid-new"}
 
     monkeypatch.setattr(chat_agent, "chat", boom)
-    monkeypatch.setattr(chat_agent, "has_conversation", lambda cid: cid == "lc-uuid")
     monkeypatch.setattr(dialogue, "_call_dify_chat", fake_dify)
-    resp = await _chat(client, conversation_id="lc-uuid")
+    resp = await _chat(client, conversation_id=lc_cid)
     assert resp.status_code == 200
     data = resp.json()
     assert data["answer"] == "dify 兜底回答"
@@ -149,9 +155,14 @@ async def test_fallback_blank_cid_for_langchain_owned_session(client, monkeypatc
 
 
 async def test_fallback_keeps_dify_owned_conversation_id(client, monkeypatch):
-    """跨轮回落：id 由 Dify 生成（非 LangChain 管理）时原样透传，
-    保证 Dify 侧多轮上下文延续。"""
+    """跨轮回落：id 由 Dify 生成（LangChain 侧仅复用为会话 key）时原样透传，
+    保证 Dify 侧多轮上下文延续（回归：上轮修复曾误判此路径）。"""
     dify_calls = []
+
+    # 模拟 R2：Dify 生成的 id 被 LangChain 复用建会（不登记为模块生成）
+    reused = chat_agent._get_or_create_conversation("dify-cid")
+    assert reused == "dify-cid"
+    assert chat_agent.has_conversation("dify-cid") is False
 
     async def boom(**kwargs):
         raise RuntimeError("LLM 服务故障")
@@ -161,7 +172,6 @@ async def test_fallback_keeps_dify_owned_conversation_id(client, monkeypatch):
         return {"answer": "dify 兜底回答", "conversation_id": conversation_id}
 
     monkeypatch.setattr(chat_agent, "chat", boom)
-    monkeypatch.setattr(chat_agent, "has_conversation", lambda cid: False)
     monkeypatch.setattr(dialogue, "_call_dify_chat", fake_dify)
     resp = await _chat(client, conversation_id="dify-cid")
     assert resp.status_code == 200
