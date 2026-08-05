@@ -62,7 +62,7 @@ digitalHuman/
 │   └── .env                  # 前端环境变量（需自行创建）
 ├── AGENTS.md                  # 项目记忆（唯一权威源；CLAUDE.md 为指向它的 symlink）
 ├── .pi/                       # pi 编码助手配置与扩展
-├── doc/                       # 设计文档目录（Dify 工作流、部署计划等）
+├── doc/                       # 设计文档目录（Dify 工作流、部署计划等）；景区知识库/ 为 RAG 索引文档源
 ├── live2d-frontend/           # 本地 Live2D 数字人（awesome-digital-human-live2d）
 ├── docker-compose.yml
 ├── Dockerfile.api             # 后端容器镜像构建
@@ -343,6 +343,16 @@ docker-compose up -d --build
 | PUT | `/api/admin/knowledge/{id}` | 编辑知识库条目 |
 | DELETE | `/api/admin/knowledge/{id}` | 删除知识库条目 |
 | POST | `/api/admin/knowledge/import` | 批量导入（JSON/Markdown 文件） |
+
+> **知识库与 RAG 联动**：管理后台知识库增/删/改/导入后自动同步重建 `knowledge` 命名空间向量索引，后台检索立即可见；结构化景点/路线数据不走向量，由推荐 Agent 结构化工具直查（零幻觉原则）。
+
+RAG 接口（`/api/rag/*`，统一检索入口，对话 RAG、推荐 Agent 与后台共用）：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/rag/search` | 语义检索；`namespace` 逗号分隔限定（knowledge/documents/user_memory），默认 knowledge+documents；响应含 `embedding_backend`/`degraded` 标记 |
+| POST | `/api/rag/index` | 全量重新索引；默认 documents 命名空间，文档源限定 `doc/景区知识库/`（三份景区知识 md），不索引架构/设计文档 |
+| GET | `/api/rag/status` | 各命名空间状态（文档数、embedding 后端、降级标记） |
 
 ## 用户体系（注册/登录/JWT）
 

@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from langchain_core.tools import tool
 
 from app.schemas.recommend import RecommendResponse, RouteRecommendation, SpotInfo
+from app.services.rag_service import _search_documents_sync
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +125,15 @@ def filter_by_tags(tags: str) -> str:
             results.append(route)
     if not results:
         return json.dumps({"message": f"没有匹配标签'{tags}'的路线"}, ensure_ascii=False)
+    return json.dumps(results, ensure_ascii=False, indent=2)
+
+
+@tool
+def search_knowledge(query: str, top_k: int = 3) -> str:
+    """检索本地知识库（讲解词/FAQ/景区资料），返回与 query 最相关的知识片段 JSON 列表。
+    每条含 content、source、score、namespace 字段。
+    用于补充结构化景点/路线数据之外的人文典故、开放时间等背景知识。"""
+    results = _search_documents_sync(query=query, top_k=top_k)
     return json.dumps(results, ensure_ascii=False, indent=2)
 
 

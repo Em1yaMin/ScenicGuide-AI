@@ -94,9 +94,11 @@
 | G1 | Dify 对话 user 值不可枚举，无法 100% 确认「无对话」而非「user 不符」 | 可能漏迁历史对话 | 控制台「日志与标注」页核对实际 user；或请 light4ai 侧确认固定 user |
 | G2 | Dify 知识库内容未导出（无 Dataset Key / 管理员凭据） | 无法核对 Dify 侧文档与三份 md 的差异 | 船长提供控制台凭据或 Dataset Key 后补导出一版存档 |
 | G3 | `DIFY_LIGHT4AI_USER` 本地 .env 为空 | 增量 polling 与补拉默认不生效（需显式 `--user`） | 部署时在 `.env` 配置与 ADH `difyAgent.yaml` 的 `DIFY_API_USER` 一致的 user 值 |
-| G4 | 三份 md 未建本地 RAG 索引 | 本地检索不可用 | 交由 sg-kb-index 任务（分块建议见下） |
+| G4 | 三份 md 未建本地 RAG 索引 | 本地检索不可用 | ✅ 已由 sg-kb-index 任务完成（`DEFAULT_DOC_DIR` 限定 `doc/景区知识库/`，`POST /api/rag/index` 全量重建，分块建议见下） |
 
 ## 4. 后续建议（供 sg-kb-index 参考）
+
+> ✅ 该任务已完成（fm/sg-kb-index）：知识库 CRUD/导入同步重建 knowledge 命名空间，统一检索入口 `/api/rag/search`（对话 RAG、推荐 Agent、后台共用），详见 AGENTS.md「本地 RAG 知识库」。以下建议保留供后续索引调优参考。
 
 1. **分块策略**（本地 RAG `CHUNK_SIZE=500` 字符默认值需按文件调整）：
    - 指南 md：按 `##` 标题分块即可，块约 300~800 字符，与默认分段兼容。

@@ -10,6 +10,12 @@ def _set_admin_token(monkeypatch):
     monkeypatch.setattr(settings, "ADMIN_API_TOKEN", "test-admin-token")
 
 
+@pytest.fixture(autouse=True)
+def _redirect_rag_data_dir(monkeypatch, tmp_path):
+    """知识库 CRUD 会同步向量索引（knowledge 命名空间），重定向持久化目录避免污染工作区。"""
+    monkeypatch.setattr("app.core.rag.RAG_DATA_DIR", tmp_path / "rag_data")
+
+
 async def _create_item(client: AsyncClient, payload: dict):
     return await client.post(
         "/api/admin/knowledge",
