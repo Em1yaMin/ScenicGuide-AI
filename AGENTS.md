@@ -80,12 +80,14 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - 备用通道官方 DeepSeek API 多轮对话要求历史 assistant 消息回传 `reasoning_content`（opencode-go 网关不强制）；对话链路（chat_agent）尚未实现该自定义转换，备用端点多轮对话受限（主端点 opencode-go 容错不受影响）
 - 冒烟脚本：`digitalHumanApi/scripts/smoke_llm.py`（`LLM_API_KEY=... python -m scripts.smoke_llm`；`--fallback` 测备用端点）；单测 `tests/test_llm.py`（MockTransport 模拟，不发真实请求）
 
-## 对话 agent（阶段1 T2：LangChain 主链路 + Dify 双轨）
+## 对话 agent（阶段1 T2+T3：LangChain 主链路 + Dify 双轨 + SSE 流式）
 
 - `app/services/chat_agent.py` — LangChain tool-calling agent（**langchain 1.x 新 API `create_agent`**，返回 langgraph 状态图，`ainvoke({"messages": [...]})`；旧的 `create_tool_calling_agent`/`AgentExecutor` 在 1.x 已移除）：结构化工具直查景点/路线（复用 `recommend_agent` 的 `search_spots`/`search_routes`/`get_spot_detail`/`get_route_detail`/`filter_by_tags`，零幻觉）、`search_knowledge`（复用统一检索入口）、`recommend_routes`（包装 `recommend_agent.recommend`，工具内 `asyncio.run` 安全——langgraph 经线程池执行同步工具）；进程内多轮会话（`conversation_id` → 消息历史 dict + 线程锁；LLM 调用 60s 超时、会话上限 1000 个 LRU 淘汰；阶段1 不持久化）；RAG 来源从返回消息中最后一条 `search_knowledge` 的 ToolMessage 提取透出
 - 双轨开关：`DIALOGUE_ENGINE=langchain`（**默认**，异常自动回落 Dify，演示不翻车）`|dify`（强制原链路）；`app/routers/dialogue.py` 的 `/api/v1/dialogue/chat` 先走 `chat_agent.chat`，任何异常（含 `LLMConfigError`）回落 `_call_dify_chat`（保留原 RAG 预检索逻辑）；回落时经 `has_conversation` 判定，不把 LangChain 生成的进程内会话 ID 透传给 Dify（未知 id 会 400 conversation_not_exist），改传空串让 Dify 新建会话；响应契约不变（answer/conversation_id/rag_context/rag_sources）
+- **recursion_limit 坑（实测）**：langchain 1.3 的 `create_agent` 把 `recursion_limit` 硬编码为 **9999**，异常 LLM 反复请求工具会循环执行近万次才报错——`chat`/`chat_stream` 必须显式传 `config={"recursion_limit": 25}`（超限抛 GraphRecursionError → 路由层回落 Dify，不挂起）
+- **SSE 流式（T3）**：`streaming=true` 时 `/dialogue/chat` 返回 SSE，事件格式 `data: {json}`：`{"type":"step","tool","label"}`（工具调用步骤）/ `{"type":"token","text"}`（回答增量）/ `{"type":"done","conversation_id","rag_context","rag_sources"}`（与 ChatResponse 对齐）/ `{"type":"error","message","fallback"}`（fallback=true 表示已切换 Dify 兜底）；`chat_agent.chat_stream` 经 `agent.astream(stream_mode="messages")` 逐块产出（langgraph 1.2 的 messages 流模式**同时产出 ToolMessage**，可从中提取 RAG 来源；工具调用消息拆为多个带 `tool_call_chunks` 的 chunk，按调用 id 去重 step、用布尔标志抑制工具消息内联 content）；Dify 兜底链路同样流式（`app/services/dify_stream.py`，ThinkFilter 过滤 `<think>` 块，参考 live2d-frontend 实现）；前端消费见 `digitalHumanVue/src/composables/useDialogueStream.ts` + `ChatView.vue` 右侧聊天面板；SSE 响应头含 `X-Accel-Buffering: no`（防 nginx 缓冲）
 - 测试注意：agent 经 `ainvoke` 调用时走 openai SDK **async client**，MockTransport 需同时注入 `http_client`（httpx.Client）与 `http_async_client`（httpx.AsyncClient）两个参数（`async_client` 字段是 openai 资源对象，不可直接传）
-- 单测：`tests/test_chat_agent.py`（工具调用链路/多轮上下文/RAG 来源/use_rag 开关，MockTransport 模拟 DeepSeek tool-calling 响应）、`tests/test_dialogue_engine.py`（双轨/回落/双链路失败礼貌报错）
+- 单测：`tests/test_chat_agent.py`（工具调用链路/多轮上下文/RAG 来源/use_rag 开关，MockTransport 模拟 DeepSeek tool-calling 响应）、`tests/test_chat_agent_stream.py`（流式 step 去重/token/done/RAG 来源/recursion_limit 断环）、`tests/test_dialogue_engine.py`（双轨/回落/双链路失败礼貌报错）、`tests/test_dialogue_stream.py`（SSE 事件序列/回落/会话 ID 移交）、`tests/test_dify_stream.py`（ThinkFilter 分块过滤/SSE 解析/错误上抛）
 
 ## AI 运营分析（LangChain + OpenAI，可回退）
 

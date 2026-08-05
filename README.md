@@ -333,7 +333,7 @@ docker-compose up -d --build
 | POST | `/visitor/register` | 游客注册 |
 | POST | `/visitor/refresh-recommend` | 手动刷新推荐问句缓存 |
 | POST | `/recommend` | 个性化路线推荐（接收偏好描述，返回匹配路线） |
-| POST | `/dialogue/chat` | 对话（**双轨**：默认 LangChain agent 主链路，结构化工具直查景点/路线 + 知识检索 + 规则推荐，进程内多轮会话；异常自动回落 Dify；`DIALOGUE_ENGINE=dify` 强制走 Dify，响应字段兼容 `answer/conversation_id/rag_context/rag_sources`） |
+| POST | `/dialogue/chat` | 对话（**双轨**：默认 LangChain agent 主链路，结构化工具直查景点/路线 + 知识检索 + 规则推荐，进程内多轮会话；异常自动回落 Dify；`DIALOGUE_ENGINE=dify` 强制走 Dify，响应字段兼容 `answer/conversation_id/rag_context/rag_sources`；`streaming=true` 时返回 SSE 流式事件，见下方「SSE 流式对话」） |
 | POST | `/dialogue/sync-now` | 手动触发对话抓取 |
 | POST | `/analysis/run-now` | 手动触发量化分析 |
 | GET | `/analysis/overview` | AI 运营分析概览（支持 `?days=7/30/90`） |
@@ -360,6 +360,33 @@ RAG 接口（`/api/rag/*`，统一检索入口，对话 RAG、推荐 Agent 与�
 | POST | `/api/rag/search` | 语义检索；`namespace` 逗号分隔限定（knowledge/documents/user_memory），默认 knowledge+documents；响应含 `embedding_backend`/`degraded` 标记 |
 | POST | `/api/rag/index` | 全量重新索引；默认 documents 命名空间，文档源限定 `doc/景区知识库/`（三份景区知识 md），不索引架构/设计文档 |
 | GET | `/api/rag/status` | 各命名空间状态（文档数、embedding 后端、降级标记） |
+
+## SSE 流式对话（阶段1 T3）
+
+`POST /api/v1/dialogue/chat` 携带 `streaming: true` 时返回 SSE（`text/event-stream`），前端可实时展示 agent 思考过程（工具调用步骤）与逐字回答。非流式（默认）行为不变。**无新增配置项**：流式/非流式共用 `DIALOGUE_ENGINE` 双轨开关与 `LLM_*`/`DIFY_*` 配置。
+
+### 事件格式（`data: {json}` 帧）
+
+| type | 字段 | 说明 |
+|------|------|------|
+| `step` | `tool` / `label` | agent 工具调用步骤（正在检索知识库 / 查询景点 / 推荐路线…，按调用 id 去重） |
+| `token` | `text` | 最终回答增量（逐字输出；DeepSeek 思考过程由 langchain-openai 剥离，不会外泄） |
+| `done` | `conversation_id` / `rag_context` / `rag_sources` | 流式完成（字段与 `ChatResponse` 对齐，`conversation_id` 供多轮续接） |
+| `error` | `message` / `fallback` | 链路错误；`fallback=true` 表示主链路异常已切换 Dify 兜底（清空部分回答继续输出），`false` 表示双链路均失败 |
+
+事件序列：LangChain 链路 `step → token → done`；故障回落时先发 `error(fallback=true)` 再发 Dify 流式事件；双链路均失败时以 `error(fallback=false)` 礼貌报错结束。
+
+```json
+{"type": "step", "tool": "search_knowledge", "label": "正在检索知识库…"}
+{"type": "token", "text": "景区 8:00 开放"}
+{"type": "done", "conversation_id": "abc", "rag_context": "", "rag_sources": []}
+```
+
+Dify 兜底链路同样流式（`response_mode=streaming`），`<think>...</think>` 块经 `ThinkFilter` 实时过滤（参考 live2d-frontend 实现，见 `app/services/dify_stream.py`）。
+
+### 前端消费
+
+`digitalHumanVue/src/composables/useDialogueStream.ts` 以 fetch + ReadableStream 逐帧解析 SSE（无额外依赖），`ChatView.vue` 右侧面板提供文本对话：步骤 chips 可视化思考过程、回答逐字渲染（含光标）、推荐问句一键发送、主链路回落提示。
 
 ## 用户体系（注册/登录/JWT）
 
