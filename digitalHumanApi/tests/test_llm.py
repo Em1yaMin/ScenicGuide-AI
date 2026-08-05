@@ -254,7 +254,6 @@ def test_request_payload_uses_max_tokens_field():
         seen["body"] = json.loads(request.content)
         return httpx.Response(200, json=_DEEPSEEK_CHAT_COMPLETION)
 
-    llm = _llm_with_mock(handler, use_fallback=True)
     # 工厂注入 max_tokens=32 → 请求体出现原生 max_tokens 字段
     llm = get_chat_llm(use_fallback=True, max_tokens=32, http_client=httpx.Client(transport=httpx.MockTransport(handler)))
     llm.invoke("你好")

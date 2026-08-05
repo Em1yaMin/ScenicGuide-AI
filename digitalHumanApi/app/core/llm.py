@@ -78,7 +78,7 @@ def create_chat_llm(
         raise LLMConfigError(f"未配置 API Key（endpoint={api_base}）")
     # 注意：不传 ChatOpenAI 的 max_tokens 字段（默认 None）——
     # langchain-openai 1.4.1 会把该字段重命名为 max_completion_tokens 发送，
-    # 即使为 None 也会出现在请求体中，DeepSeek 系端点不识别。
+    # DeepSeek 系端点不识别并静默忽略（长度限制失效）。
     # 长度限制统一经 extra_body 注入（见 _build_extra_body）。
     return ChatOpenAI(
         model=model,
