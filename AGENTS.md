@@ -73,6 +73,13 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - **对话接口用户标识**：`/api/v1/dialogue/chat` 优先从 `Authorization: Bearer` token 解析（登录用户→用户 id、游客→guest-xxx），无 token 回退请求体 `user`（默认 `visitor`，向后兼容）；token 无效时降级 `visitor` 并告警（不阻断对话），认证接口严格 401（决策注释见 `security.py resolve_dialogue_user`）
 - 配置：`JWT_SECRET`、`JWT_EXPIRES_MINUTES`（默认 1440）、`GUEST_TOKEN_EXPIRES_MINUTES`（默认 30），见 `.env.example`
 
+## 对话 LLM 接入层（阶段1，LangChain 工厂，未接对话链路）
+
+- `app/core/llm.py` — ChatOpenAI（langchain-openai）工厂：`get_chat_llm()`（按 `LLM_*` 配置构造，主端点缺 key 自动降级备用端点，都缺抛 `LLMConfigError`）、`create_chat_llm()`（显式参数底层构造）、`resolve_endpoint()`；主/备用双端点：`LLM_API_*`（默认 opencode-go `https://opencode.ai/zen/go/v1` + `deepseek-v4-flash`）与 `LLM_FALLBACK_*`（默认官方 DeepSeek API），与 Embedding（`EMBEDDING_*`）、运营分析（`OPENAI_*`）配置完全独立
+- **DeepSeek 思考格式兼容性**（实测结论，详见 `doc/llm-adapter-smoke-test.md`）：`reasoning_content` 被 langchain-openai 自动剥离（流式思考 chunk 为空串、content 为最终回答、不报错）→ 无需自定义处理；**max_tokens 必须经工厂 `extra_body` 注入原生 `max_tokens` 字段**（langchain-openai 1.4.1 硬编码改名为 `max_completion_tokens`，DeepSeek 系端点静默忽略致长度限制失效）；**不要在 `invoke()` 显式传 max_tokens**
+- 备用通道官方 DeepSeek API 多轮对话要求历史 assistant 消息回传 `reasoning_content`（opencode-go 网关不强制）→ 对话链路任务需自定义消息转换
+- 冒烟脚本：`digitalHumanApi/scripts/smoke_llm.py`（`LLM_API_KEY=... python -m scripts.smoke_llm`；`--fallback` 测备用端点）；单测 `tests/test_llm.py`（MockTransport 模拟，不发真实请求）
+
 ## AI 运营分析（LangChain + OpenAI，可回退）
 
 - `app/services/analytics_service.py` + `app/routers/analysis.py` — `GET /api/v1/analysis/overview`、`/trends`、`POST /run-now`

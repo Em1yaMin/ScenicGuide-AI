@@ -39,6 +39,25 @@ class Settings(BaseModel):
     OPENAI_API_BASE: str = os.environ.get("OPENAI_API_BASE", "")
     OPENAI_MODEL: str = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
 
+    # 对话 LLM（阶段1: Dify 迁往 LangChain agent 的模型接入层，见 app/core/llm.py）
+    # 与 Embedding（EMBEDDING_*）及运营分析（OPENAI_*）的配置完全独立
+    # 主端点默认 opencode-go（OpenAI 兼容），备用端点为官方 DeepSeek API
+    LLM_API_BASE: str = os.environ.get(
+        "LLM_API_BASE", "https://opencode.ai/zen/go/v1"
+    )
+    LLM_API_KEY: str = os.environ.get("LLM_API_KEY", "")
+    LLM_MODEL: str = os.environ.get("LLM_MODEL", "deepseek-v4-flash")
+    # 备用端点（主端点不可用/未配置 key 时切换）
+    LLM_FALLBACK_API_BASE: str = os.environ.get(
+        "LLM_FALLBACK_API_BASE", "https://api.deepseek.com/v1"
+    )
+    LLM_FALLBACK_API_KEY: str = os.environ.get("LLM_FALLBACK_API_KEY", "")
+    LLM_FALLBACK_MODEL: str = os.environ.get(
+        "LLM_FALLBACK_MODEL", "deepseek-chat"
+    )
+    # 对话默认温度（工厂层默认值，可按调用覆盖）
+    LLM_TEMPERATURE: float = float(os.environ.get("LLM_TEMPERATURE", "0.7"))
+
     # RAG 向量化 Embedding（Minimax OpenAI 兼容端点，与对话 LLM 的 OPENAI_* 完全独立）
     # 不配置 EMBEDDING_API_KEY 时自动降级为本地 TF-IDF 向量化（见 app/core/embedding.py）
     EMBEDDING_API_BASE: str = os.environ.get(
