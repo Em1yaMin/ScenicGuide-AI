@@ -5,6 +5,7 @@
 '''
 
 from .difyAgent import DifyAgent
+from .langchainAgent import LangChainAgent
 from .repeaterAgent import RepeaterAgent
 from .fastgptAgent import FastgptAgent
 from .openaiAgent import OpenaiAgent

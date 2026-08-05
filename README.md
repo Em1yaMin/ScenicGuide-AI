@@ -24,7 +24,7 @@
 **引擎配置**:
 - **ASR**: 腾讯云实时语音识别 (TencentAPI)
 - **TTS**: MiniMax API (`speech-2.8-hd` + `Chinese_sweet_girl_nv1` 音色)
-- **Agent**: Dify Chat Agent（与主项目共用 Dify 实例 `YOUR_DIFY_SERVER_IP`）
+- **Agent**: LangChainAgent（默认，走本后端 `POST /api/v1/dialogue/chat` LangChain 主链路，后端侧异常自动回落 Dify）；DifyAgent（直连 Dify Chat Agent）保留可切换
 
 启动步骤见上方「**4. 启动本地数字人服务**」。详细部署步骤与故障排查见 `AGENTS.md`（ADH 专节）或 `doc/local-digital-human-deploy-plan.md`。
 
@@ -167,7 +167,7 @@ Start-Process -WindowStyle Hidden -WorkingDirectory "$PWD/live2d-frontend/web" -
 > - 命令中的 `$PWD` 需替换为项目根目录绝对路径（如 `E:/project_file/digitalHuman`），或将终端 cd 到项目根目录后执行。
 > - 数字人后端端口已在 `config_template.yaml` 中改为 **8001**（原 8000 被主后端占用）。
 > - 数字人前端需在 `web/.env` 中设置 `NEXT_PUBLIC_ADH_SERVER_PORT=8001`，否则心跳连错端口导致 "Soul is death!"。
-> - 存在两个配置文件：`config_template.yaml`（端口 8001，使用腾讯云 ASR + Dify Agent + MiniMax TTS）和 `config_all_in_dify.yaml`（端口 8000，引擎全部走 Dify API）。默认使用 `config_template.yaml`，切换配置时注意端口变化。
+> - 存在两个配置文件：`config_template.yaml`（端口 8001，使用腾讯云 ASR + LangChainAgent（默认，走本后端对话链路）+ MiniMax TTS）和 `config_all_in_dify.yaml`（端口 8000，引擎全部走 Dify API）。默认使用 `config_template.yaml`，切换配置时注意端口变化。
 
 ### 3. 启动后端（手动）
 
@@ -213,7 +213,7 @@ pnpm run dev    # 或 node node_modules\next\dist\bin\next dev -p 3000
 
 > **两个命令需分别在各自的终端窗口中运行**（不要关掉）。首次启动前端可能需要清 localStorage `character-storage` 键以加载默认 Hiyori 模型。
 >
-> 引擎配置详见 `AGENTS.md`（ADH 专节）或 `doc/local-digital-human-deploy-plan.md`。当前已配置：腾讯云 ASR + Dify Agent + MiniMax TTS（`Chinese_sweet_girl_nv1` 音色）。
+> 引擎配置详见 `AGENTS.md`（ADH 专节）或 `doc/local-digital-human-deploy-plan.md`。当前已配置：腾讯云 ASR + LangChainAgent（默认，走本后端 LangChain 主链路，异常自动回落 Dify）+ MiniMax TTS（`Chinese_sweet_girl_nv1` 音色）。
 
 ### 6. 访问应用
 
@@ -391,7 +391,7 @@ pytest -v
 | Dify Workflow 量化分析 | ✅ 正常（16 条对话全部评估完成，大屏/报告有真实数据） |
 | 数据大屏 | ✅ 正常（sentiment_trend 全量连续查询，从最早对话日到今天、缺失日零值回填 / satisfaction / hot_issues 均有数据） |
 | 手动触发端点 | ✅ 正常（`POST /sync-now` + `/run-now` 手动触发后台逻辑） |
-| 本地数字人部署 | ✅ 已部署（TencentAPI ASR + DifyAgent + MiniMax TTS） |
+| 本地数字人部署 | ✅ 已部署（TencentAPI ASR + LangChainAgent + MiniMax TTS） |
 | 动态推荐问句 | ✅ 正常（每 5 分钟从 Dify 刷新，缓存 stale-while-revalidate） |
 | Docker Compose | 已配置，未在本次验收中实际构建 |
 
@@ -438,7 +438,7 @@ A: 语音功能需要**安全上下文**（HTTPS 或 localhost）。ADH 数字�
 管理后台等非语音功能不受此限制。本项目已内置 `crypto.randomUUID` 的 fallback（见 `digitalHumanVue/src/utils/uuid.ts`），因此访客端非语音页面可在明文 HTTP 下正常运行，仅语音输入受限。
 
 **Q: ADH 数字人凭据在哪里配置？**
-A: 凭据不写入代码库，配置在 ADH 引擎配置文件中：`live2d-frontend/configs/engines/tts/minimaxTTS.yaml`（MiniMax TTS）、`live2d-frontend/configs/engines/asr/tencentAPI.yaml`（腾讯云 ASR）、`live2d-frontend/configs/agents/difyAgent.yaml`（Dify Agent）。修改后需重启 ADH 后端生效。
+A: 凭据不写入代码库，配置在 ADH 引擎配置文件中：`live2d-frontend/configs/engines/tts/minimaxTTS.yaml`（MiniMax TTS）、`live2d-frontend/configs/engines/asr/tencentAPI.yaml`（腾讯云 ASR）、`live2d-frontend/configs/agents/langchainAgent.yaml`（默认引擎，`LLM_API_URL` 指向本后端，可选 Bearer token）、`live2d-frontend/configs/agents/difyAgent.yaml`（Dify Agent，保留可切换直连）。修改后需重启 ADH 后端生效。
 
 ## Dify Workflow 量化分析规格
 

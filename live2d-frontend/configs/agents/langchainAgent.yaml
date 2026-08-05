@@ -1,0 +1,25 @@
+NAME: "LangChainAgent"
+VERSION: "v0.0.1"
+# 暴露给前端的参数选项以及默认值
+PARAMETERS: [
+  {
+    NAME: "LLM_API_URL",
+    DEFAULT: "http://127.0.0.1:8000"
+  },
+  {
+    NAME: "LLM_API_TOKEN",
+    DEFAULT: ""
+  },
+  {
+    NAME: "LLM_API_USER",
+    DEFAULT: "visitor"
+  },
+  {
+    NAME: "LLM_USE_RAG",
+    DEFAULT: true
+  },
+  {
+    NAME: "LLM_RAG_TOP_K",
+    DEFAULT: 3
+  }
+]

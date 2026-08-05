@@ -93,7 +93,7 @@
 |---|------|------|------|
 | G1 | Dify 对话 user 值不可枚举，无法 100% 确认「无对话」而非「user 不符」 | 可能漏迁历史对话 | 控制台「日志与标注」页核对实际 user；或请 light4ai 侧确认固定 user |
 | G2 | Dify 知识库内容未导出（无 Dataset Key / 管理员凭据） | 无法核对 Dify 侧文档与三份 md 的差异 | 船长提供控制台凭据或 Dataset Key 后补导出一版存档 |
-| G3 | `DIFY_LIGHT4AI_USER` 本地 .env 为空 | 增量 polling 与补拉默认不生效（需显式 `--user`） | 部署时在 `.env` 配置与 ADH `difyAgent.yaml` 的 `DIFY_API_USER` 一致的 user 值 |
+| G3 | `DIFY_LIGHT4AI_USER` 本地 .env 为空 | 增量 polling 与补拉默认不生效（需显式 `--user`） | 部署时在 `.env` 配置 `DIFY_LIGHT4AI_USER` 与 ADH 引擎 user 一致（默认 LangChainAgent `LLM_API_USER`；切回 DifyAgent 直连时为 `difyAgent.yaml` 的 `DIFY_API_USER`），详见 `doc/dify配置/README.md` |
 | G4 | 三份 md 未建本地 RAG 索引 | 本地检索不可用 | ✅ 已由 sg-kb-index 任务完成（`DEFAULT_DOC_DIR` 限定 `doc/景区知识库/`，`POST /api/rag/index` 全量重建，分块建议见下） |
 
 ## 4. 后续建议（供 sg-kb-index 参考）

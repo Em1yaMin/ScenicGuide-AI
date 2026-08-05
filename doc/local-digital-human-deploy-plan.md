@@ -3,6 +3,8 @@
 > 目标：本地部署 `awesome-digital-human-live2d` live2d-frontend 替代云端 light4ai，Vue3 访客端通过 iframe 嵌入本地数字人。
 > ASR（语音转文字）走腾讯云一句话识别；TTS（文字转语音）走 Dify Workflow（插件接入）；Agent 走 DifyAgent。
 > 生成时间：2026-07-13 · 更新：2026-07-13（补充腾讯云凭证 + Dify TTS Workflow Key）
+>
+> **2026-08-05 更新（T4）**：Agent 链路已切换为 LangChainAgent（默认，走本后端 `POST /api/v1/dialogue/chat`，后端侧异常自动回落 Dify）；DifyAgent 直连保留可切换。本文其余为部署历史记录，最新状态以 `AGENTS.md` ADH 专节为准。
 
 ## 一、目标架构
 

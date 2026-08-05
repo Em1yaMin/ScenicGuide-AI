@@ -16,5 +16,5 @@ SERVER:
       SUPPORT_LIST: [ "minimaxTTS.yaml" ]
       DEFAULT: "minimaxTTS.yaml"
   AGENTS: 
-    SUPPORT_LIST: [ "difyAgent.yaml" ]
-    DEFAULT: "difyAgent.yaml"
+    SUPPORT_LIST: [ "langchainAgent.yaml", "difyAgent.yaml" ]
+    DEFAULT: "langchainAgent.yaml"
