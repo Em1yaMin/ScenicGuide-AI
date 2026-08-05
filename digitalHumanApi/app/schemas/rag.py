@@ -23,7 +23,7 @@ class RagIndexRequest(BaseModel):
     namespace: Optional[str] = Field(
         default=None,
         description="目标命名空间（knowledge/documents/user_memory）；"
-        "不传时默认 documents（doc/ 文档索引）",
+        "不传时默认 documents（doc/景区知识库/ 文档索引）",
     )
 
 

@@ -1,7 +1,10 @@
 """
 RAG 服务层：文档加载、分块、向量化、存储、检索。
 
-支持从 doc/ 目录加载景区资料（.md、.txt 文件），
+支持从 doc/景区知识库/ 目录加载景区资料（.md、.txt 文件，
+索引范围限定景区知识文档，不混入 doc/ 下架构/设计文档），
+并支持管理后台知识库条目（knowledge_base 表）的同步索引：
+CRUD/导入变更后重建 knowledge 命名空间向量索引。
 向量化后端由 app/core/embedding.py 工厂选择（Minimax Embedding API，
 不可用时自动降级本地 TF-IDF），文件持久化存储，
 无需 chromadb、sentence-transformers 等外部向量库服务。
@@ -20,6 +23,7 @@ from app.core.rag import (
     DEFAULT_DOC_DIR,
     DEFAULT_TOP_K,
     NAMESPACE_DOCUMENTS,
+    NAMESPACE_KNOWLEDGE,
     get_vectorstore_for_namespace,
     normalize_namespaces,
 )
@@ -38,7 +42,7 @@ def _load_documents(doc_dir: Optional[Path] = None) -> List[Document]:
     """从指定目录递归加载所有 Markdown 和文本文件。
 
     Args:
-        doc_dir: 文档目录路径，默认 doc/
+        doc_dir: 文档目录路径，默认 doc/景区知识库/
 
     Returns:
         LangChain Document 列表
@@ -183,8 +187,8 @@ def _index_documents_sync(
     流程: 加载 → 分块 → 向量化 → 存储
 
     Args:
-        doc_dir: 文档目录，默认 doc/
-        namespace: 目标命名空间（默认 documents；索引 doc/ 文档）
+        doc_dir: 文档目录，默认 doc/景区知识库/
+        namespace: 目标命名空间（默认 documents；索引 doc/ 景区知识文档）
 
     Returns:
         {"status", "documents", "chunks", "namespace", "embedding_backend",
@@ -234,7 +238,7 @@ async def index_documents(
     流程: 加载 → 分块 → 向量化 → 存储
 
     Args:
-        doc_dir: 文档目录，默认 doc/
+        doc_dir: 文档目录，默认 doc/景区知识库/
         namespace: 目标命名空间（默认 documents）
 
     Returns:
@@ -246,12 +250,119 @@ async def index_documents(
     )
 
 
+# ---------------------------------------------------------------------------
+# 知识库条目索引（管理后台 CRUD 变更同步）
+# ---------------------------------------------------------------------------
+
+def _build_knowledge_documents(entries: List[dict]) -> List[Document]:
+    """将知识库条目（DB 行）转为待向量化的 Document 列表。
+
+    条目以「标题 + 正文」整体作为检索单元（条目粒度短于文档分块粒度，
+    不再做段落切分），metadata 携带条目归属信息供检索来源展示。
+
+    Args:
+        entries: [{"id", "title", "category", "content"}, ...]
+
+    Returns:
+        LangChain Document 列表（跳过空内容条目）
+    """
+    documents: List[Document] = []
+    for entry in entries:
+        title = (entry.get("title") or "").strip()
+        content = (entry.get("content") or "").strip()
+        if not content:
+            continue
+        page_content = f"{title}\n{content}" if title else content
+        documents.append(Document(
+            page_content=page_content,
+            metadata={
+                "kb_id": entry.get("id"),
+                "title": title,
+                "category": entry.get("category", ""),
+                "filename": f"知识库条目#{entry.get('id')}",
+            },
+        ))
+    return documents
+
+
+def _index_knowledge_entries_sync(
+    entries: List[dict],
+    namespace: Optional[str] = None,
+) -> dict:
+    """同步执行知识库条目全量重建（knowledge 命名空间）。
+
+    管理后台增/删/改/导入后调用：以当前 DB 全量条目重建向量索引，
+    保证索引与数据库一致（条目量小，全量重建开销可忽略且无残留）。
+
+    Args:
+        entries: 知识库条目字典列表（含 id/title/category/content）
+        namespace: 目标命名空间，默认 knowledge
+
+    Returns:
+        {"status", "documents", "namespace", "embedding_backend",
+         "degraded", "degraded_reason"}
+    """
+    if namespace is None or not namespace.strip():
+        ns = NAMESPACE_KNOWLEDGE
+    else:
+        namespaces = normalize_namespaces(namespace)
+        if len(namespaces) != 1:
+            raise ValueError(f"索引接口的 namespace 参数需为单一命名空间，收到: {namespaces}")
+        ns = namespaces[0]
+
+    documents = _build_knowledge_documents(entries)
+    if not documents:
+        # 库已清空：清空向量存储，避免残留旧条目可被检索
+        vectorstore = get_vectorstore_for_namespace(ns)
+        vectorstore.clear()
+        return {"status": "empty", "documents": 0, "namespace": ns}
+
+    vectorstore = get_vectorstore_for_namespace(ns)
+    vectorstore.clear()  # 全量重建
+    vectorstore.add_documents(documents)
+
+    return {
+        "status": "ok",
+        "documents": len(documents),
+        "namespace": ns,
+        "embedding_backend": vectorstore.embedding_backend,
+        "degraded": vectorstore.degraded,
+        "degraded_reason": vectorstore.degraded_reason,
+    }
+
+
+async def index_knowledge_entries(
+    entries: List[dict],
+    namespace: Optional[str] = None,
+) -> dict:
+    """执行知识库条目全量重建（默认 knowledge 命名空间）。
+
+    由 knowledge_service 在 CRUD/导入变更后调用，同步更新向量索引。
+
+    Args:
+        entries: 知识库条目字典列表（含 id/title/category/content）
+        namespace: 目标命名空间，默认 knowledge
+
+    Returns:
+        {"status": str, "documents": int, "namespace": str}
+    """
+    import asyncio
+    return await asyncio.get_running_loop().run_in_executor(
+        None, _index_knowledge_entries_sync, entries, namespace
+    )
+
+
 async def search_documents(
     query: str,
     top_k: int = DEFAULT_TOP_K,
     namespace: Optional[str] = None,
 ) -> List[dict]:
     """检索与查询最相关的文档片段（可在多个命名空间内联合检索）。
+
+    这是对话 RAG、后台检索、推荐 Agent 共用的统一检索入口：
+    - 对话 RAG（dialogue.py）/ ADH rag-context：默认 knowledge+documents 公共命名空间
+    - 后台检索（/api/rag/search）：可通过 namespace 参数限定
+    - 推荐 Agent（recommend_agent.py 的 search_knowledge 工具）：同步包装本函数
 
     Args:
         query: 查询文本
@@ -261,6 +372,18 @@ async def search_documents(
     Returns:
         [{"content": str, "source": str, "score": float, "namespace": str}, ...]
     """
+    import asyncio
+    return await asyncio.get_running_loop().run_in_executor(
+        None, _search_documents_sync, query, top_k, namespace
+    )
+
+
+def _search_documents_sync(
+    query: str,
+    top_k: int = DEFAULT_TOP_K,
+    namespace: Optional[str] = None,
+) -> List[dict]:
+    """search_documents 的同步实现（供 asyncio executor / 推荐 Agent 同步工具复用）。"""
     try:
         namespaces = normalize_namespaces(namespace)
         all_results: List[dict] = []

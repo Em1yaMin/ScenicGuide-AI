@@ -33,8 +33,9 @@ logger = logging.getLogger(__name__)
 # 持久化目录
 RAG_DATA_DIR: Path = Path(__file__).resolve().parents[2] / "rag_data"
 
-# 默认文档目录
-DEFAULT_DOC_DIR: Path = Path(__file__).resolve().parents[3] / "doc"
+# 默认文档目录：仅限定到 doc/景区知识库/（三份景区知识 md），
+# 避免把 doc/ 下的架构/设计/部署文档混入 RAG 索引。
+DEFAULT_DOC_DIR: Path = Path(__file__).resolve().parents[3] / "doc" / "景区知识库"
 
 # 默认配置
 DEFAULT_TOP_K: int = int(os.environ.get("RAG_TOP_K", "3"))

@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from typing import Optional
 
@@ -13,6 +14,36 @@ from app.schemas.knowledge import (
     KnowledgeListResponse,
     KnowledgeUpdateRequest,
 )
+from app.services.rag_service import index_knowledge_entries
+
+logger = logging.getLogger(__name__)
+
+
+async def _sync_knowledge_index(db: AsyncSession) -> None:
+    """知识库变更后同步重建 knowledge 命名空间向量索引。
+
+    以当前 DB 全量条目重建（与向量库全量重建机制一致），
+    索引失败仅告警日志，不阻断 CRUD 主流程（下次变更/手动索引会自愈）。
+    """
+    try:
+        result = await db.execute(select(KnowledgeBase))
+        entries = [
+            {
+                "id": kb.id,
+                "title": kb.title,
+                "category": kb.category,
+                "content": kb.content,
+            }
+            for kb in result.scalars().all()
+        ]
+        sync_result = await index_knowledge_entries(entries)
+        logger.info(
+            "知识库向量索引已同步: namespace=%s, documents=%d",
+            sync_result.get("namespace"),
+            sync_result.get("documents", 0),
+        )
+    except Exception as e:
+        logger.warning("知识库向量索引同步失败（不阻断 CRUD）: %s", e)
 
 
 async def list_knowledge(
@@ -68,9 +99,17 @@ async def get_knowledge(db: AsyncSession, kb_id: int) -> Optional[KnowledgeBase]
 
 
 async def create_knowledge(
-    db: AsyncSession, request: KnowledgeCreateRequest
+    db: AsyncSession,
+    request: KnowledgeCreateRequest,
+    sync_index: bool = True,
 ) -> KnowledgeItem:
-    """创建知识库条目。"""
+    """创建知识库条目，并同步更新 knowledge 命名空间向量索引。
+
+    Args:
+        db: 数据库会话
+        request: 创建请求
+        sync_index: 是否同步向量索引（批量导入时由调用方统一同步一次）
+    """
     kb = KnowledgeBase(
         title=request.title,
         category=request.category,
@@ -80,13 +119,15 @@ async def create_knowledge(
     db.add(kb)
     await db.flush()
     await db.refresh(kb)
+    if sync_index:
+        await _sync_knowledge_index(db)
     return KnowledgeItem.model_validate(kb)
 
 
 async def update_knowledge(
     db: AsyncSession, kb_id: int, request: KnowledgeUpdateRequest
 ) -> Optional[KnowledgeBase]:
-    """更新知识库条目，返回更新后的 ORM 对象；不存在时返回 None。"""
+    """更新知识库条目，并同步更新向量索引；不存在时返回 None。"""
     kb = await get_knowledge(db, kb_id)
     if kb is None:
         return None
@@ -97,16 +138,18 @@ async def update_knowledge(
 
     await db.flush()
     await db.refresh(kb)
+    await _sync_knowledge_index(db)
     return kb
 
 
 async def delete_knowledge(db: AsyncSession, kb_id: int) -> bool:
-    """删除知识库条目，成功返回 True，不存在返回 False。"""
+    """删除知识库条目，并同步更新向量索引；成功返回 True，不存在返回 False。"""
     kb = await get_knowledge(db, kb_id)
     if kb is None:
         return False
     await db.delete(kb)
     await db.flush()
+    await _sync_knowledge_index(db)
     return True
 
 
@@ -116,7 +159,7 @@ async def import_knowledge(
     filename: str,
     default_category: str = "景点资料",
 ) -> KnowledgeImportResponse:
-    """从 JSON 或 Markdown 文件批量导入知识库条目。"""
+    """从 JSON 或 Markdown 文件批量导入知识库条目，导入完成后统一同步向量索引。"""
     imported = 0
     skipped = 0
     lower_name = filename.lower()
@@ -132,17 +175,21 @@ async def import_knowledge(
                 skipped += 1
                 continue
             entry = _build_create_request(item, default_category)
-            await create_knowledge(db, entry)
+            await create_knowledge(db, entry, sync_index=False)
             imported += 1
         if imported == 0 and skipped > 0:
             raise ValueError("JSON 文件中未找到有效的知识库条目，所有元素均不是对象格式")
     elif lower_name.endswith((".md", ".markdown")):
         entries = _parse_markdown(content, default_category)
         for entry in entries:
-            await create_knowledge(db, entry)
+            await create_knowledge(db, entry, sync_index=False)
         imported += len(entries)
     else:
         raise ValueError("不支持的文件格式，仅支持 .json 和 .md")
+
+    # 批量导入统一在完成后同步一次向量索引，避免逐条全量重建
+    if imported > 0:
+        await _sync_knowledge_index(db)
 
     return KnowledgeImportResponse(imported_count=imported, skipped_count=skipped)
 

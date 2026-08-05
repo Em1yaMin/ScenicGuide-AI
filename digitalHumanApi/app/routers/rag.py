@@ -83,7 +83,7 @@ async def rag_index(
 ) -> RagIndexResponse:
     """触发全量重新索引。
 
-    重新扫描 doc/ 目录，加载所有景区资料文件，
+    重新扫描 doc/景区知识库/ 目录，加载景区知识文档，
     分块、向量化并存储到指定命名空间（默认 documents）的向量存储
     （JSON 文件持久化）。
     """
