@@ -6,6 +6,7 @@
 
 from ..builder import AGENTS
 from ..agentBase import BaseAgent
+from .difyAgent import ThinkFilter
 import re
 import json
 from typing import List, Union
@@ -26,46 +27,6 @@ EVENT_MESSAGE = "message"             # 携带 answer 的文本增量事件
 EVENT_STEP = "step"                   # agent 步骤事件（忽略/透出日志）
 EVENT_ERROR = "error"                 # 携带 message 的错误事件
 DONE_MARK = "[DONE]"                  # 流结束标记
-
-
-class ThinkFilter:
-    """流式过滤器：移除 <think>...</think> 块，处理跨 chunk 的标签分割。"""
-    def __init__(self):
-        self._buffer = ""
-        self._in_think = False
-
-    def feed(self, text: str) -> str:
-        """喂入文本，返回过滤后的输出。"""
-        self._buffer += text
-        output = ""
-        while self._buffer:
-            if self._in_think:
-                end_idx = self._buffer.find('</think>')
-                if end_idx != -1:
-                    self._buffer = self._buffer[end_idx + 8:]
-                    self._in_think = False
-                else:
-                    if len(self._buffer) > 7:
-                        self._buffer = self._buffer[-7:]
-                    break
-            else:
-                start_idx = self._buffer.find('<think>')
-                if start_idx != -1:
-                    output += self._buffer[:start_idx]
-                    self._buffer = self._buffer[start_idx + 7:]
-                    self._in_think = True
-                else:
-                    safe_len = max(0, len(self._buffer) - 6)
-                    output += self._buffer[:safe_len]
-                    self._buffer = self._buffer[safe_len:]
-                    break
-        return output
-
-    def flush(self) -> str:
-        """流结束后获取残留缓冲区（不处于 think 内时才返回）。"""
-        if self._in_think:
-            return ""
-        return self._buffer
 
 
 @AGENTS.register("LangChainAgent")
