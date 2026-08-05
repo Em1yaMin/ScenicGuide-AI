@@ -21,6 +21,23 @@ function submitDraft() {
   void send(text)
 }
 
+const isComposing = ref(false)
+
+function onCompositionStart() {
+  isComposing.value = true
+}
+
+function onCompositionEnd() {
+  isComposing.value = false
+}
+
+function onInputKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Enter') return
+  if (e.isComposing || isComposing.value) return
+  e.preventDefault()
+  submitDraft()
+}
+
 // 新内容到达时自动滚动到底部
 watch(
   turns,
@@ -291,7 +308,9 @@ function onQuestionClick(text: string) {
                 class="chat-input"
                 placeholder="输入您的问题，Enter 发送…"
                 :disabled="isStreaming"
-                @keyup.enter="submitDraft"
+                @compositionstart="onCompositionStart"
+                @compositionend="onCompositionEnd"
+                @keydown="onInputKeydown"
               />
               <button
                 class="chat-send"
