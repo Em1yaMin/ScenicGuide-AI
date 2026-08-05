@@ -161,6 +161,37 @@ class Test_LangChainAgent_API:
         assert req["json"]["streaming"] is False
 
     @pytest.mark.asyncio(scope="session")
+    async def test_stream_blocking_json_fallback(self, version: str, client: AsyncClient, fake_client):
+        """后端未实现流式：streaming=True 但响应为整行阻塞 ChatResponse JSON，回退产出 answer。"""
+        fake_client.response = FakeResponse(lines=[json.dumps({
+            "answer": "阻塞式完整回复",
+            "conversation_id": "cid-block",
+            "rag_context": "",
+            "rag_sources": [],
+        })])
+        url = f"/adh/agent/{version}/infer"
+        item = {"engine": ENGINE, "settings": settings(), "streaming": True, "data": "你好"}
+        resp = await client.post(url, json=item)
+        assert resp.status_code == 200
+        assert "阻塞式完整回复" in resp.text
+        assert fake_client.requests[0]["json"]["streaming"] is True
+
+    @pytest.mark.asyncio(scope="session")
+    async def test_stream_blocking_conversation_id(self, version: str, client: AsyncClient, fake_client):
+        """后端未实现流式：streaming=True 但整行阻塞 JSON 含 conversation_id，回退返回会话 ID。"""
+        fake_client.response = FakeResponse(lines=[json.dumps({
+            "answer": "你好",
+            "conversation_id": "cid-block",
+        })])
+        url = f"/adh/agent/{version}/conversation_id"
+        item = {"engine": ENGINE, "settings": settings(), "streaming": True}
+        resp = await client.post(url, json=item)
+        assert resp.status_code == 200
+        resp = resp.json()
+        assert resp["code"] == 0
+        assert resp["data"] == "cid-block"
+
+    @pytest.mark.asyncio(scope="session")
     async def test_stream_conversation_id(self, version: str, client: AsyncClient, fake_client):
         """createConversation：从 SSE conversation 事件取会话 ID。"""
         fake_client.response = FakeResponse(lines=sse_lines(
@@ -236,6 +267,26 @@ class Test_LangChainAgent_Engine:
         ))
         outputs = [text async for text in agent.run(TextMessage(data="你好"), True, **settings())]
         assert "错误" in "".join(outputs)
+
+    @pytest.mark.asyncio(scope="session")
+    async def test_blocking_json_think_filtered(self, fake_client, agent):
+        """阻塞 JSON 回退：整行 ChatResponse JSON 的 answer 产出且 <think> 被过滤。"""
+        fake_client.response = FakeResponse(lines=[json.dumps({
+            "answer": "<think>内部推理</think>最终回答",
+            "conversation_id": "cid-block",
+        })])
+        outputs = [text async for text in agent.run(TextMessage(data="你好"), True, **settings())]
+        assert "".join(outputs) == "最终回答"
+
+    @pytest.mark.asyncio(scope="session")
+    async def test_truncated_line_ignored(self, fake_client, agent):
+        """非 SSE 且非合法 ChatResponse JSON 的行被忽略，后续有效行正常产出。"""
+        fake_client.response = FakeResponse(lines=[
+            "some random text",
+            json.dumps({"answer": "有效回复"}),
+        ])
+        outputs = [text async for text in agent.run(TextMessage(data="你好"), True, **settings())]
+        assert "".join(outputs) == "有效回复"
 
     @pytest.mark.asyncio(scope="session")
     async def test_missing_parameter(self, fake_client, agent):

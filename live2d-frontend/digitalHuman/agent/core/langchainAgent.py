@@ -166,19 +166,27 @@ class LangChainAgent(BaseAgent):
 
     @staticmethod
     async def _iter_sse(response):
-        """解析 SSE 行流，产出事件 dict（data: {json} 的 JSON 内容）。"""
+        """解析 SSE 行流，产出事件 dict（data: {json} 的 JSON 内容）。
+
+        兼容非 SSE 阻塞响应：整行无法按 SSE 解析时，若为合法 ChatResponse JSON
+        （含 answer 或 conversation_id 字段）则回退按事件产出，保证后端未实现
+        流式端点时链路仍可用。
+        """
         async for line in response.aiter_lines():
             chunkStr = line.strip()
             if not chunkStr or chunkStr == f"data: {DONE_MARK}" or chunkStr == DONE_MARK:
                 continue
             chunkData = DATA_PATTERN.search(chunkStr)
-            if not chunkData:
+            raw = chunkData.group(1) if chunkData else chunkStr
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
                 logger.warning(f"[AGENT] Engine return truncated data: {chunkStr}")
                 continue
-            try:
-                data = json.loads(chunkData.group(1))
-            except json.JSONDecodeError:
-                logger.warning(f"[AGENT] Engine return non-json data: {chunkStr}")
+            if not isinstance(data, dict):
+                logger.warning(f"[AGENT] Engine return truncated data: {chunkStr}")
                 continue
-            if isinstance(data, dict):
-                yield data
+            if not chunkData and "answer" not in data and "conversation_id" not in data:
+                logger.warning(f"[AGENT] Engine return truncated data: {chunkStr}")
+                continue
+            yield data

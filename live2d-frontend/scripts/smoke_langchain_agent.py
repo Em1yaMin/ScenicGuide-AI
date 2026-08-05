@@ -7,6 +7,9 @@
   3. 非流式 ChatResponse JSON 兼容
   4. LangChainAgent 引擎类可正常驱动上述链路（与 /adh/agent/infer 同路径）
 
+注意：后端流式端点（T3）未落地时第 1 步将 FAIL（后端返回阻塞 JSON 而非 SSE），
+属预期；引擎侧第 2 步因内置阻塞 JSON 回退解析仍应 PASS——链路在 T3 前后均可用。
+
 用法（复用 ADH venv 运行，需本后端已启动）:
     ./venv/Scripts/python.exe scripts/smoke_langchain_agent.py                      # 默认 http://127.0.0.1:8000
     ./venv/Scripts/python.exe scripts/smoke_langchain_agent.py --url http://x.x.x.x:8000 --query "介绍一下这个景区" --token <jwt>
