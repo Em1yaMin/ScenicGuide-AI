@@ -705,6 +705,7 @@ async def chat(
             config={"recursion_limit": _MAX_AGENT_STEPS},
         )
         all_messages: List[BaseMessage] = result.get("messages", [])
+        answer = ""
 
         # 3. 提取最终回答（最后一条非工具消息）
         for msg in reversed(all_messages):
