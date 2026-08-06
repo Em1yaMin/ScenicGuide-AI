@@ -5,6 +5,13 @@
 
 设计要点（船长决策 2026-08-05）：
 
+- **双模式（阶段3 T1，方案B）**：对话入口先做意图分类（app/services/
+  intent_classifier.py）——简单问答（单工具可答）走现有快速路径（零延迟增加）；
+  复杂任务（多步骤意图，如规划行程）走 LangGraph 规划图（app/services/
+  planner_agent.py：规划→多步执行→总结，SSE 步骤可视化）；分类失败/规划
+  路径异常静默降级快速路径，再由路由层兜底 Dify（双轨回落不变）；开关
+  AGENT_DUAL_MODE=false 可整体回退到阶段2 行为
+
 - **结构化数据零幻觉**：景点/路线信息由 `search_spots` / `search_routes` /
   `get_spot_detail` / `get_route_detail` / `filter_by_tags` 等结构化工具直查
   本地 JSON（复用 recommend_agent 的工具，不走向量）
@@ -48,10 +55,25 @@ from langchain_core.tools import tool
 from app.core import memory_store
 from app.core.config import settings
 from app.core.llm import get_chat_llm
-from app.services import memory_service, recommend_agent
+from app.services import memory_service, planner_agent, recommend_agent
+from app.services.intent_classifier import classify_intent
 from app.services.rag_service import build_rag_context
 
 logger = logging.getLogger(__name__)
+
+
+def _is_complex_intent(query: str) -> bool:
+    """意图分类（阶段3 T1 双模式分流）：复杂 → True。
+
+    防御性包装：分类器内部异常由 intent_classifier 自行兜底（默认简单），
+    此处再包一层 try/except 双保险——任何异常按简单处理（安全降级快速路径，
+    对话不中断）。
+    """
+    try:
+        return classify_intent(query) == "complex"
+    except Exception:
+        logger.warning("意图分类异常（按简单处理，走快速路径）: query=%r", query)
+        return False
 
 # ── 常量 ──────────────────────────────────────────────────────────────────
 
@@ -79,6 +101,14 @@ _MAX_CONVERSATIONS = 1000
 _MAX_AGENT_STEPS = 25
 # 知识检索工具的调用名（用于从 agent 返回中提取 RAG 来源）
 _KNOWLEDGE_TOOL_NAME = "search_knowledge"
+
+# 阶段3 T1 双模式：意图分类为复杂时走规划路径（planner_agent），
+# 简单/分类失败走快速路径。规划路径步骤的 SSE 文案（tool=plan/summarize）
+_PLAN_STEP_LABELS: Dict[str, str] = {
+    "plan": "正在为您规划行程…",
+    "summarize": "正在生成行程安排…",
+    "plan_fallback": "正在直接为您解答…",
+}
 
 # 长期记忆注入（阶段2 T3）：检索条数上限（与任务契约一致：top_k=3）
 _MEMORY_INJECT_TOP_K = 3
@@ -170,6 +200,13 @@ _TOOLS: List[Any] = [
     recommend_agent.filter_by_tags,     # 标签筛选路线
     recommend_routes,                   # 规则引擎推荐（可复用 recommend 逻辑）
 ]
+
+
+def _select_tools(use_rag: bool) -> List[Any]:
+    """按 use_rag 选择工具集（快速路径与规划路径共用）。"""
+    if use_rag:
+        return list(_TOOLS)
+    return [t for t in _TOOLS if t.name != _KNOWLEDGE_TOOL_NAME]
 
 
 # ── 进程内会话存储（阶段2 T1：进程内 TTL 缓存 + SQLite 双写持久化） ────
@@ -424,12 +461,9 @@ def _build_agent(*, use_rag: bool, llm: Optional[Any] = None) -> Any:
     """构建 LangChain tool-calling agent（create_agent，langchain 1.x 状态图）。"""
     if llm is None:
         llm = get_chat_llm(max_tokens=_CHAT_MAX_TOKENS, timeout=_CHAT_TIMEOUT)
-    tools = list(_TOOLS) if use_rag else [
-        t for t in _TOOLS if t.name != _KNOWLEDGE_TOOL_NAME
-    ]
     return create_agent(
         model=llm,
-        tools=tools,
+        tools=_select_tools(use_rag),
         system_prompt=SYSTEM_PROMPT,
         name="scenic_chat_agent",
     )
@@ -624,6 +658,9 @@ async def chat(
 
     Raises:
         LLMConfigError / 网络 / API 异常：由路由层捕获并自动回落 Dify
+
+    阶段3 T1 双模式：意图分类为复杂且 AGENT_DUAL_MODE 开启时，先尝试规划
+    路径（planner_agent.chat_plan）；规划异常/分类简单时走快速路径。
     """
     # 1. 会话管理（进程内缓存 → SQLite 懒恢复；新建同步落盘）
     conversation_id = _get_or_create_conversation(conversation_id, user)
@@ -637,24 +674,47 @@ async def chat(
     if memory_context:
         messages.insert(0, SystemMessage(content=memory_context))
 
+    # 1.6 阶段3 T1 双模式：复杂任务走规划路径（LangGraph 规划图：
+    #     规划 → 多步执行 → 总结）。意图分类为简单/分类失败时跳过；
+    #     规划路径任何异常静默降级快速路径，对话不中断（双轨回落不变）
+    answer: Optional[str] = None
+    rag_context = ""
+    rag_sources: List[Dict[str, Any]] = []
+    plan_steps: List[Any] = []
+    if settings.AGENT_DUAL_MODE and _is_complex_intent(query):
+        try:
+            plan_result = await planner_agent.chat_plan(
+                messages=messages,
+                rag_top_k=rag_top_k,
+                tools=_select_tools(use_rag),
+            )
+            answer = plan_result.answer
+            rag_context = plan_result.rag_context
+            rag_sources = plan_result.rag_sources
+            plan_steps = plan_result.plan
+        except Exception as e:
+            # 规划失败安全降级：走快速路径（日志告警，不阻断对话）
+            logger.warning("规划路径失败，降级快速路径: %s", e)
+
     # 2. 调用 agent（历史 + 当前消息；create_agent 内部循环执行工具）
-    agent = _get_agent(use_rag=use_rag)
-    result = await agent.ainvoke(
-        {"messages": messages},
-        config={"recursion_limit": _MAX_AGENT_STEPS},
-    )
-    all_messages: List[BaseMessage] = result.get("messages", [])
+    #    （双模式关闭 / 分类简单 / 规划路径失败时走这里，行为与阶段2 完全一致）
+    if answer is None:
+        agent = _get_agent(use_rag=use_rag)
+        result = await agent.ainvoke(
+            {"messages": messages},
+            config={"recursion_limit": _MAX_AGENT_STEPS},
+        )
+        all_messages: List[BaseMessage] = result.get("messages", [])
 
-    # 3. 提取最终回答（最后一条非工具消息）
-    answer = ""
-    for msg in reversed(all_messages):
-        if getattr(msg, "type", "") == "ai" and not getattr(msg, "tool_calls", None):
-            content = msg.content
-            answer = content if isinstance(content, str) else str(content or "")
-            break
+        # 3. 提取最终回答（最后一条非工具消息）
+        for msg in reversed(all_messages):
+            if getattr(msg, "type", "") == "ai" and not getattr(msg, "tool_calls", None):
+                content = msg.content
+                answer = content if isinstance(content, str) else str(content or "")
+                break
 
-    # 4. 提取 RAG 来源（search_knowledge 工具真实检索结果，透出到响应）
-    rag_context, rag_sources = _extract_rag_info(all_messages, rag_top_k)
+        # 4. 提取 RAG 来源（search_knowledge 工具真实检索结果，透出到响应）
+        rag_context, rag_sources = _extract_rag_info(all_messages, rag_top_k)
 
     # 5. 追加历史（进程内 + SQLite 双写，短期记忆持久化）
     _append_history(conversation_id, query, answer, user)
@@ -663,11 +723,16 @@ async def chat(
     #    写入 user_memory 向量库（按 user 隔离；游客不写；失败静默降级）
     _schedule_memory_extraction(user, conversation_id, query, answer)
 
+    engine = "langchain-plan" if plan_steps else "langchain"
+    tool_count = len(plan_steps) if plan_steps else len(
+        [m for m in locals().get("all_messages", []) if getattr(m, "type", "") == "tool"]
+    )
     logger.info(
-        "对话完成: engine=langchain user=%s conversation=%s tools=%d answer_len=%d",
+        "对话完成: engine=%s user=%s conversation=%s tools=%d answer_len=%d",
+        engine,
         user,
         conversation_id,
-        len([m for m in all_messages if getattr(m, "type", "") == "tool"]),
+        tool_count,
         len(answer),
     )
     return ChatAgentResult(
@@ -716,6 +781,36 @@ async def chat_stream(
     messages: List[BaseMessage] = history + [HumanMessage(content=query)]
     if memory_context:
         messages.insert(0, SystemMessage(content=memory_context))
+
+    # 1.6 阶段3 T1 双模式：复杂任务走规划路径（SSE 事件与快速路径契约一致：
+    #     step（规划中/执行中/总结中）/ token（总结逐字输出）/ done）。
+    #     规划路径任何异常（含规划失败）静默降级快速路径，对话不中断
+    if settings.AGENT_DUAL_MODE and _is_complex_intent(query):
+        plan_tokens: List[str] = []
+        try:
+            async for event in planner_agent.chat_plan_stream(
+                messages=messages,
+                conversation_id=conversation_id,
+                rag_top_k=rag_top_k,
+                tools=_select_tools(use_rag),
+                labels={**_STEP_LABELS, **_PLAN_STEP_LABELS},
+            ):
+                if event.get("type") == "token":
+                    plan_tokens.append(event.get("text", ""))
+                yield event
+            # 规划路径完成：追加历史 + 长期记忆钩子（与快速路径一致）
+            plan_answer = "".join(plan_tokens)
+            _append_history(conversation_id, query, plan_answer, user)
+            _schedule_memory_extraction(user, conversation_id, query, plan_answer)
+            return
+        except Exception as e:
+            # 规划失败安全降级：日志告警 + step 提示，继续快速路径（不中断）
+            logger.warning("规划路径流式失败，降级快速路径: %s", e)
+            yield {
+                "type": "step",
+                "tool": "plan_fallback",
+                "label": _PLAN_STEP_LABELS["plan_fallback"],
+            }
 
     # 2. 流式调用 agent（多轮上下文 + 当前消息）
     agent = _get_agent(use_rag=use_rag)
