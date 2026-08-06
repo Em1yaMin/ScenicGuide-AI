@@ -11,6 +11,7 @@ pytest + pytest-asyncio 测试套件。覆盖 FastAPI HTTP 端点、服务层逻
 ## Test Fixtures (conftest.py)
 
 ```
+_reset_memory_store (autouse, 重置短期记忆存储为 :memory:，防跨测试污染；持久化/重启恢复专项测试自行 reset_store 到临时文件)
 _pin_embedding_api_key_off (autouse, 固定 EMBEDDING_API_KEY 为空 → 走本地 TF-IDF)
 db_engine → db_session → client
   (3 个函数级 fixture，链式依赖，每个测试完全隔离)

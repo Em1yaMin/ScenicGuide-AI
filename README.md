@@ -127,6 +127,9 @@ cp .env.example .env
 | `EMBEDDING_API_KEY` | Minimax Embedding API Key（RAG 向量化，与 OPENAI_*/LLM_* 独立；不配置时自动降级本地 TF-IDF，详见 AGENTS.md「本地 RAG 知识库」） |
 | `EMBEDDING_API_BASE` | Minimax Embedding 端点（默认 `https://api.minimaxi.com/v1`，**原生 API 格式**：请求 `texts`+`type`（query/db）、响应 `vectors`，实测模型 `embo-01`，见 `doc/phase1-e2e-verification.md`） |
 | `EMBEDDING_MODEL` | Embedding 模型名（默认 `embo-01`） |
+| `MEMORY_DB_PATH` | 短期记忆 SQLite 存储路径（默认 `memory_store.db`，独立于主库 digital_human.db，标准库 sqlite3，无额外依赖，见 AGENTS.md「短期记忆持久化」） |
+| `MEMORY_TTL_DAYS` | 会话 TTL（天，默认 7）：滑动窗口，每次对话刷新过期时间，到期会话由后台任务清理 |
+| `MEMORY_CLEANUP_INTERVAL_SECONDS` | 过期会话清理周期（秒，默认 3600）：启动时立即清理一次 + 定期清理 |
 | `SSH_HOST` / `SSH_PORT` / `SSH_USER` / `SSH_PASSWORD` | 部署 Dify 的远程服务器（可选） |
 
 **前端** — 复制并填写 `digitalHumanVue/.env`：
@@ -333,7 +336,7 @@ docker-compose up -d --build
 | POST | `/visitor/register` | 游客注册 |
 | POST | `/visitor/refresh-recommend` | 手动刷新推荐问句缓存 |
 | POST | `/recommend` | 个性化路线推荐（接收偏好描述，返回匹配路线） |
-| POST | `/dialogue/chat` | 对话（**双轨**：默认 LangChain agent 主链路，结构化工具直查景点/路线 + 知识检索 + 规则推荐，进程内多轮会话；异常自动回落 Dify；`DIALOGUE_ENGINE=dify` 强制走 Dify，响应字段兼容 `answer/conversation_id/rag_context/rag_sources`；`streaming=true` 时返回 SSE 流式事件，见下方「SSE 流式对话」） |
+| POST | `/dialogue/chat` | 对话（**双轨**：默认 LangChain agent 主链路，结构化工具直查景点/路线 + 知识检索 + 规则推荐，多轮会话**短期记忆持久化**（SQLite 落盘 + TTL，重启可恢复，见下方「短期记忆持久化」）；异常自动回落 Dify；`DIALOGUE_ENGINE=dify` 强制走 Dify，响应字段兼容 `answer/conversation_id/rag_context/rag_sources`；`streaming=true` 时返回 SSE 流式事件，见下方「SSE 流式对话」） |
 | POST | `/dialogue/sync-now` | 手动触发对话抓取 |
 | POST | `/analysis/run-now` | 手动触发量化分析 |
 | GET | `/analysis/overview` | AI 运营分析概览（支持 `?days=7/30/90`） |
@@ -388,6 +391,18 @@ Dify 兜底链路同样流式（`response_mode=streaming`），`<think>...</thin
 
 `digitalHumanVue/src/composables/useDialogueStream.ts` 以 fetch + ReadableStream 逐帧解析 SSE（无额外依赖），`ChatView.vue` 右侧面板提供文本对话：步骤 chips 可视化思考过程、回答逐字渲染（含光标）、推荐问句一键发送、主链路回落提示。
 
+## 短期记忆持久化（阶段2 T1）
+
+多轮会话上下文已从**进程内 dict（重启即失）**升级为**SQLite 落盘 + 进程内 TTL 缓存**（登录用户与游客均享短期记忆，会话级、按 `conversation_id`）：
+
+- **重启恢复**：重启后同 `conversation_id` 续聊不丢多轮上下文（SQLite 懒恢复；LRU 淘汰只出缓存、不出库）
+- **TTL 滑动窗口**：默认 7 天（`MEMORY_TTL_DAYS`），每次对话刷新过期时间；过期会话由后台任务定期清理（启动立即执行一次 + 每 `MEMORY_CLEANUP_INTERVAL_SECONDS` 秒，默认 1 小时）＋ 访问时惰性清理双保险
+- **双轨回落兼容**：会话归属判定（`has_conversation`）随 `source` 字段持久化——LangChain 生成的 id 对 Dify 依旧未知（回落传空串新建会话），Dify 自己的 id 原样透传延续上下文
+- **降级不阻断**：SQLite 写失败仅告警，记忆降级为进程内，对话不中断
+- 配置项：`MEMORY_DB_PATH` / `MEMORY_TTL_DAYS` / `MEMORY_CLEANUP_INTERVAL_SECONDS`，见 `digitalHumanApi/.env.example`
+
+存储层与读写策略等实现细节见 AGENTS.md「短期记忆持久化」。
+
 ## 用户体系（注册/登录/JWT）
 
 后端提供最小可用用户体系，游客免登录可继续使用对话功能：
@@ -421,6 +436,7 @@ pytest -v
 | 本地数字人部署 | ✅ 已部署（TencentAPI ASR + LangChainAgent + MiniMax TTS） |
 | 动态推荐问句 | ✅ 正常（每 5 分钟从 Dify 刷新，缓存 stale-while-revalidate） |
 | 阶段1 双轨联调 | ✅ 通过（LangChain 新链路全流程 + 故障回落 Dify + ADH 接入 + 前端流式渲染；联调发现并修复 3 个缺陷：Minimax Embedding 原生 API 格式、ADH SSE 事件契约、回落错误处理，详见 [`doc/phase1-e2e-verification.md`](doc/phase1-e2e-verification.md)） |
+| 阶段2 T1 短期记忆 | ✅ 实现完成（会话历史 SQLite 落盘 + TTL 滑动窗口过期清理 + 重启恢复，存储层/清理任务/集成单测覆盖，测试全绿） |
 | Docker Compose | 已配置，未在本次验收中实际构建 |
 
 ## 常见问题

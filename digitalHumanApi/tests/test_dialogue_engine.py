@@ -18,6 +18,7 @@ def _pin_dialogue_engine(monkeypatch):
     # 清理 chat_agent 进程内会话，避免跨测试污染归属判定
     with chat_agent._conversations_lock:
         chat_agent._conversations.clear()
+        chat_agent._conversation_meta.clear()
         chat_agent._generated_conversation_ids.clear()
 
 

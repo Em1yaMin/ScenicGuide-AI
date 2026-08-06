@@ -13,7 +13,8 @@
 - **推荐能力**：`recommend_routes` 包装 recommend_agent.recommend（规则引擎
   评分 + 结构化直查），供 agent 在识别到游览偏好时调用
 - **多轮上下文**：进程内会话（conversation_id → 消息历史 dict，线程锁保护；
-  阶段1 不持久化，阶段2 再接入用户长期记忆）
+  阶段2 T1 起短期记忆持久化：SQLite 落盘 + 进程内 TTL 缓存，重启可恢复，
+  详见下方「进程内会话存储」节；长期记忆为后续阶段）
 - **安全边界**：预订/账号/支付等操作类需求不提供工具、永不自动办理，
   system prompt 要求 agent 引导游客联系人工客服
 
@@ -25,6 +26,7 @@ import asyncio
 import json
 import logging
 import threading
+import time
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -34,6 +36,8 @@ from langchain.agents import create_agent
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
 from langchain_core.tools import tool
 
+from app.core import memory_store
+from app.core.config import settings
 from app.core.llm import get_chat_llm
 from app.services import recommend_agent
 from app.services.rag_service import build_rag_context
@@ -115,39 +119,167 @@ _TOOLS: List[Any] = [
 ]
 
 
-# ── 进程内会话存储（阶段1：不持久化） ─────────────────────────────────────
+# ── 进程内会话存储（阶段2 T1：进程内 TTL 缓存 + SQLite 双写持久化） ────
+#
+# 短期记忆持久化方案（与 app/core/memory_store.py 配套）：
+# - 读走缓存、写双写：`_conversations` 为热缓存（LRU 上限 _MAX_CONVERSATIONS），
+#   每次追加同步落盘 SQLite（独立文件 memory_store.db），崩溃无丢失窗口；
+#   SQLite 写失败仅告警降级为进程内记忆，不阻断对话
+# - 懒恢复：缓存未命中时从 SQLite 读回该会话历史（重启后同 conversation_id
+#   续聊可恢复多轮上下文），避免启动全量加载；LRU 淘汰只出缓存、不出库
+#   （_MAX_CONVERSATIONS 内存上限语义不变，SQLite 数据保留至 TTL 过期）
+# - TTL 滑动窗口：`_conversation_meta` 记录每会话过期时间（每次追加刷新），
+#   过期会话访问时惰性清理；后台任务（app/tasks/memory_cleanup.py）定期
+#   清理 SQLite 过期行 + 驱逐进程内过期缓存
+# - `_generated_conversation_ids` 归属判定随 source 持久化：重启恢复时
+#   仅对本模块生成的 id（source=langchain）重新登记，双轨回落行为不变
 
 _conversations: "OrderedDict[str, List[BaseMessage]]" = OrderedDict()
 _conversations_lock = threading.Lock()
+
+
+@dataclass
+class _SessionMeta:
+    """会话元数据（进程内，与 SQLite 行对应）。"""
+    expires_at: float  # 过期时间（unix 秒），滑动窗口 TTL
+    user: str          # 最近活跃用户标识（登录用户 id / 游客 id / visitor）
+    source: str        # memory_store.SOURCE_LANGCHAIN（本模块生成）| SOURCE_CLIENT
+
+
+# conversation_id → 会话元数据（TTL 惰性过期检查用；与 SQLite ttl_expires_at 一致）
+_conversation_meta: "Dict[str, _SessionMeta]" = {}
 # 本模块生成的会话 ID 集合（仅 uuid.uuid4().hex 生成时登记）：
 # 判定「该 id 对 Dify 未知」用，不随 LRU 淘汰，也不登记客户端传入/复用的 id
 _generated_conversation_ids: "set[str]" = set()
 
 
+def _now_ts() -> float:
+    return time.time()
+
+
+def _expires_at() -> float:
+    """当前时间的会话过期时间（TTL 取存储层配置，存储不可用时降级默认值）。"""
+    ttl = None
+    try:
+        ttl = memory_store.get_store().ttl_seconds()
+    except Exception:
+        logger.warning("短期记忆存储不可用，按配置默认 TTL 计算过期时间")
+    if ttl is None:
+        ttl = int(settings.MEMORY_TTL_DAYS * 86400)
+    return _now_ts() + ttl
+
+
+def _store_call(name: str, *args: Any, **kwargs: Any) -> Any:
+    """SQLite 持久化调用包装：失败仅告警，记忆降级为进程内，不阻断对话。"""
+    try:
+        return getattr(memory_store.get_store(), name)(*args, **kwargs)
+    except Exception as e:
+        logger.warning(
+            "短期记忆持久化失败（对话继续，降级为进程内记忆）: op=%s err=%s",
+            name,
+            e,
+        )
+        return None
+
+
+def _deserialize_history(seq: List[Dict[str, Any]]) -> List[BaseMessage]:
+    """SQLite 消息序列 → BaseMessage 历史列表（忽略未知 role，防御性）。"""
+    history: List[BaseMessage] = []
+    for item in seq:
+        role = item.get("role")
+        content = item.get("content", "")
+        if role == "human":
+            history.append(HumanMessage(content=content))
+        elif role == "ai":
+            history.append(AIMessage(content=content))
+    return history
+
+
 def _evict_locked() -> None:
-    """LRU 淘汰最久未活跃会话（须在持有 _conversations_lock 时调用）。"""
+    """LRU 淘汰最久未活跃会话（须在持有 _conversations_lock 时调用）。
+
+    LRU 淘汰仅移出进程内缓存，SQLite 落盘数据保留（短期记忆持久化），
+    下次访问该 id 时从库中懒恢复；_MAX_CONVERSATIONS 内存上限语义不变。
+    """
     while len(_conversations) > _MAX_CONVERSATIONS:
         oldest_id, _ = _conversations.popitem(last=False)
+        _conversation_meta.pop(oldest_id, None)
         logger.info("会话数超限，淘汰最久未活跃会话: conversation_id=%s", oldest_id)
 
 
-def _get_or_create_conversation(conversation_id: str) -> str:
-    """按 conversation_id 取会话；空 id 或未知 id 时新建并返回有效 id。"""
+def _get_or_create_conversation(
+    conversation_id: str, user: str = "visitor"
+) -> str:
+    """按 conversation_id 取会话（进程内缓存 → SQLite 懒恢复）；空 id /
+    过期 / 未知 id 时新建并返回有效 id（新建会话同步落盘）。
+
+    阶段2 T1 起接入短期记忆持久化：重启后同 conversation_id 续聊可从
+    SQLite 恢复历史消息；新建会话写双写（缓存 + 落盘），TTL 滑动窗口。
+    """
     with _conversations_lock:
-        if not conversation_id or conversation_id not in _conversations:
-            if not conversation_id:
-                conversation_id = uuid.uuid4().hex
-                _generated_conversation_ids.add(conversation_id)
-            _conversations[conversation_id] = []
-            _evict_locked()
-            logger.info("新建对话会话: conversation_id=%s", conversation_id)
-        else:
-            _conversations.move_to_end(conversation_id)
+        now = _now_ts()
+        # 1. 缓存命中且未过期 → 直接复用
+        if conversation_id and conversation_id in _conversations:
+            meta = _conversation_meta.get(conversation_id)
+            if meta is not None and meta.expires_at > now:
+                _conversations.move_to_end(conversation_id)
+                return conversation_id
+            # 过期：从缓存驱逐（惰性清理），走下方恢复/新建
+            logger.info(
+                "会话已过期（惰性清理）: conversation_id=%s", conversation_id
+            )
+            _conversations.pop(conversation_id, None)
+            _conversation_meta.pop(conversation_id, None)
+
+        # 2. SQLite 懒恢复（重启后续聊不丢上下文）
+        if conversation_id:
+            session = _store_call("load_session", conversation_id, now)
+            if session:
+                history = _deserialize_history(session["messages"])
+                _conversations[conversation_id] = history
+                _conversation_meta[conversation_id] = _SessionMeta(
+                    expires_at=session["ttl_expires_at"],
+                    user=session["user"],
+                    source=session["source"],
+                )
+                if session["source"] == memory_store.SOURCE_LANGCHAIN:
+                    # 归属判定随 source 恢复：重启后该 id 对 Dify 依旧未知
+                    _generated_conversation_ids.add(conversation_id)
+                _conversations.move_to_end(conversation_id)
+                logger.info(
+                    "从 SQLite 恢复会话: conversation_id=%s user=%s msgs=%d",
+                    conversation_id,
+                    session["user"],
+                    len(history),
+                )
+                return conversation_id
+
+        # 3. 新建（空 id 生成 uuid；同步落盘，source 区分归属）
+        generated = False
+        if not conversation_id:
+            conversation_id = uuid.uuid4().hex
+            generated = True
+            _generated_conversation_ids.add(conversation_id)
+        source = (
+            memory_store.SOURCE_LANGCHAIN if generated else memory_store.SOURCE_CLIENT
+        )
+        _conversations[conversation_id] = []
+        _conversation_meta[conversation_id] = _SessionMeta(
+            expires_at=_expires_at(), user=user, source=source
+        )
+        _evict_locked()
+        _store_call("create_session", conversation_id, user=user, source=source)
+        logger.info(
+            "新建对话会话: conversation_id=%s user=%s", conversation_id, user
+        )
         return conversation_id
 
 
-def _append_history(conversation_id: str, query: str, answer: str) -> None:
-    """追加一轮问答到会话历史，超限丢弃最早消息。"""
+def _append_history(
+    conversation_id: str, query: str, answer: str, user: str = "visitor"
+) -> None:
+    """追加一轮问答到会话历史（进程内 + SQLite 双写），超限丢弃最早消息。"""
+    source = memory_store.SOURCE_CLIENT
     with _conversations_lock:
         history = _conversations.get(conversation_id)
         if history is None:
@@ -160,12 +292,62 @@ def _append_history(conversation_id: str, query: str, answer: str) -> None:
         history.append(AIMessage(content=answer))
         if len(history) > _MAX_HISTORY_MESSAGES:
             del history[: len(history) - _MAX_HISTORY_MESSAGES]
+        meta = _conversation_meta.get(conversation_id)
+        if meta is None:
+            # 防御：缓存有历史但元数据缺失（理论上不发生），按新建补齐
+            meta = _SessionMeta(expires_at=_expires_at(), user=user, source=source)
+            _conversation_meta[conversation_id] = meta
+        else:
+            meta.expires_at = _expires_at()  # TTL 滑动窗口（每次对话刷新）
+            meta.user = user
+        source = meta.source
+
+    # 写双写：SQLite 落盘（失败仅告警，不阻断对话）
+    ok = _store_call(
+        "append_messages",
+        conversation_id,
+        [("human", query), ("ai", answer)],
+        _MAX_HISTORY_MESSAGES,
+        user=user,
+    )
+    if ok is False:
+        # 会话在库中缺失/已过期（正常路径不会发生，防御性重建后重试）
+        _store_call("create_session", conversation_id, user=user, source=source)
+        _store_call(
+            "append_messages",
+            conversation_id,
+            [("human", query), ("ai", answer)],
+            _MAX_HISTORY_MESSAGES,
+            user=user,
+        )
 
 
 def clear_conversation(conversation_id: str) -> None:
-    """清除指定会话历史（供测试与未来管理接口使用）。"""
+    """清除指定会话历史（进程内缓存 + SQLite，供测试与未来管理接口使用）。"""
     with _conversations_lock:
         _conversations.pop(conversation_id, None)
+        _conversation_meta.pop(conversation_id, None)
+    _store_call("delete_session", conversation_id)
+
+
+def evict_expired_conversations(now: Optional[float] = None) -> int:
+    """驱逐进程内已过期的会话缓存（供后台清理任务调用）。返回驱逐数。
+
+    与 SQLite 侧 cleanup_expired 配套：库删过期行、缓存驱过期会话，
+    双保险保证 TTL 过期后同 id 续聊按新会话处理。
+    """
+    if now is None:
+        now = _now_ts()
+    evicted = 0
+    with _conversations_lock:
+        for cid in list(_conversation_meta.keys()):
+            if _conversation_meta[cid].expires_at <= now:
+                _conversations.pop(cid, None)
+                _conversation_meta.pop(cid, None)
+                evicted += 1
+    if evicted:
+        logger.info("清理过期会话缓存: evicted=%d", evicted)
+    return evicted
 
 
 def has_conversation(conversation_id: str) -> bool:
@@ -288,9 +470,9 @@ async def chat(
 
     Args:
         query: 用户消息
-        user: 用户标识（登录用户 id / 游客 id / visitor；阶段1 仅用于日志，
-            阶段2 接入用户长期记忆时使用）
-        conversation_id: 会话 ID；空串则新建会话（生成新 id 并返回）
+        user: 用户标识（登录用户 id / 游客 id / visitor；写入短期记忆会话的
+            user 字段，登录用户与游客均享短期记忆）
+        conversation_id: 会话 ID；空串则新建会话（生成新 id 并返回，SQLite 落盘）
         use_rag: 是否启用知识检索工具 search_knowledge
         rag_top_k: RAG 检索结果数（同时用于响应中 rag_sources 透出）
 
@@ -300,8 +482,8 @@ async def chat(
     Raises:
         LLMConfigError / 网络 / API 异常：由路由层捕获并自动回落 Dify
     """
-    # 1. 会话管理（进程内）
-    conversation_id = _get_or_create_conversation(conversation_id)
+    # 1. 会话管理（进程内缓存 → SQLite 懒恢复；新建同步落盘）
+    conversation_id = _get_or_create_conversation(conversation_id, user)
     with _conversations_lock:
         history = list(_conversations.get(conversation_id, []))
 
@@ -324,8 +506,8 @@ async def chat(
     # 4. 提取 RAG 来源（search_knowledge 工具真实检索结果，透出到响应）
     rag_context, rag_sources = _extract_rag_info(all_messages, rag_top_k)
 
-    # 5. 追加历史（进程内，阶段2 再做持久化记忆）
-    _append_history(conversation_id, query, answer)
+    # 5. 追加历史（进程内 + SQLite 双写，短期记忆持久化）
+    _append_history(conversation_id, query, answer, user)
 
     logger.info(
         "对话完成: engine=langchain user=%s conversation=%s tools=%d answer_len=%d",
@@ -370,8 +552,8 @@ async def chat_stream(
     Raises:
         LLMConfigError / 网络 / API 异常：由路由层捕获并自动回落 Dify
     """
-    # 1. 会话管理（进程内，与 chat() 一致）
-    conversation_id = _get_or_create_conversation(conversation_id)
+    # 1. 会话管理（进程内缓存 → SQLite 懒恢复；新建同步落盘，与 chat() 一致）
+    conversation_id = _get_or_create_conversation(conversation_id, user)
     with _conversations_lock:
         history = list(_conversations.get(conversation_id, []))
 
@@ -415,9 +597,9 @@ async def chat_stream(
             if getattr(chunk, "name", "") == _KNOWLEDGE_TOOL_NAME:
                 rag_tool_messages.append(chunk)
 
-    # 3. 追加历史（进程内，阶段2 再做持久化记忆）
+    # 3. 追加历史（进程内 + SQLite 双写，短期记忆持久化）
     answer = "".join(answer_parts)
-    _append_history(conversation_id, query, answer)
+    _append_history(conversation_id, query, answer, user)
 
     # 4. RAG 来源透出（最后一次 search_knowledge 调用，与 chat() 一致）
     rag_context, rag_sources = _extract_rag_info(rag_tool_messages, rag_top_k)

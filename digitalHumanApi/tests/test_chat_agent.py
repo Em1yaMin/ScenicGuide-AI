@@ -5,12 +5,14 @@
 多轮上下文（进程内会话）、RAG 来源透出、use_rag 开关、空回答兜底。
 """
 
+import asyncio
 import json
 
 import httpx
 import pytest
 from langchain_core.messages import HumanMessage
 
+from app.core import memory_store
 from app.core.config import settings
 from app.core.llm import get_chat_llm
 from app.services import chat_agent
@@ -36,11 +38,13 @@ def _pin_llm_config(monkeypatch):
     chat_agent.reset_agent_cache()
     with chat_agent._conversations_lock:
         chat_agent._conversations.clear()
+        chat_agent._conversation_meta.clear()
         chat_agent._generated_conversation_ids.clear()
     yield
     chat_agent.reset_agent_cache()
     with chat_agent._conversations_lock:
         chat_agent._conversations.clear()
+        chat_agent._conversation_meta.clear()
         chat_agent._generated_conversation_ids.clear()
 
 
@@ -412,3 +416,128 @@ async def test_chat_recursion_limit_breaks_tool_loop(monkeypatch):
         await chat_agent.chat("你好")
     # 步数上限 25 ≈ 12 轮工具调用，LLM 调用次数远小于 9999
     assert calls < 30
+
+
+# ── 短期记忆持久化（阶段2 T1） ────────────────────────────────────────────
+
+
+async def test_history_persisted_and_restored_after_restart(monkeypatch, tmp_path):
+    """模拟重启：清空进程内会话 + 用同一 SQLite 文件重建存储层后，
+    同 conversation_id 续聊可恢复历史消息（多轮上下文不丢）。"""
+    db_path = str(tmp_path / "memory.db")
+    memory_store.reset_store(db_path=db_path)
+
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        n = len(bodies)
+        if n == 1:
+            return httpx.Response(200, json=_completion([_text_choice("第一轮回答")]))
+        return httpx.Response(200, json=_completion([_text_choice("第二轮回答")]))
+
+    _patch_agent(monkeypatch, handler, use_rag=False)
+    r1 = await chat_agent.chat("第一问", conversation_id="")
+    cid = r1.conversation_id
+    assert len(bodies) == 1
+
+    # 模拟重启：进程内状态清空，存储层用同一文件重建
+    with chat_agent._conversations_lock:
+        chat_agent._conversations.clear()
+        chat_agent._conversation_meta.clear()
+        chat_agent._generated_conversation_ids.clear()
+    memory_store.reset_store(db_path=db_path)
+
+    r2 = await chat_agent.chat("第二问", conversation_id=cid)
+    assert r2.conversation_id == cid
+    # 第二轮请求体必须携带第一轮历史（user×2 + assistant×1 + system）
+    roles = [m["role"] for m in bodies[-1]["messages"]]
+    assert roles.count("user") == 2
+    assert roles.count("assistant") == 1
+    # SQLite 侧累计两轮问答（4 条消息）
+    session = memory_store.get_store().load_session(cid)
+    assert session is not None
+    assert len(session["messages"]) == 4
+    # 归属判定随 source 恢复：重启后该 id 仍为本模块生成（回落传空串）
+    assert chat_agent.has_conversation(cid) is True
+
+
+async def test_lru_eviction_keeps_db_history(monkeypatch, tmp_path):
+    """LRU 淘汰只出缓存、不出库：被淘汰会话从 SQLite 懒恢复历史。"""
+    db_path = str(tmp_path / "memory.db")
+    memory_store.reset_store(db_path=db_path)
+
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        n = len(bodies)
+        if n == 1:
+            return httpx.Response(200, json=_completion([_text_choice("第一轮回答")]))
+        return httpx.Response(200, json=_completion([_text_choice("第二轮回答")]))
+
+    _patch_agent(monkeypatch, handler, use_rag=False)
+    monkeypatch.setattr(chat_agent, "_MAX_CONVERSATIONS", 1)
+    r1 = await chat_agent.chat("第一问", conversation_id="")
+    cid = r1.conversation_id
+    # 灌入第二个会话触发 LRU 淘汰第一个
+    await chat_agent.chat("另一会话", conversation_id="")
+    with chat_agent._conversations_lock:
+        assert cid not in chat_agent._conversations
+
+    await chat_agent.chat("第二问", conversation_id=cid)
+    roles = [m["role"] for m in bodies[-1]["messages"]]
+    assert roles.count("user") == 2  # 历史从 SQLite 恢复
+
+
+async def test_expired_session_not_restored(monkeypatch, tmp_path):
+    """TTL 过期后同 id 续聊按新会话处理：不恢复过期历史。"""
+    db_path = str(tmp_path / "memory.db")
+    memory_store.reset_store(db_path=db_path, ttl_seconds=1)
+
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json=_completion([_text_choice("答")]))
+
+    _patch_agent(monkeypatch, handler, use_rag=False)
+    r1 = await chat_agent.chat("第一问", conversation_id="")
+    cid = r1.conversation_id
+    assert len(bodies) == 1
+
+    # 模拟重启 + 超过 TTL：清空进程内状态，用同一文件重建存储层
+    await asyncio.sleep(1.1)
+    with chat_agent._conversations_lock:
+        chat_agent._conversations.clear()
+        chat_agent._conversation_meta.clear()
+        chat_agent._generated_conversation_ids.clear()
+    memory_store.reset_store(db_path=db_path, ttl_seconds=1)
+
+    await chat_agent.chat("第二问", conversation_id=cid)
+    # 过期历史不恢复：第二轮请求体只有当前这一轮（user×1）
+    roles = [m["role"] for m in bodies[-1]["messages"]]
+    assert roles.count("user") == 1
+    assert roles.count("assistant") == 0
+
+
+async def test_clear_conversation_deletes_db(monkeypatch, tmp_path):
+    """clear_conversation 同时清除进程内缓存与 SQLite 落盘数据。"""
+    db_path = str(tmp_path / "memory.db")
+    memory_store.reset_store(db_path=db_path)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=_completion([_text_choice("答")]))
+
+    _patch_agent(monkeypatch, handler, use_rag=False)
+    r1 = await chat_agent.chat("你好", conversation_id="")
+    cid = r1.conversation_id
+    assert memory_store.get_store().count_sessions() == 1
+
+    chat_agent.clear_conversation(cid)
+    with chat_agent._conversations_lock:
+        assert cid not in chat_agent._conversations
+    assert memory_store.get_store().load_session(cid) is None
+    assert memory_store.get_store().count_sessions() == 0
+    # 归属判定不变（仅清历史）
+    assert chat_agent.has_conversation(cid) is True

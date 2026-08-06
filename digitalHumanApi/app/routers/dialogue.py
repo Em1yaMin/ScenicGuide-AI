@@ -26,7 +26,7 @@ class ChatRequest(BaseModel):
     """RAG 增强对话请求。"""
     query: str = Field(..., description="用户输入", min_length=1, max_length=5000)
     user: str = Field(default="visitor", description="用户标识")
-    conversation_id: str = Field(default="", description="会话 ID（LangChain 进程内会话或 Dify 会话；留空则新建）")
+    conversation_id: str = Field(default="", description="会话 ID（LangChain 会话或 Dify 会话；留空则新建）")
     use_rag: bool = Field(default=True, description="是否启用本地 RAG 检索")
     rag_top_k: int = Field(default=3, description="RAG 检索结果数", ge=1, le=10)
     streaming: bool = Field(default=False, description="是否流式返回")
@@ -35,7 +35,7 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     """对话响应。"""
     answer: str = Field(default="", description="回复内容")
-    conversation_id: str = Field(default="", description="会话 ID（LangChain 进程内会话或 Dify 会话）")
+    conversation_id: str = Field(default="", description="会话 ID（LangChain 会话或 Dify 会话）")
     rag_context: str = Field(default="", description="注入的 RAG 上下文（调试用）")
     rag_sources: list = Field(default_factory=list, description="RAG 检索来源")
 
@@ -79,7 +79,7 @@ async def chat_with_rag(
     流程（DIALOGUE_ENGINE=langchain，默认）:
     1. 走 LangChain 对话 agent（app/services/chat_agent.py）：结构化工具
        直查景点/路线（零幻觉）+ search_knowledge 统一检索入口查知识库
-       + recommend_routes 规则推荐，进程内多轮上下文
+       + recommend_routes 规则推荐，多轮上下文（短期记忆持久化：SQLite 落盘，重启可恢复）
     2. agent 链路异常（LLM 未配置/网络/API 故障）时自动回落 Dify：
        先本地 RAG 预检索注入 query，再调用 Dify Chat Agent
 

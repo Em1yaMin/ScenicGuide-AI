@@ -38,11 +38,13 @@ def _pin_llm_config(monkeypatch):
     chat_agent.reset_agent_cache()
     with chat_agent._conversations_lock:
         chat_agent._conversations.clear()
+        chat_agent._conversation_meta.clear()
         chat_agent._generated_conversation_ids.clear()
     yield
     chat_agent.reset_agent_cache()
     with chat_agent._conversations_lock:
         chat_agent._conversations.clear()
+        chat_agent._conversation_meta.clear()
         chat_agent._generated_conversation_ids.clear()
 
 
