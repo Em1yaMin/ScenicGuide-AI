@@ -1,4 +1,4 @@
-"""后台任务：定期聚合 Dashboard 数据并调用 Dify Workflow 刷新推荐问句缓存。"""
+"""后台任务：定期聚合 Dashboard 数据并调用本地 LLM 刷新推荐问句缓存（阶段3 T3，脱离 Dify）。"""
 import asyncio
 import logging
 from typing import List
@@ -37,7 +37,7 @@ async def refresh_cycle() -> int:
         )
         return len(questions)
     logger.warning(
-        "Refresh cycle — workflow returned None, keeping %d cached questions",
+        "Refresh cycle — generation returned None, keeping %d cached questions",
         len(_recommend_cache),
     )
     return 0

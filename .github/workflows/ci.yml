@@ -19,7 +19,6 @@ jobs:
       DIFY_API_URL: https://dify.dummy.invalid/v1
       DIFY_API_KEY: ci-dummy-key
       DIFY_WORKFLOW_API_KEY: ci-dummy-key
-      DIFY_RECOMMEND_WORKFLOW_API_KEY: ci-dummy-key
     steps:
       - name: Checkout
         uses: actions/checkout@v4

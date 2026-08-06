@@ -28,7 +28,6 @@ class Settings(BaseModel):
     DIFY_API_URL: str = os.environ.get("DIFY_API_URL", "")
     DIFY_API_KEY: str = os.environ.get("DIFY_API_KEY", "")
     DIFY_WORKFLOW_API_KEY: str = os.environ.get("DIFY_WORKFLOW_API_KEY", "")
-    DIFY_RECOMMEND_WORKFLOW_API_KEY: str = os.environ.get("DIFY_RECOMMEND_WORKFLOW_API_KEY", "")
     DIFY_LIGHT4AI_USER: List[str] = [
         u.strip()
         for u in os.environ.get("DIFY_LIGHT4AI_USER", "YOUR_DIFY_USER").split(",")
@@ -126,8 +125,6 @@ class Settings(BaseModel):
             raise ValueError("DIFY_API_KEY must not be empty")
         if not self.DIFY_WORKFLOW_API_KEY:
             raise ValueError("DIFY_WORKFLOW_API_KEY must not be empty")
-        if not self.DIFY_RECOMMEND_WORKFLOW_API_KEY:
-            raise ValueError("DIFY_RECOMMEND_WORKFLOW_API_KEY must not be empty")
         return self
 
 

@@ -113,7 +113,6 @@ cp .env.example .env
 | `DIFY_API_URL` | Dify API 基础地址，如 `https://your-dify.example.com/v1` |
 | `DIFY_API_KEY` | Chat Agent 应用 Key（拉取对话） |
 | `DIFY_WORKFLOW_API_KEY` | Workflow 应用 Key（触发量化评估） |
-| `DIFY_RECOMMEND_WORKFLOW_API_KEY` | 推荐问句 Workflow 应用 Key（需在 Dify 平台单独创建） |
 | `DIFY_LIGHT4AI_USER` | light4ai 调 Dify 时固定的 user 字段 |
 | `OPENAI_API_KEY` | OpenAI API Key（用于 LangChain AI 运营分析，不配置时回退到纯 DB 统计；**当前部署单用 opencode-go 端点**，与 `LLM_*` 同一 key，见 `digitalHumanApi/.env`） |
 | `OPENAI_API_BASE` | OpenAI API 基础地址（可选；当前部署 `https://opencode.ai/zen/go/v1`） |
@@ -332,7 +331,7 @@ docker-compose up -d --build
 | POST | `/auth/login` | 登录（返回 JWT + 用户信息） |
 | GET | `/auth/me` | 当前登录用户（Bearer token，无效 token 401） |
 | POST | `/auth/guest` | 签发短期游客 token（匿名，30 分钟） |
-| GET | `/visitor/recommended-questions` | 获取动态推荐问句（后台每 5 分钟从 Dify 刷新） |
+| GET | `/visitor/recommended-questions` | 获取动态推荐问句（后台每 5 分钟由本地 LLM 生成刷新，阶段3 T3 已脱离 Dify） |
 | POST | `/visitor/register` | 游客注册 |
 | POST | `/visitor/refresh-recommend` | 手动刷新推荐问句缓存 |
 | POST | `/recommend` | 个性化路线推荐（接收偏好描述，返回匹配路线） |
@@ -459,7 +458,7 @@ pytest -v
 | 数据大屏 | ✅ 正常（sentiment_trend 全量连续查询，从最早对话日到今天、缺失日零值回填 / satisfaction / hot_issues 均有数据） |
 | 手动触发端点 | ✅ 正常（`POST /sync-now` + `/run-now` 手动触发后台逻辑） |
 | 本地数字人部署 | ✅ 已部署（TencentAPI ASR + LangChainAgent + MiniMax TTS） |
-| 动态推荐问句 | ✅ 正常（每 5 分钟从 Dify 刷新，缓存 stale-while-revalidate） |
+| 动态推荐问句 | ✅ 正常（每 5 分钟由本地 LLM 生成刷新（阶段3 T3 脱离 Dify，`LLM_API_*` 配置 opencode-go，聚合 Dashboard 数据生成，失败降级保留旧缓存），缓存 stale-while-revalidate） |
 | 阶段1 双轨联调 | ✅ 通过（LangChain 新链路全流程 + 故障回落 Dify + ADH 接入 + 前端流式渲染；联调发现并修复 3 个缺陷：Minimax Embedding 原生 API 格式、ADH SSE 事件契约、回落错误处理，详见 [`doc/phase1-e2e-verification.md`](doc/phase1-e2e-verification.md)） |
 | 阶段2 T1 短期记忆 | ✅ 实现完成（会话历史 SQLite 落盘 + TTL 滑动窗口过期清理 + 重启恢复，存储层/清理任务/集成单测覆盖，测试全绿） |
 | 阶段2 T2 长期记忆写入 | ✅ 实现完成（对话后后台 LLM 提取用户事实/偏好写入 user_memory 向量库，按 user 隔离、同事实覆盖、条数上限，游客不写，失败静默降级） |
