@@ -59,6 +59,9 @@ START → plan（规划） → execute（多步执行，循环 ≤6 步） → s
    安排…`）在首个 summarize token 时输出，保证「总结中 → token」顺序正确。
 5. **RAG 来源透出**：执行结果中最后一次 `search_knowledge` 的返回按快速路径
    契约提取 `rag_context`/`rag_sources`（done 事件携带）。
+6. **规划偶发空响应重试**（阶段3 收官补丁，2026-08-06）：opencode-go 思考型
+   模型对长规划 prompt 偶发返回空 content，`plan_node` 对空/无效输出重试
+   1 次（`_PLAN_RETRIES=1`）；详见 `doc/phase3-e2e-verification.md` §3.1。
 
 ### 1.3 安全降级与双轨回落（不变）
 
@@ -96,11 +99,11 @@ done  conversation_id / rag_context / rag_sources
 | 文件 | 覆盖 |
 |------|------|
 | `tests/test_intent_classifier.py` | 简单/复杂分类、简单信号优先、分类异常降级、与既有查询兼容、船长决策收窄词表回归（38 例） |
-| `tests/test_planner_agent.py` | 规划生成/多步执行/总结全链路、SSE 事件序列、RAG 透出、规划失败/未知工具/总结为空/LLM 故障降级、工具失败不中断（13 例） |
+| `tests/test_planner_agent.py` | 规划生成/多步执行/总结全链路、SSE 事件序列、RAG 透出、规划失败/未知工具/总结为空/LLM 故障降级、工具失败不中断、规划偶发空响应重试（15 例） |
 | `tests/test_dual_mode.py` | chat/chat_stream 分流、规划失败/分类失败降级、`AGENT_DUAL_MODE=false` 回退、记忆注入透传（10 例） |
 | 存量回归 | 全部既有对话/记忆/路由测试保留通过 |
 
-全量：**314 passed**（存量 253 + 新增 61；含船长决策 2026-08-06 词表收窄后的全量回归）。
+全量：**320 passed**（含船长决策 2026-08-06 词表收窄后的全量回归；阶段3 收官新增 2 例规划偶发空响应重试，详见 `doc/phase3-e2e-verification.md`）。
 
 ## 4. 真实环境冒烟验证（2026-08-06）
 

@@ -392,3 +392,70 @@ async def test_chat_plan_tool_failure_continues():
     assert result.answer == "回答完成。"
     assert result.plan[0]["tool"] == "boom_tool"
     assert result.plan[1]["tool"] == "ok_tool"
+
+
+# ── 规划阶段偶发空响应重试（2026-08-06 联调发现：opencode-go 思考型模型
+#    对长规划 prompt 偶发返回 200 但 content 为空，重试一次显著提升成功率）──
+
+
+async def test_chat_plan_retries_empty_plan_output():
+    """首次规划输出为空（偶发空响应）→ 自动重试 → 第二次成功。"""
+    plan_steps = [
+        {"tool": "search_routes", "args": {"query": "灵山一日游"}, "note": "查路线"},
+    ]
+    attempts = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        first_sys = next(
+            (m.get("content", "") for m in body.get("messages", []) if m.get("role") == "system"),
+            "",
+        )
+        if "规划引擎" not in first_sys:
+            return _text_stream("回答完成。")
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            # 第一次：模拟 opencode-go 偶发空 content（流式无任何文本）
+            return _text_stream("")
+        return _text_stream(json.dumps({"steps": plan_steps}, ensure_ascii=False))
+
+    llm = _llm_with_mock(handler)
+    result = await planner_agent.chat_plan(
+        _messages(),
+        tools=[planner_agent.search_routes] if hasattr(planner_agent, "search_routes") else _tools(),
+        llm=llm,
+    )
+    assert attempts["n"] == 2, f"预期重试 1 次（共 2 次规划调用），实际 {attempts['n']}"
+    assert result.answer == "回答完成。"
+    assert result.plan[0]["tool"] == "search_routes"
+
+
+async def test_chat_plan_retries_exhausted_raises():
+    """连续两次规划输出为空 → 重试耗尽 → PlannerError（上层降级快速路径）。"""
+    attempts = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        first_sys = next(
+            (m.get("content", "") for m in body.get("messages", []) if m.get("role") == "system"),
+            "",
+        )
+        if "规划引擎" not in first_sys:
+            return _text_stream("回答完成。")
+        attempts["n"] += 1
+        return _text_stream("")
+
+    llm = _llm_with_mock(handler)
+    with pytest.raises(PlannerError):
+        await planner_agent.chat_plan(
+            _messages(),
+            tools=[],
+            llm=llm,
+        )
+    assert attempts["n"] == 2, f"预期 2 次规划调用后放弃，实际 {attempts['n']}"
+
+
+def _tools():
+    """测试工具集兜底（与 chat_agent._select_tools 一致的本地工具）。"""
+    from app.services.chat_agent import _select_tools
+    return _select_tools(use_rag=False)
