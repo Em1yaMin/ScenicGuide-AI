@@ -98,11 +98,11 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 船长决策 2026-08-06：对话入口先做**意图分类**，按任务复杂度分流。设计/测试/冒烟详见 `doc/phase3-dual-mode.md`（含技术坑与真实请求证据）。
 
-- `app/services/intent_classifier.py` — **轻量规则分类**（纯字符串匹配、零延迟；不选 LLM 单次分类——会给简单消息引入额外 LLM 往返，违背「简单问答延迟无显著增加」）：`classify_intent(query)` 返回 `simple`/`complex`，失败/未命中默认 `simple`（安全降级）；**词表设计约束：与既有测试查询兼容**——「拍照」「推荐」「推荐路线」等单轮偏好表达不判复杂（快速路径 recommend_routes 可处理），仅「路线推荐」「推荐一条」等明确多步规划词判复杂；同查询复杂信号 ≥ 简单信号时判复杂
+- `app/services/intent_classifier.py` — **轻量规则分类**（纯字符串匹配、零延迟；不选 LLM 单次分类——会给简单消息引入额外 LLM 往返，违背「简单问答延迟无显著增加」）：`classify_intent(query)` 返回 `simple`/`complex`，失败/未命中默认 `simple`（安全降级）；**词表设计约束：与既有测试查询兼容 + 船长决策 2026-08-06 方案B 收窄**——「拍照」「推荐」「推荐路线」等单轮偏好表达不判复杂（快速路径 recommend_routes 可处理），**纯人群/导航词（「怎么走」「带老人」「带小孩」「老人小孩」「带娃」「亲子游」「情侣游」「全家游」「家庭游」）不判复杂**（单轮可答的导航/适宜性/单偏好查询走快速路径，避免规划路径延迟增量）；仅明确多步规划词判复杂（规划/安排/行程/攻略/N日游/怎么玩/怎么安排/路线推荐/推荐一条/预算/制定行程/帮我计划/帮我规划），组合规划类查询（如「规划灵山一日游，带老人小孩，喜欢拍照」）仍复杂；同查询复杂信号 ≥ 简单信号时判复杂
 - `app/services/planner_agent.py` — **LangGraph 显式图**（langgraph 1.2 自带，零新依赖）：`START → plan（规划）→ execute（循环 ≤6 步）→ summarize（总结）→ END`；`chat_plan`（非流式）/`chat_plan_stream`（SSE，复用 step/token/done 契约）；**规划阶段用 `llm.astream` 累积 + `_parse_plan` 手动解析 JSON**——langgraph 把图内模型调用统一转为流式（stream=True），`with_structured_output` 解析器不兼容流式分块（实测报错），JSON 解析跨 DeepSeek/OpenAI 端点健壮；执行阶段 `BaseTool.ainvoke` 线程池执行（`recommend_routes` 内含 asyncio.run 安全），单步失败记录错误继续；总结阶段流式逐字输出（`stream_mode=["updates","messages"]`，仅透出 `langgraph_node=="summarize"` 的 token；**token 先于节点完成事件到达 → 总结步骤事件在首个 token 时输出**保序）；RAG 来源从执行结果最后一条 `search_knowledge` 提取透出；异常统一抛 `PlannerError`（规划失败/步骤全非法/总结为空/LLM 故障）
 - **chat_agent 分流**：`chat()`/`chat_stream()` 在会话管理 + 长期记忆注入（T3）之后调 `_is_complex_intent(query)`（双层 try/except 防御）——复杂且 `AGENT_DUAL_MODE` 开启走规划路径（`planner_agent.chat_plan` / `chat_plan_stream`，`tools=_select_tools(use_rag)` 传入、记忆注入上下文随 messages 透传）；规划异常静默降级快速路径（流式先发 `step tool=plan_fallback label=正在直接为您解答…`），再由路由层兜底 Dify（双轨不变）；会话/历史/记忆钩子仍由 chat_agent 统一管理
 - 配置：`AGENT_DUAL_MODE`（默认 `true`；`false` 全部走快速路径，行为与阶段2 完全一致，回退开关）
-- 测试：`tests/test_intent_classifier.py`（16）+ `tests/test_planner_agent.py`（16）+ `tests/test_dual_mode.py`（10）；**测试注意：图内模型调用统一 stream=true，mock handler 需按首条 system 消息内容区分规划节点（含「规划引擎」）与总结节点**；存量测试查询（「我喜欢拍照」「推荐路线」等）必须保持 simple（词表约束）
+- 测试：`tests/test_intent_classifier.py`（38）+ `tests/test_planner_agent.py`（13）+ `tests/test_dual_mode.py`（10）；**测试注意：图内模型调用统一 stream=true，mock handler 需按首条 system 消息内容区分规划节点（含「规划引擎」）与总结节点**；存量测试查询（「我喜欢拍照」「推荐路线」等）必须保持 simple（词表约束）
 
 ## 短期记忆持久化（阶段2 T1，船长决策：进程内 TTL 缓存 + SQLite，暂不上 Redis）
 

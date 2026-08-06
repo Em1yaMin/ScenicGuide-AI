@@ -62,11 +62,30 @@ def test_classify_complex_multi_step(query):
         "这里难不难走？",
         "",
         "   ",
+        # 船长决策 2026-08-06（nm-f1-wordlist 方案B）：纯人群/导航单轮查询
+        # 不判复杂（走快速路径，避免规划路径延迟增量）
+        "灵山怎么走？",
+        "适合带老人去吗",
+        "带小孩适合玩什么？",
+        "带老人小孩去合适吗",
+        "带小孩可以玩什么项目",
     ],
 )
 def test_classify_simple_single_fact(query):
-    """单事实查询 / 无规划信号 → simple（含既有测试查询回归）。"""
+    """单事实查询 / 无规划信号 → simple（含既有测试查询回归与收窄词表回归）。"""
     assert classify_intent(query) == SIMPLE
+
+
+def test_captain_wordlist_narrowing_keeps_compound_planning_complex():
+    """船长决策收窄词表后：组合规划类查询（人群偏好 + 规划词）仍判复杂。"""
+    for q in [
+        "规划灵山一日游，带老人小孩，喜欢拍照",
+        "带老人小孩一日游怎么玩？",
+        "帮我规划两日游，带娃，预算充足",
+        "推荐一条适合情侣的半日游路线",
+        "制定行程：早上看花海，下午逛小镇",
+    ]:
+        assert classify_intent(q) == COMPLEX, q
 
 
 def test_simple_signal_outweighs_single_complex_word():
