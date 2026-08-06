@@ -97,6 +97,17 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - 测试注意：agent 经 `ainvoke` 调用时走 openai SDK **async client**，MockTransport 需同时注入 `http_client`（httpx.Client）与 `http_async_client`（httpx.AsyncClient）两个参数（`async_client` 字段是 openai 资源对象，不可直接传）
 - 单测：`tests/test_chat_agent.py`（工具调用链路/多轮上下文/RAG 来源/use_rag 开关，MockTransport 模拟 DeepSeek tool-calling 响应）、`tests/test_chat_agent_stream.py`（流式 step 去重/token/done/RAG 来源/recursion_limit 断环）、`tests/test_dialogue_engine.py`（双轨/回落/双链路失败礼貌报错）、`tests/test_dialogue_stream.py`（SSE 事件序列/回落/会话 ID 移交）、`tests/test_dify_stream.py`（ThinkFilter 分块过滤/SSE 解析/错误上抛）
 
+## 长期记忆（阶段2 T2：对话记忆写入，**T3 契约见 doc/long-term-memory.md**）
+
+- `app/services/memory_service.py` — 记忆条目 schema + 写入/检索/提取；`doc/long-term-memory.md` 为**权威设计文档与 T3 契约**（变更 schema/接口必须同步该文档与本节）
+- **记忆条目 schema（T3 契约）**：每条记忆一个字段组 `{user, fact_type, content, source_conversation_id, timestamp}`；`fact_type` ∈ `preference`（偏好）/`fact`（事实）/`habit`（习惯），非法值归一 `fact`；`content` 为自然语言记忆句（≤200 字符）；存储形态为 user_memory 命名空间内**每条记忆一个 Document**（page_content=content，metadata 携带结构化字段），按 user 隔离
+- 公开接口（T3 对齐）：`save_user_memory(user, facts) -> dict`（按 user 写入/覆盖，同 user 同规范化 content 去重更新不膨胀，返回 written/overwritten/total/skipped）、`search_user_memory(user, query, top_k=3) -> List[MemoryEntry]`（user 子集内语义检索，游客/异常返回空）、`count_user_memory(user)`、`extract_facts(query, answer, llm=None)`（LLM 单次提取，可注入 llm 测试）、`extract_and_store(user, cid, query, answer)`（对话后钩子主体）
+- **游客隔离**：`is_guest_user()` 判定 visitor / guest-* / 空串为游客；游客（含匿名）**不写长期记忆**（跳过 LLM 调用与写入）
+- **提取钩子**：`chat_agent.py` 主流程不动，仅在 `chat()` 末尾 / `chat_stream()` done 事件后调 `_schedule_memory_extraction`（后台 asyncio task，不 await、不阻塞响应；句柄登记 `_memory_tasks` 防 GC、done 回调消费异常）；提取失败/LLM 未配置**静默降级不写记忆**（告警日志），绝不阻断对话；测试用 `monkeypatch.setattr(chat_agent, "_memory_extract_hook", noop)` 隔离（test_chat_agent/test_chat_agent_stream 的 autouse fixture 已固定）
+- 存储复用：`app/core/rag.py` 的 `SimpleVectorStore` 新增 `delete_documents(predicate)`（按谓词删文档+向量，支撑覆盖更新）与 `similarity_search_with_score_filtered(query, k, predicate)`（子集检索，支撑按 user 隔离）两个通用方法；写入/检索均在 `rag_service._vector_index_lock` 下执行
+- 配置：`MEMORY_ENABLED`（默认 true，总开关）、`MEMORY_MAX_PER_USER`（默认 200，超限淘汰 timestamp 最旧条目），见 `.env.example`
+- 单测：`tests/test_memory.py`（schema/按 user 隔离/覆盖去重/条数上限/游客跳过/LLM 提取容错/静默降级/chat+chat_stream 钩子调度，mock LLM 与 MockTransport，不发真实请求）、`tests/test_rag.py`（delete_documents 与过滤子集检索回归）
+
 ## AI 运营分析（LangChain + OpenAI，可回退）
 
 - `app/services/analytics_service.py` + `app/routers/analysis.py` — `GET /api/v1/analysis/overview`、`/trends`、`POST /run-now`
@@ -114,7 +125,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 # Business Context
 
-- **Visitor 端**: 访客通过数字人 iframe 对话（Dify Chat Agent），系统后台轮询抓取对话内容；用户体系（注册/登录/游客）见上方「用户认证」专节，登录用户享后续长期记忆（记忆功能后续任务实现）
+- **Visitor 端**: 访客通过数字人 iframe 对话（Dify Chat Agent），系统后台轮询抓取对话内容；用户体系（注册/登录/游客）见上方「用户认证」专节，登录用户享**长期记忆**（阶段2 T2 已实现：对话后提取用户事实/偏好写入 user_memory 向量库，按 user 隔离；游客不写，见「长期记忆」专节与 doc/long-term-memory.md）
 - **Admin 端**: 管理后台展示情感趋势、满意度、热点关注和景点热度（数据来自 Dify Workflow 量化分析），以及知识库管理（讲解词/FAQ/资料 CRUD + 批量导入）
 - **数据隔离**: 轮询/量化仍仅跟踪单一虚拟访客（`DIFY_LIGHT4AI_USER`），无多租户、无按用户的数据隔离（JWT 认证仅标记对话 user，不隔离数据，见上方「用户体系」）
 

@@ -34,6 +34,12 @@ def _pin_llm_config(monkeypatch):
     """固定主/备用端点配置，避免测试依赖真实环境变量。"""
     for key, value in {**PRIMARY, **FALLBACK}.items():
         monkeypatch.setattr(settings, key, value)
+    # 记忆提取钩子固定为 no-op：避免后台任务用假 key 发起真实网络请求
+    # （阶段2 T2 记忆钩子本身在 test_memory.py 中专项覆盖）
+    async def _noop_memory(*args, **kwargs):
+        return {"written": 0, "skipped": True}
+
+    monkeypatch.setattr(chat_agent, "_memory_extract_hook", _noop_memory)
     # 重置 agent 缓存与进程内会话，避免跨测试污染
     chat_agent.reset_agent_cache()
     with chat_agent._conversations_lock:

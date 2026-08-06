@@ -50,7 +50,8 @@ CHUNK_OVERLAP: int = int(os.environ.get("RAG_CHUNK_OVERLAP", "50"))
 # 命名空间：每个命名空间拥有独立向量索引与独立持久化文件，检索互不命中。
 # - knowledge:   知识库条目（管理后台录入，CRUD/导入变更后同步重建索引）
 # - documents:   doc/景区知识库/ 文档（全量索引）
-# - user_memory: 用户长期记忆（预留，本阶段仅保留接口与持久化目录）
+# - user_memory: 用户长期记忆（阶段2 T2 已接入写入端：对话后提取用户事实/偏好，
+#                按 user 隔离，见 app/services/memory_service.py）
 NAMESPACE_KNOWLEDGE = "knowledge"
 NAMESPACE_DOCUMENTS = "documents"
 NAMESPACE_USER_MEMORY = "user_memory"
@@ -485,6 +486,80 @@ class SimpleVectorStore:
         norm_b = math.sqrt(sum(y * y for y in b_pad)) or 1.0
 
         return dot / (norm_a * norm_b)
+
+    def delete_documents(self, predicate) -> int:
+        """删除满足谓词的文档（按位置索引同步删除向量，避免全量重新向量化）。
+
+        用于按 user 隔离的用户长期记忆的覆盖更新：先删旧条目再写入新条目。
+
+        Args:
+            predicate: Callable[[Document], bool]，返回 True 的文档将被删除
+
+        Returns:
+            实际删除的文档数（无匹配时返回 0，不触发持久化）
+        """
+        keep_docs: List[Document] = []
+        keep_vectors: List[List[float]] = []
+        removed = 0
+        for doc, vec in zip(self._documents, self._vectors):
+            if predicate(doc):
+                removed += 1
+            else:
+                keep_docs.append(doc)
+                keep_vectors.append(vec)
+        if not removed:
+            return 0
+        self._documents = keep_docs
+        if len(keep_vectors) == len(keep_docs):
+            self._vectors = keep_vectors
+        else:
+            # 防御：向量与文档数量不一致（理论上不发生），按剩余文档重新向量化
+            self._vectors = self._embed_documents_safe(
+                [d.page_content for d in keep_docs]
+            )
+        self._refresh_matrix()
+        self._save()
+        logger.info(
+            "Deleted %d documents from %s, remaining: %d",
+            removed,
+            self.collection_name,
+            len(self._documents),
+        )
+        return removed
+
+    def similarity_search_with_score_filtered(
+        self,
+        query: str,
+        k: int = DEFAULT_TOP_K,
+        predicate=None,
+    ) -> List[Tuple[Document, float]]:
+        """在满足谓词的文档子集内检索（如按 user 隔离的用户长期记忆）。
+
+        与 similarity_search_with_score 的排序/过滤语义一致，但仅对
+        predicate 返回 True 的文档计算相似度（子集规模通常很小，
+        逐向量循环即可，无需构建临时矩阵）。
+
+        Args:
+            query: 查询文本
+            k: 返回数量
+            predicate: Callable[[Document], bool]，None 时检索全部文档
+
+        Returns:
+            [(Document, score), ...] 按相似度降序排列
+        """
+        if not self._documents:
+            return []
+        query_vec = self._embed_query_safe(query)
+        results: List[Tuple[Document, float]] = []
+        for doc, vec in zip(self._documents, self._vectors):
+            if predicate is not None and not predicate(doc):
+                continue
+            sim = self._cosine_similarity(query_vec, vec)
+            if sim <= 0.01:
+                continue
+            results.append((doc, sim))
+        results.sort(key=lambda x: -x[1])
+        return results[:k]
 
     def count(self) -> int:
         """返回文档数量。"""

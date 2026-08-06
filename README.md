@@ -413,6 +413,17 @@ Dify 兜底链路同样流式（`response_mode=streaming`），`<think>...</thin
 - **安全**：密码使用 pwdlib[bcrypt] 哈希存储，绝不落明文；日志不打印 token/密码
 - **配置**：`JWT_SECRET`（生产必须设置，留空时启动生成随机临时密钥、重启后 token 失效）、`JWT_EXPIRES_MINUTES`（默认 1440）、`GUEST_TOKEN_EXPIRES_MINUTES`（默认 30），见 `digitalHumanApi/.env.example`
 
+## 长期记忆（阶段2 T2：对话记忆写入）
+
+对话完成后后台异步提取用户事实/偏好/习惯，写入 `user_memory` 向量库（Minimax embedding + 轻量文件持久化，按 user 隔离）：
+
+- **记忆条目 schema（T3 契约，详见 [`doc/long-term-memory.md`](digitalHumanApi/doc/long-term-memory.md)）**：`{user, fact_type, content, source_conversation_id, timestamp}`；`fact_type` 为 `preference`（偏好）/ `fact`（事实）/ `habit`（习惯），`content` 为自然语言记忆句（如「喜欢拍照」「带老人小孩」）
+- **写入**：`app/services/memory_service.py` 的 `save_user_memory(user, facts)`——同 user 同事实**覆盖更新**（记忆不膨胀），每用户条数上限 `MEMORY_MAX_PER_USER`（默认 200，超限淘汰最旧）
+- **提取**：`chat_agent` 对话完成后调 `extract_and_store`（LLM 单次调用提取，复用 `LLM_*` 配置）；**失败静默降级不写记忆，绝不阻塞对话响应**
+- **游客隔离**：游客（visitor / guest-* / 匿名）不产生长期记忆（不调用 LLM、不写入）
+- **检索（T3 用）**：`search_user_memory(user, query, top_k)` 在指定 user 的记忆子集内语义检索；`count_user_memory(user)` 统计条数
+- **配置**：`MEMORY_ENABLED`（默认开启）、`MEMORY_MAX_PER_USER`（默认 200），见 `digitalHumanApi/.env.example`
+
 ## 测试
 
 ```bash
