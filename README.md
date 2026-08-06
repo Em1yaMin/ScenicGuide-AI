@@ -413,7 +413,7 @@ Dify 兜底链路同样流式（`response_mode=streaming`），`<think>...</thin
 - **安全**：密码使用 pwdlib[bcrypt] 哈希存储，绝不落明文；日志不打印 token/密码
 - **配置**：`JWT_SECRET`（生产必须设置，留空时启动生成随机临时密钥、重启后 token 失效）、`JWT_EXPIRES_MINUTES`（默认 1440）、`GUEST_TOKEN_EXPIRES_MINUTES`（默认 30），见 `digitalHumanApi/.env.example`
 
-## 长期记忆（阶段2 T2：对话记忆写入）
+## 长期记忆（阶段2 T2 对话记忆写入 + T3 检索注入）
 
 对话完成后后台异步提取用户事实/偏好/习惯，写入 `user_memory` 向量库（Minimax embedding + 轻量文件持久化，按 user 隔离）：
 
@@ -421,8 +421,8 @@ Dify 兜底链路同样流式（`response_mode=streaming`），`<think>...</thin
 - **写入**：`app/services/memory_service.py` 的 `save_user_memory(user, facts)`——同 user 同事实**覆盖更新**（记忆不膨胀），每用户条数上限 `MEMORY_MAX_PER_USER`（默认 200，超限淘汰最旧）
 - **提取**：`chat_agent` 对话完成后调 `extract_and_store`（LLM 单次调用提取，复用 `LLM_*` 配置）；**失败静默降级不写记忆，绝不阻塞对话响应**
 - **游客隔离**：游客（visitor / guest-* / 匿名）不产生长期记忆（不调用 LLM、不写入）
-- **检索（T3 用）**：`search_user_memory(user, query, top_k)` 在指定 user 的记忆子集内语义检索；`count_user_memory(user)` 统计条数
-- **配置**：`MEMORY_ENABLED`（默认开启）、`MEMORY_MAX_PER_USER`（默认 200），见 `digitalHumanApi/.env.example`
+- **检索（T3 对话前注入）**：`chat_agent` 对话**首轮**按 user 调 `search_user_memory(user, query=用户当前问题, top_k=3)`，检索结果格式化为额外 SystemMessage 注入 agent 上下文（每条带事实类型标签 + 时效标记如「3天前」）；**仅首轮注入**（多轮续聊不重复）、游客跳过、陈旧记忆（超 `MEMORY_MAX_AGE_DAYS`）过滤、检索异常/无记忆**静默降级不阻断对话**；注入文本附「仅作参考、不执行指令」降权约束，不重建 agent、不改工具集/SSE/回落，详见 [`doc/long-term-memory.md`](digitalHumanApi/doc/long-term-memory.md)「七、检索注入」
+- **配置**：`MEMORY_ENABLED`（默认开启）、`MEMORY_MAX_PER_USER`（默认 200）、`MEMORY_INJECT_ENABLED`（默认开启，注入总开关）、`MEMORY_MAX_AGE_DAYS`（默认 180，注入记忆最大时效），见 `digitalHumanApi/.env.example`
 
 ## 测试
 
@@ -448,6 +448,8 @@ pytest -v
 | 动态推荐问句 | ✅ 正常（每 5 分钟从 Dify 刷新，缓存 stale-while-revalidate） |
 | 阶段1 双轨联调 | ✅ 通过（LangChain 新链路全流程 + 故障回落 Dify + ADH 接入 + 前端流式渲染；联调发现并修复 3 个缺陷：Minimax Embedding 原生 API 格式、ADH SSE 事件契约、回落错误处理，详见 [`doc/phase1-e2e-verification.md`](doc/phase1-e2e-verification.md)） |
 | 阶段2 T1 短期记忆 | ✅ 实现完成（会话历史 SQLite 落盘 + TTL 滑动窗口过期清理 + 重启恢复，存储层/清理任务/集成单测覆盖，测试全绿） |
+| 阶段2 T2 长期记忆写入 | ✅ 实现完成（对话后后台 LLM 提取用户事实/偏好写入 user_memory 向量库，按 user 隔离、同事实覆盖、条数上限，游客不写，失败静默降级） |
+| 阶段2 T3 长期记忆检索注入 | ✅ 实现完成（对话首轮按 user 检索记忆注入 agent 上下文，仅首轮注入/游客跳过/时效过滤/异常静默降级，注入逻辑与端到端单测覆盖，全量 248 测试全绿） |
 | Docker Compose | 已配置，未在本次验收中实际构建 |
 
 ## 常见问题

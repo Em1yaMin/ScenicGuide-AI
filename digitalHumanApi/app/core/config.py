@@ -107,6 +107,16 @@ class Settings(BaseModel):
     # 每用户记忆条数上限（超限淘汰 timestamp 最旧条目，防记忆无限膨胀）
     MEMORY_MAX_PER_USER: int = int(os.environ.get("MEMORY_MAX_PER_USER", "200"))
 
+    # 长期记忆检索注入（阶段2 T3：对话首轮按 user 检索用户画像注入 agent 上下文，
+    # 见 app/services/chat_agent.py 与 doc/long-term-memory.md）
+    # MEMORY_INJECT_ENABLED: 注入总开关（默认开启；游客无记忆天然不注入；
+    # 检索异常/无记忆静默降级不阻断对话）
+    MEMORY_INJECT_ENABLED: bool = (
+        os.environ.get("MEMORY_INJECT_ENABLED", "true").lower() == "true"
+    )
+    # 注入的记忆最大时效（天）：超过视为陈旧事实不注入（防过时信息误导）
+    MEMORY_MAX_AGE_DAYS: int = int(os.environ.get("MEMORY_MAX_AGE_DAYS", "180"))
+
     @model_validator(mode="after")
     def _validate_dify_config(self) -> "Settings":
         """Validate that Dify API config values are non-empty at startup."""
