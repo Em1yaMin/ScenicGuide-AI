@@ -12,6 +12,7 @@ LLM 上下文，保证问句与真实数据相关。
 不阻断页面），由调用方（tasks/recommend_questions.refresh_cycle）保持
 stale-while-revalidate 缓存（旧缓存兜底）。
 """
+import asyncio
 import json
 import logging
 import re
@@ -270,11 +271,12 @@ async def fetch_recommended_questions(
             timeout=_RECOMMEND_TIMEOUT,
         )
 
-        response = llm.invoke(
+        response = await asyncio.to_thread(
+            llm.invoke,
             [
                 SystemMessage(content=_RECOMMEND_SYSTEM_PROMPT),
                 HumanMessage(content=_build_recommend_prompt(inputs)),
-            ]
+            ],
         )
         content = getattr(response, "content", response)
         if not isinstance(content, str):
