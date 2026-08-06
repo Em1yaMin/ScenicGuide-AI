@@ -115,7 +115,7 @@ cp .env.example .env
 | `DIFY_WORKFLOW_API_KEY` | Workflow 应用 Key（触发量化评估） |
 | `DIFY_RECOMMEND_WORKFLOW_API_KEY` | 推荐问句 Workflow 应用 Key（需在 Dify 平台单独创建） |
 | `DIFY_LIGHT4AI_USER` | light4ai 调 Dify 时固定的 user 字段 |
-| `OPENAI_API_KEY` | OpenAI API Key（用于 LangChain AI 运营分析，不配置时回退到纯 DB 统计；**当前部署单用 opencode-go 端点**，与 `LLM_*` 同一 key，见 `digitalHumanApi/.env`） |
+| `OPENAI_API_KEY` | OpenAI API Key（用于 LangChain AI 运营分析，不配置时回退到纯 DB 统计；**当前部署单用 opencode-go 端点**，与 `LLM_*` 同一 key，见 `digitalHumanApi/.env`；LLM 分析失败/不可用时响应 `llm_analysis=false` 降级标记，见 `doc/phase3-analytics-verification.md`） |
 | `OPENAI_API_BASE` | OpenAI API 基础地址（可选；当前部署 `https://opencode.ai/zen/go/v1`） |
 | `OPENAI_MODEL` | OpenAI 模型名（默认 `gpt-4o-mini`；当前部署 `deepseek-v4-flash`） |
 | `LLM_API_KEY` | 对话 LLM Key（主端点 opencode-go，阶段1 接入层；与 `OPENAI_*`/`EMBEDDING_*` 完全独立，见 `app/core/llm.py` 与 `doc/llm-adapter-smoke-test.md`） |
@@ -339,7 +339,7 @@ docker-compose up -d --build
 | POST | `/dialogue/chat` | 对话（**双轨**：默认 LangChain agent 主链路，结构化工具直查景点/路线 + 知识检索 + 规则推荐，多轮会话**短期记忆持久化**（SQLite 落盘 + TTL，重启可恢复，见下方「短期记忆持久化」）；异常自动回落 Dify；`DIALOGUE_ENGINE=dify` 强制走 Dify，响应字段兼容 `answer/conversation_id/rag_context/rag_sources`；`streaming=true` 时返回 SSE 流式事件，见下方「SSE 流式对话」） |
 | POST | `/dialogue/sync-now` | 手动触发对话抓取 |
 | POST | `/analysis/run-now` | 手动触发量化分析 |
-| GET | `/analysis/overview` | AI 运营分析概览（支持 `?days=7/30/90`） |
+| GET | `/analysis/overview` | AI 运营分析概览（支持 `?days=7/30/90`；LangChain LLM 分析，失败自动回退纯 DB 统计并置 `llm_analysis=false` 降级标记；真实调用约 1-2 分钟，见 `doc/phase3-analytics-verification.md`） |
 | GET | `/analysis/trends` | 趋势数据（每日对话量 + 满意度均分） |
 | GET | `/admin/dashboard` | 数据大屏聚合数据 |
 | GET | `/admin/report` | 分析报告数据 |
