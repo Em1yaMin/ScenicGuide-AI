@@ -13,7 +13,6 @@ services:
       - CORS_ORIGINS=
       - DIFY_API_URL=${DIFY_API_URL:-}
       - DIFY_API_KEY=${DIFY_API_KEY:-}
-      - DIFY_WORKFLOW_API_KEY=${DIFY_WORKFLOW_API_KEY:-}
       - LLM_API_BASE=${LLM_API_BASE:-}
       - LLM_API_KEY=${LLM_API_KEY:-}
       - LLM_MODEL=${LLM_MODEL:-}

@@ -1,6 +1,8 @@
 # Dify Workflow 量化分析规格
 
-后端通过 `DIFY_WORKFLOW_API_KEY` 调用 Dify Workflow 应用，对每条对话进行情感量化分析。该 Workflow 必须符合以下规格，否则量化分析链路无法工作。
+> ⚠️ **已 superseded（阶段4 首项，2026-08-07 船长决策方案A）**：量化评估已改为**本地 LLM**（`app/services/evaluation_service.py`，复用 `LLM_*` 配置 opencode-go），**不再调用 Dify Workflow**，`DIFY_WORKFLOW_API_KEY` 与 `dify_client.trigger_workflow` 已移除。本文档仅作为历史设计存档保留（提示词语义已移植到本地 LLM 版 System 提示词，见 `evaluation_service._EVALUATION_SYSTEM_PROMPT`）。
+
+后端（阶段4 前）通过 `DIFY_WORKFLOW_API_KEY` 调用 Dify Workflow 应用，对每条对话进行情感量化分析。该 Workflow 必须符合以下规格，否则量化分析链路无法工作。
 
 > 完整工作流设计背景参见 [`quantitative-workflow-量化工作流.md`](quantitative-workflow-量化工作流.md)。
 

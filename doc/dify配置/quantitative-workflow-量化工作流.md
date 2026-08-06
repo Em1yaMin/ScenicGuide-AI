@@ -1,7 +1,9 @@
 # 量化评估工作流设计
 
+> ⚠️ **已 superseded（阶段4 首项，2026-08-07 船长决策方案A）**：量化评估已改为**本地 LLM**（`app/services/evaluation_service.py`，复用 `LLM_*` 配置 opencode-go），**不再调用 Dify Workflow**，`DIFY_WORKFLOW_API_KEY` 与 `dify_client.trigger_workflow` 已移除。本文档仅作为历史设计与提示词存档保留（提示词语义已移植到 `evaluation_service._EVALUATION_SYSTEM_PROMPT`）。
+
 > 适用：Dify **工作流** 类型应用，用于对景区数字人对话进行量化分析。
-> 对应后端配置：`DIFY_WORKFLOW_API_KEY`（Workflow 密钥）。
+> 对应后端配置：`DIFY_WORKFLOW_API_KEY`（Workflow 密钥，已移除）。
 
 ---
 

@@ -27,7 +27,6 @@ class Settings(BaseModel):
 
     DIFY_API_URL: str = os.environ.get("DIFY_API_URL", "")
     DIFY_API_KEY: str = os.environ.get("DIFY_API_KEY", "")
-    DIFY_WORKFLOW_API_KEY: str = os.environ.get("DIFY_WORKFLOW_API_KEY", "")
     DIFY_LIGHT4AI_USER: List[str] = [
         u.strip()
         for u in os.environ.get("DIFY_LIGHT4AI_USER", "YOUR_DIFY_USER").split(",")
@@ -128,12 +127,13 @@ class Settings(BaseModel):
     @model_validator(mode="after")
     def _validate_dify_config(self) -> "Settings":
         """Validate that Dify API config values are non-empty at startup."""
+        # 阶段4（2026-08-06 船长决策方案A）：Dify Workflow 量化评估已本地化
+        # （app/services/evaluation_service.py），DIFY_WORKFLOW_API_KEY 已移除；
+        # 剩余 DIFY_API_URL/DIFY_API_KEY 服务于对话双轨回落 + 历史数据接口
         if not self.DIFY_API_URL:
             raise ValueError("DIFY_API_URL must not be empty")
         if not self.DIFY_API_KEY:
             raise ValueError("DIFY_API_KEY must not be empty")
-        if not self.DIFY_WORKFLOW_API_KEY:
-            raise ValueError("DIFY_WORKFLOW_API_KEY must not be empty")
         return self
 
 

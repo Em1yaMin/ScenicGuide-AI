@@ -43,7 +43,7 @@
 |------|-------------|-------------|--------|------|
 | **聊天助手** | Chatbot | `DIFY_API_KEY` | 本后端（LangChain 回落）／ADH（切回 DifyAgent 时） | 景区导览实时对话 |
 | **知识库** | Knowledge | — | 聊天助手（关联） | 提供景区事实信息 |
-| **量化工作流** | Workflow | `DIFY_WORKFLOW_API_KEY` | FastAPI 后端 | 对话质量量化分析 |
+| **量化工作流** | Workflow | `DIFY_WORKFLOW_API_KEY` | FastAPI 后端 | ~~对话质量量化分析~~（阶段4 首项已本地 LLM 化，`DIFY_WORKFLOW_API_KEY` 已移除，见 `doc/dify-dependency-audit.md`；本文档相关章节为历史存档） |
 
 ---
 
@@ -60,7 +60,8 @@ DIFY_API_URL=http://YOUR_DIFY_SERVER_IP/v1
 DIFY_API_KEY=app-YOUR_CHAT_AGENT_KEY
 
 # 量化工作流 API Key（Workflow，用于对话分析）
-# 量化工作流 API Key（2026-07-15 新建）
+# ⚠️ 已 superseded（阶段4 首项）：量化评估已本地 LLM 化，此变量已从后端 config/docker-compose/CI/.env.example 移除；
+#    本文档仅作 Dify 平台侧历史存档（提示词已移植到 app/services/evaluation_service.py）
 DIFY_WORKFLOW_API_KEY=app-YOUR_WORKFLOW_KEY
 
 # 轮询用户列表（逗号分隔，每个用户都会拉取对话）
@@ -188,7 +189,7 @@ curl http://localhost:8000/api/v1/admin/dashboard
 | 数字人回答空白 | 对话链路异常 | 1. 检查本后端 `/api/v1/dialogue/chat`（LangChainAgent 的 `LLM_API_URL`）2. 若切回 DifyAgent 直连，检查 `difyAgent.yaml` 的 API Key 3. 检查 Dify 日志 |
 | 对话没被抓取 | 轮询用户与对话 user 不一致 | 1. 检查 `.env` 中 `DIFY_LIGHT4AI_USER` 2. 检查 ADH 引擎 user 配置（LangChainAgent `LLM_API_USER`／DifyAgent `DIFY_API_USER`）是否一致 3. 用 Dify API 直接测 `/conversations?user=xxx` |
 | 工作流评估失败 | 输出格式不正确 | 1. 在 Dify 工作流中手动测试 2. 检查 LLM 输出是否为合法 JSON 3. 检查 LLM 温度是否过高导致格式不稳定 |
-| 大屏无数据 | evaluations 表为空 | 1. 确认 analysis_loop 正在运行 2. 检查 `DIFY_WORKFLOW_API_KEY` 是否正确 3. 手动触发 `/api/v1/analysis/run-now` |
+| 大屏无数据 | evaluations 表为空 | 1. 确认 analysis_loop 正在运行 2. 阶段4 起评估由本地 LLM 产出（检查 `LLM_API_KEY` 与 `app/services/evaluation_service.py`，不再需要 `DIFY_WORKFLOW_API_KEY`） 3. 手动触发 `/api/v1/analysis/run-now` |
 | 评分异常（全满分/全低分） | 提示词约束过强或过弱 | 1. 用测试用例 4.1-4.5 在 Dify 工作流中逐一验证 2. 调整评分标准描述 3. 考虑提高 Temperature 增加评分多样性 |
 
 ---
