@@ -123,6 +123,7 @@ error(fallback=true) → step → token → done 序列正确，前端可据此�
 
 - `README.md`：`OPENAI_*` 行注明当前部署单用 opencode-go 端点/模型 deepseek-v4-flash；`LLM_FALLBACK_*` 行更新为船长决策（备用同主端点 opencode-go，无需另配官方 DeepSeek）
 - `digitalHumanApi/.env.example`：同步 LLM_FALLBACK（备用同主端点）与 OPENAI（单用 opencode-go）注释；LLM_*/MEMORY_* 说明此前已齐备，无需新增
+- 根 `.env.example`（Docker Compose 部署）：同步 LLM_FALLBACK_* 值与 OPENAI 注释（备用同主端点 opencode-go）
 
 ## 附注
 
