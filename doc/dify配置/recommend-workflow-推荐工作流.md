@@ -1,5 +1,7 @@
 # 推荐问句生成工作流设计
 
+> ⚠️ **已 superseded（阶段3 T3，2026-08-06 船长决策方案B）**：推荐问句已改为**本地 LLM 生成**（`app/services/recommend_service.py`，复用 `LLM_*` 配置 opencode-go），**不再调用 Dify Workflow**，`DIFY_RECOMMEND_WORKFLOW_API_KEY` 已移除。本文档仅作为历史设计与提示词存档保留（提示词语义已移植到本地 LLM 版 System 提示词）。
+
 > 适用：Dify **工作流** 类型应用，用于根据 Dashboard 聚合数据动态生成游客推荐问句。
 > 对应后端配置：`DIFY_RECOMMEND_WORKFLOW_API_KEY`（推荐 Workflow 独立密钥）。
 

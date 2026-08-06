@@ -1,5 +1,7 @@
 # 推荐问句工作流 — Dify 配置
 
+> ⚠️ **已 superseded（阶段3 T3，2026-08-06）**：推荐问句已改**本地 LLM 生成**（`app/services/recommend_service.py`），不再依赖 Dify 工作流。本目录文档仅供历史参考。
+
 > 动态推荐问句功能的 Dify Workflow 提示词设计与配置文档。
 
 ---

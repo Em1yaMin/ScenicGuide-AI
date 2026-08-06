@@ -38,6 +38,15 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - `app/services/recommend_agent.py` — 基于 LangChain Tool Calling 模式 + 规则引擎/关键词匹配，工具读取 `app/data/` 本地 JSON 数据源推理推荐
 - `app/routers/recommend.py` — `POST /api/v1/recommend`
 
+## 推荐问句（阶段3 T3：本地 LLM 生成，脱离 Dify）
+
+- `app/services/recommend_service.py` — 推荐问句生成（首页数字人引导区可提问句）：聚合 7 天 Dashboard 数据（concern_tags/mentioned_spots/sentiment_summary/total_dialogues）→ 本地 LLM 生成 questions 数组。**船长决策 2026-08-06 方案B：直接移除 Dify Workflow 调用**（不再有 DIFY_RECOMMEND_WORKFLOW_API_KEY，不留 fallback，为阶段4 Dify 退场铺路）；改用 `app/core/llm.py` 工厂（`get_chat_llm`，`LLM_*` 配置 opencode-go），输出契约不变（questions 数组，前端无感）
+  - 入口 `fetch_recommended_questions(llm=None)`（可注入 llm 测试）；无评估数据/LLM 未配置/调用异常/解析失败均返回 None 不抛错（LLMConfigError 单独告警），调用方保持 stale-while-revalidate 旧缓存
+  - 输出解析 `_parse_questions_output`（容错：剥 `<think>` 标签/```json``` 围栏/JSON 解码/别名兜底/去重），不依赖 dify_helpers
+- `app/tasks/recommend_questions.py` — 后台循环每 5 分钟刷新缓存（recommend_loop，main.py lifespan 注册）；`/api/v1/visitor/recommended-questions` 读缓存、`/refresh-recommend` 手动刷新
+- 清理面：dify_client 已删除 `trigger_recommend_workflow`/`recommend_workflow_headers`；config.py 校验器不再要求推荐 key；`.env.example`（根目录与 digitalHumanApi/）与 docker-compose.yml 已移除该变量；对话双轨回落 Dify（dialogue.py/dify_client 其他用途）保持不动
+- 测试：`tests/test_recommend_service.py`（解析/提示词/本地 LLM mock/失败降级）
+
 ## 本地 RAG 知识库（无外部向量库依赖）
 
 - `app/core/embedding.py` — Embedding 选择工厂 + `MinimaxEmbeddings`（**原生** `/embeddings` 端点，httpx 实现，配置 `EMBEDDING_API_KEY` 启用，与对话 LLM（`LLM_*`）及运营分析（`OPENAI_*`）完全独立）；**原生 API 格式（实测 embo-01，2026-08-06 联调修正）**：请求体 `{"model", "texts", "type"}`（`embed_documents` 传 `type=db`、`embed_query` 传 `type=query`，两者向量空间不同混用会降低检索质量），响应 `{"vectors": [...]}`；响应解析兼容 OpenAI 兼容格式（`data` 数组）便于未来切换；**先检查 `base_resp.status_code` 业务错误**（如 1008 insufficient balance，HTTP 200 但 vectors 为 null，真实环境实测 2026-08-06）——先行明确诊断，不误报"响应条数不符"；未配置 key 或 API 失败时自动降级本地 TF-IDF（日志告警，`degraded` 标记透出到检索响应）
@@ -220,7 +229,7 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 ## Testing (pytest)
 
 - Tests use in-memory SQLite (`tests/conftest.py` fixtures), no DATABASE_URL / .env needed.
-- Gotcha: `app/core/config.py` instantiates `Settings()` at import with a validator that rejects empty Dify env vars — running pytest without `.env` or placeholder `DIFY_API_URL`/`DIFY_API_KEY`/`DIFY_WORKFLOW_API_KEY`/`DIFY_RECOMMEND_WORKFLOW_API_KEY` raises ImportError. CI injects dummy values (tests never call real APIs).
+- Gotcha: `app/core/config.py` instantiates `Settings()` at import with a validator that rejects empty Dify env vars — running pytest without `.env` or placeholder `DIFY_API_URL`/`DIFY_API_KEY`/`DIFY_WORKFLOW_API_KEY` raises ImportError. CI injects dummy values (tests never call real APIs). 推荐问句（阶段3 T3）已脱离 Dify，不再需要 `DIFY_RECOMMEND_WORKFLOW_API_KEY`。
 
 ## Maintaining this file
 
