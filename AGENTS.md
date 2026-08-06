@@ -115,7 +115,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - `app/services/analytics_service.py` + `app/routers/analysis.py` — `GET /api/v1/analysis/overview`（`?days=1-365`）、`GET /trends`、`POST /run-now`
 - 使用 `langchain_openai.ChatOpenAI` 生成分析；**LLM 失败/未配置/输出不可解析时自动回退纯 DB 统计**（确定性摘要：满意度方向由趋势前后半段均分对比判定、热门问题来自 concern_tags、高峰时段 DB 精确统计、运营建议由热点/高峰推导），任务与接口均不因 LLM 故障中断
 - **降级标记**：`AIOverviewResponse.llm_analysis`（true=LLM 产出；false=DB 统计兜底），`ai_summary` 尾部附「（数据库统计模式，LLM 分析不可用）」供前端/管理后台识别
-- **超时参数（实测 2026-08-06，opencode-go + deepseek-v4-flash）**：分析 prompt 单次调用约 55-90s（端点延迟高且波动大），`LLM_REQUEST_TIMEOUT=180`（httpx）/ `LLM_ANALYSIS_TIMEOUT=240`（asyncio.wait_for 总上限）——原 60s/90s 会稳定超时误降级；详见 `doc/phase3-analytics-verification.md`
+- **超时参数（实测 2026-08-06，opencode-go + deepseek-v4-flash）**：分析 prompt 单次调用约 55-90s（端点延迟高且波动大），`LLM_REQUEST_TIMEOUT=180`（httpx）/ `LLM_ANALYSIS_TIMEOUT=240`（asyncio.wait_for 总上限）——原 60s/90s 会稳定超时误降级；详见 `doc/phase3-analytics-verification.md`；**部署拓扑约束**：docker 部署下 nginx `/api/` 的 `proxy_read_timeout` 必须 ≥ 分析超时预算（`nginx.conf` 已配 300s），否则管理后台 overview 在代理层被 504 掐断（直连 8000 不受影响）
 - 配置：`OPENAI_API_KEY`/`OPENAI_API_BASE`/`OPENAI_MODEL`（**当前部署单用 opencode-go 端点**，与 `LLM_*` 同一 key，见 `digitalHumanApi/.env`）；未配置 key 时跳过 LLM 直接 DB 统计
 - 定时任务 `app/tasks/analysis.py::analysis_loop`（每 300s）仅做 Dify Workflow 量化评估（`batch_evaluate`），任务级 try/except 保证故障持续运行；LLM 分析由接口按需触发（无独立调度）
 - 测试：`tests/test_analysis.py`（LLM 成功/失败/无 key 三种降级路径 + 任务韧性）；conftest 固定 `OPENAI_API_KEY=""`（同 CI，防本地 worktree .env 真实 key 污染测试触发慢速网络调用）

@@ -37,6 +37,8 @@ summary_len=747 → attempt 0: OK 55.3s / attempt 1: OK 90.2s / attempt 2: OK 68
 
 **修复**：`analytics_service.py` 新增常量 `LLM_REQUEST_TIMEOUT=180`（httpx 超时）、`LLM_ANALYSIS_TIMEOUT=240`（asyncio.wait_for 总上限，需大于 httpx 超时使底层超时正常上抛）。修复后真实调用成功（见 §4 日志）。
 
+**部署拓扑超时说明（2026-08-06 船长决策，方案 A）**：本验证在直连 `127.0.0.1:8000`（绕过 nginx）下完成，真实调用总耗时约 2m08s（§4）且失败路径需等 httpx 180s 超时——均超过 docker 部署拓扑中 nginx `/api/` 的 `proxy_read_timeout 120s`（`nginx.conf`），管理后台经 nginx 代理访问 `/api/v1/analysis/overview` 会被 504 掐断、LLM 结果与 DB 兜底都送不到客户端。已将 `nginx.conf` 的 `proxy_read_timeout` 提升至 `300s`（> `LLM_ANALYSIS_TIMEOUT=240` 总预算），并同步在 README 部署说明记录该超时约束；后续如再调大分析超时预算，需同步检查 nginx 代理超时。
+
 ### 3.2 DB 兜底摘要不完整（LLM 失败时满意度摘要误导）
 
 **现象**：LLM 失败后 `satisfaction_summary` 恒为「暂无足够数据进行分析」、`satisfaction_direction` 恒为「平稳」、无运营建议——即使 DB 已有 8 条评估与关注点数据。
@@ -87,10 +89,11 @@ curl -s "http://127.0.0.1:8000/api/v1/analysis/overview?days=30"
   - `test_overview_without_key_uses_db_fallback` — 无 key → 跳过 LLM 直接 DB 兜底
   - `test_analysis_loop_survives_batch_failure` — 定时任务 batch 异常 → 记日志继续下一轮（asyncio.sleep patch 保留原始引用避免递归）
 - 全量回归：`pytest -q` → **253 passed**（无回归）
-- 无新增依赖；仅改 `digitalHumanApi/` 后端（schema/service/tests/conftest/文档）
+- 无新增依赖；改动范围：`digitalHumanApi/` 后端（schema/service/tests/conftest/文档）+ 根目录 `nginx.conf`（部署层代理超时对齐，见 §3.1）
 
 ## 6. 结论
 
 - 分析链路本地化确认完成：真实 opencode-go key 下 LLM 分析成功（接口与日志证据），DB 统计兜底完整且带降级标记
 - 验证暴露的 3 个问题全部修复：LLM 超时过紧、兜底摘要误导、测试环境 key 污染
+- 部署拓扑超时对齐：nginx `/api/` `proxy_read_timeout` 120s→300s，避免分析接口（真实调用约 128s、失败路径等 httpx 180s）在 docker 部署下被 504 掐断
 - 定时任务（analysis_loop）在 LLM/Workflow 故障时任务级 try/except 保证持续运行
