@@ -51,6 +51,9 @@ _PLANNER_MAX_TOKENS = 2048
 _PLANNER_TIMEOUT = 60
 # 规划步骤数上限（防止异常 LLM 规划出超长步骤序列）
 _MAX_PLAN_STEPS = 6
+# 规划阶段 LLM 重试次数（opencode-go 思考型模型对长 prompt 偶发返回空
+# content（实测约 50%，与 max_tokens 无关），重试一次显著提升成功率）
+_PLAN_RETRIES = 1
 # 单步工具输出注入总结 prompt 的最大长度（控制 token 开销）
 _MAX_STEP_OUTPUT_LEN = 1200
 # 图执行步数上限（plan + ≤6 步执行 + summarize，余量充足防死循环）
@@ -224,21 +227,43 @@ def _build_graph(*, tools: List[Any], llm: Any) -> Any:
     plan_prompt = _build_plan_prompt(tools)
 
     async def plan_node(state: PlannerState) -> Dict[str, Any]:
-        chunks: List[str] = []
-        try:
-            # 图内模型调用被 langgraph 统一转为流式：经 astream 累积后解析 JSON
-            # （不用 with_structured_output，见 _parse_plan 注释）
-            async for chunk in llm.astream(
-                [SystemMessage(content=plan_prompt)] + list(state["messages"])
-            ):
-                content = getattr(chunk, "content", "")
-                if isinstance(content, str) and content:
-                    chunks.append(content)
-        except Exception as e:
-            raise PlannerError(f"规划生成失败: {e}") from e
-        plan_obj = _parse_plan("".join(chunks))
-        steps = _validate_steps(plan_obj.steps if plan_obj else [], tools_by_name)
-        if not steps:
+        # 偶发空响应重试：opencode-go 思考型模型（deepseek-v4-flash）对长
+        # 规划 prompt 偶发返回 200 但 content 为空（思考耗尽，不报错）或
+        # 流式无分块（ValueError），重试一次显著降低降级概率（见 _PLAN_RETRIES）
+        for attempt in range(_PLAN_RETRIES + 1):
+            chunks: List[str] = []
+            try:
+                # 图内模型调用被 langgraph 统一转为流式：经 astream 累积后解析 JSON
+                # （不用 with_structured_output，见 _parse_plan 注释）
+                async for chunk in llm.astream(
+                    [SystemMessage(content=plan_prompt)] + list(state["messages"])
+                ):
+                    content = getattr(chunk, "content", "")
+                    if isinstance(content, str) and content:
+                        chunks.append(content)
+            except Exception as e:
+                if attempt < _PLAN_RETRIES:
+                    logger.warning(
+                        "规划流式调用异常（尝试 %d/%d）: %s，重试",
+                        attempt + 1,
+                        _PLAN_RETRIES + 1,
+                        e,
+                    )
+                    continue
+                raise PlannerError(f"规划生成失败: {e}") from e
+            plan_obj = _parse_plan("".join(chunks))
+            steps = _validate_steps(
+                plan_obj.steps if plan_obj else [], tools_by_name
+            )
+            if steps:
+                break
+            if attempt < _PLAN_RETRIES:
+                logger.warning(
+                    "规划输出为空或无效（尝试 %d/%d），重试",
+                    attempt + 1,
+                    _PLAN_RETRIES + 1,
+                )
+        else:
             raise PlannerError("规划结果为空或全部步骤无效")
         logger.info(
             "规划路径: 生成 %d 步计划: %s",

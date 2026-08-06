@@ -1,6 +1,6 @@
 # 景区导览 AI 数字人系统
 
-景区导览 AI 数字人系统 — Python FastAPI 后端 + Vue 3 前端单体应用，通过 Docker Compose 部署。后端集成 Dify AI 平台提供对话抓取与情感分析，前端提供访客端（数字人对话）和管理后台（数据大屏 + 报告）。
+景区导览 AI 数字人系统 — Python FastAPI 后端 + Vue 3 前端单体应用，通过 Docker Compose 部署。后端集成 Dify AI 平台提供对话双轨回落与对话/评估数据抓取（**阶段3 收官后 Dify 依赖面已收敛**：推荐问句与分析链路已本地化，仅对话回落与历史数据接口保留，见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md)），前端提供访客端（数字人对话）和管理后台（数据大屏 + 报告）。
 
 ## 技术栈
 
@@ -9,7 +9,7 @@
 | 后端 | Python 3.9+ · FastAPI · SQLAlchemy 2.0 (async) · SQLite (aiosqlite) · httpx · LangChain |
 | 前端 | Vue 3 · TypeScript · Vite 8 · Pinia · Vue Router · ECharts |
 | 部署 | Docker Compose · Nginx |
-| 外部服务 | Dify AI 平台（Chat Agent 对话兜底 + Workflow 量化分析）、LangChain agent（对话主链路）+ OpenAI（AI 运营分析）、对话 LLM（opencode-go DeepSeek，见 `doc/llm-adapter-smoke-test.md`）、本地 Live2D 数字人（live2d-frontend） |
+| 外部服务 | Dify AI 平台（Chat Agent 对话双轨回落 + Workflow 量化分析）、LangChain agent（对话主链路）+ OpenAI（AI 运营分析）、对话 LLM（opencode-go DeepSeek，见 `doc/llm-adapter-smoke-test.md`）、本地 Live2D 数字人（live2d-frontend） |
 
 ## 本地数字人依赖
 
@@ -404,7 +404,7 @@ Dify 兜底链路同样流式（`response_mode=streaming`），`<think>...</thin
 
 **规划路径**（LangGraph 状态图，零新依赖）：
 
-- **规划**：LLM 按用户需求生成步骤序列（≤6 步，每步一个工具调用，JSON 输出经 `llm.astream` 累积后解析——图内模型调用被 langgraph 统一转为流式，`with_structured_output` 不兼容流式分块）；工具集复用快速路径的 6+1 工具（结构化直查 + 知识检索 + 规则推荐）
+- **规划**：LLM 按用户需求生成步骤序列（≤6 步，每步一个工具调用，JSON 输出经 `llm.astream` 累积后解析——图内模型调用被 langgraph 统一转为流式，`with_structured_output` 不兼容流式分块）；工具集复用快速路径的 6+1 工具（结构化直查 + 知识检索 + 规则推荐）；**偶发空响应重试**（2026-08-06 联调发现：opencode-go 思考型模型对长 prompt 偶发返回空 content，`plan_node` 对空/无效输出重试 1 次，见 `doc/phase3-e2e-verification.md` §3.1）
 - **执行**：逐步骤确定性调用工具（`BaseTool.ainvoke` 线程池执行，`recommend_routes` 内含 `asyncio.run` 安全）；单步失败记录错误继续，不中断
 - **总结**：LLM 聚合全部工具结果生成结构化最终回答（流式逐字输出，经 `stream_mode="messages"` 按 `langgraph_node=="summarize"` 区分）
 
@@ -488,7 +488,8 @@ pytest -v
 | 阶段2 T2 长期记忆写入 | ✅ 实现完成（对话后后台 LLM 提取用户事实/偏好写入 user_memory 向量库，按 user 隔离、同事实覆盖、条数上限，游客不写，失败静默降级） |
 | 阶段2 T3 长期记忆检索注入 | ✅ 实现完成（对话首轮按 user 检索记忆注入 agent 上下文，仅首轮注入/游客跳过/时效过滤/异常静默降级，注入逻辑与端到端单测覆盖，全量 248 测试全绿） |
 | 阶段2 T4 登录生效联调（收官） | ✅ 通过（真实环境：登录用户注册/登录→多轮对话→长期记忆写入 user_memory（5 条）→新会话检索注入（回答引用用户画像）；游客无 token / guest token 降级正确（短期正常、无长期记忆、无注入）；同事实覆盖去重；无联调缺陷，详见 [`doc/phase2-memory-verification.md`](doc/phase2-memory-verification.md)） |
-| 阶段3 T1 双模式对话 | ✅ 实现完成（意图分类层分流：简单问答→快速路径零延迟、复杂任务→LangGraph 规划图（规划→多步执行→总结）SSE 步骤可视化；分类失败/规划异常静默降级快速路径→Dify；`AGENT_DUAL_MODE=false` 可整体回退；分类/规划/双模式集成单测 + 全量 314 测试全绿，真实环境冒烟验证见 [`doc/phase3-dual-mode.md`](doc/phase3-dual-mode.md)） |
+| 阶段3 收官全链路联调 | ✅ 通过（真实环境：简单问答快速路径 / 复杂任务规划路径（SSE 步骤可视化）/ 推荐问句本地生成（脱离 Dify）/ 分析链路 LLM + DB 兜底降级标记 / 记忆系统（长期写入+注入+游客隔离）/ 双轨回落；联调发现并修复规划路径偶发空响应（opencode-go 长 prompt 思考耗尽）→ 增加重试；全量 320 测试全绿，详见 [`doc/phase3-e2e-verification.md`](doc/phase3-e2e-verification.md)） |
+| 阶段3 Dify 依赖盘点 | ✅ 完成（推荐/分析已脱离 Dify；剩余为对话双轨回落 + 历史数据接口 + Workflow 量化评估，清理建议见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md)） |
 | Docker Compose | 已配置，未在本次验收中实际构建 |
 
 ## 常见问题

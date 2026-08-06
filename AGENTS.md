@@ -94,15 +94,25 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - `app/services/chat_agent.py` — LangChain tool-calling agent（**langchain 1.x 新 API `create_agent`**，返回 langgraph 状态图，`ainvoke({"messages": [...]})`；旧的 `create_tool_calling_agent`/`AgentExecutor` 在 1.x 已移除）：结构化工具直查景点/路线（复用 `recommend_agent` 的 `search_spots`/`search_routes`/`get_spot_detail`/`get_route_detail`/`filter_by_tags`，零幻觉）、`search_knowledge`（复用统一检索入口）、`recommend_routes`（包装 `recommend_agent.recommend`，工具内 `asyncio.run` 安全——langgraph 经线程池执行同步工具）；多轮上下文：**阶段2 T1 起短期记忆持久化**（见下方「短期记忆持久化」专节，进程内 TTL 缓存 + SQLite 双写，重启可恢复）；RAG 来源从返回消息中最后一条 `search_knowledge` 的 ToolMessage 提取透出
 - 双轨开关：`DIALOGUE_ENGINE=langchain`（**默认**，异常自动回落 Dify，演示不翻车）`|dify`（强制原链路）；`app/routers/dialogue.py` 的 `/api/v1/dialogue/chat` 先走 `chat_agent.chat`，任何异常（含 `LLMConfigError`）回落 `_call_dify_chat`（保留原 RAG 预检索逻辑）；回落时经 `has_conversation` 判定，不把 LangChain 生成的进程内会话 ID 透传给 Dify（未知 id 会 400 conversation_not_exist），改传空串让 Dify 新建会话；响应契约不变（answer/conversation_id/rag_context/rag_sources）
 
+## Dify 依赖面（阶段3 收官盘点，阶段4 退场依据见 doc/dify-dependency-audit.md）
+
+船长决策 2026-08-06 方案B：阶段4 Dify 退场工作并入阶段3 顺手推进——盘点并清理 Dify 依赖面，**除对话双轨回落保留外其余尽量清理**。当前 Dify 依赖仅剩三类（推荐问句与分析接口已脱离 Dify）：
+
+1. **对话双轨回落（保留，演示兜底）**：`dialogue.py` 的 `_call_dify_chat`/`_call_dify_chat_stream` + `app/services/dify_stream.py`（SSE 消费 + ThinkFilter）；`DIFY_API_URL`/`DIFY_API_KEY`
+2. **历史数据接口（保留）**：`tasks/polling.py`（30s 轮询拉对话入库）、`tasks/backfill.py`（一次性补拉 CLI）、`services/dify_client.py` 的 `get_conversations`/`get_conversation_messages`；`DIFY_LIGHT4AI_USER`（空则轮询空转）
+3. **Dify Workflow 量化评估（保留，阶段4 最大可清理面）**：`tasks/analysis.py::analysis_loop`（300s）→ `batch_evaluate` → `dify_client.trigger_workflow`（`DIFY_WORKFLOW_API_KEY`）+ `dify_helpers.parse_workflow_output`；产出 Evaluation 表 = 管理后台 Dashboard/Report 情感/满意度/热点/景点热度**唯一数据源**，故不可直接移除；阶段4 清理建议（详见审计报告 §3.2）：方案A 本地 LLM 评估替代（prompt 语义对齐原 Workflow）或方案B 移除 analysis_loop 接受管理后台评估类图表空态（前端已有 hasData 空态兜底）
+
+已清理面：推荐问句（#30，`DIFY_RECOMMEND_WORKFLOW_API_KEY` 已移除）、运营分析接口（#31，`analytics_service.py` 纯本地 LLM + DB 兜底，`llm_analysis` 降级标记）、推荐 Agent 的 dify_helpers 依赖（#30）。联调全链路验证与规划路径偶发空响应修复记录见 `doc/phase3-e2e-verification.md`。
+
 ## 双模式对话（阶段3 T1：简单问答快速路径 / 复杂任务 LangGraph 规划图，方案B）
 
 船长决策 2026-08-06：对话入口先做**意图分类**，按任务复杂度分流。设计/测试/冒烟详见 `doc/phase3-dual-mode.md`（含技术坑与真实请求证据）。
 
 - `app/services/intent_classifier.py` — **轻量规则分类**（纯字符串匹配、零延迟；不选 LLM 单次分类——会给简单消息引入额外 LLM 往返，违背「简单问答延迟无显著增加」）：`classify_intent(query)` 返回 `simple`/`complex`，失败/未命中默认 `simple`（安全降级）；**词表设计约束：与既有测试查询兼容 + 船长决策 2026-08-06 方案B 收窄**——「拍照」「推荐」「推荐路线」等单轮偏好表达不判复杂（快速路径 recommend_routes 可处理），**纯人群/导航词（「怎么走」「带老人」「带小孩」「老人小孩」「带娃」「亲子游」「情侣游」「全家游」「家庭游」）不判复杂**（单轮可答的导航/适宜性/单偏好查询走快速路径，避免规划路径延迟增量）；仅明确多步规划词判复杂（规划/安排/行程/攻略/N日游/怎么玩/怎么安排/路线推荐/推荐一条/预算/制定行程/帮我计划/帮我规划），组合规划类查询（如「规划灵山一日游，带老人小孩，喜欢拍照」）仍复杂；同查询复杂信号 ≥ 简单信号时判复杂
-- `app/services/planner_agent.py` — **LangGraph 显式图**（langgraph 1.2 自带，零新依赖）：`START → plan（规划）→ execute（循环 ≤6 步）→ summarize（总结）→ END`；`chat_plan`（非流式）/`chat_plan_stream`（SSE，复用 step/token/done 契约）；**规划阶段用 `llm.astream` 累积 + `_parse_plan` 手动解析 JSON**——langgraph 把图内模型调用统一转为流式（stream=True），`with_structured_output` 解析器不兼容流式分块（实测报错），JSON 解析跨 DeepSeek/OpenAI 端点健壮；执行阶段 `BaseTool.ainvoke` 线程池执行（`recommend_routes` 内含 asyncio.run 安全），单步失败记录错误继续；总结阶段流式逐字输出（`stream_mode=["updates","messages"]`，仅透出 `langgraph_node=="summarize"` 的 token；**token 先于节点完成事件到达 → 总结步骤事件在首个 token 时输出**保序）；RAG 来源从执行结果最后一条 `search_knowledge` 提取透出；异常统一抛 `PlannerError`（规划失败/步骤全非法/总结为空/LLM 故障）
+- `app/services/planner_agent.py` — **LangGraph 显式图**（langgraph 1.2 自带，零新依赖）：`START → plan（规划）→ execute（循环 ≤6 步）→ summarize（总结）→ END`；`chat_plan`（非流式）/`chat_plan_stream`（SSE，复用 step/token/done 契约）；**规划阶段用 `llm.astream` 累积 + `_parse_plan` 手动解析 JSON**——langgraph 把图内模型调用统一转为流式（stream=True），`with_structured_output` 解析器不兼容流式分块（实测报错），JSON 解析跨 DeepSeek/OpenAI 端点健壮；**偶发空响应重试（阶段3 收官联调发现并修复，2026-08-06）**：opencode-go 思考型模型（deepseek-v4-flash）对长规划 prompt 偶发返回 200 但 content 为空（思考耗尽不报错，实测约 50% 概率与 max_tokens 无关），`plan_node` 对空/无效输出/流式无分块异常重试 1 次（`_PLAN_RETRIES=1`），重试耗尽仍抛 `PlannerError`；执行阶段 `BaseTool.ainvoke` 线程池执行（`recommend_routes` 内含 asyncio.run 安全），单步失败记录错误继续；总结阶段流式逐字输出（`stream_mode=["updates","messages"]`，仅透出 `langgraph_node=="summarize"` 的 token；**token 先于节点完成事件到达 → 总结步骤事件在首个 token 时输出**保序）；RAG 来源从执行结果最后一条 `search_knowledge` 提取透出；异常统一抛 `PlannerError`（规划失败/步骤全非法/总结为空/LLM 故障）
 - **chat_agent 分流**：`chat()`/`chat_stream()` 在会话管理 + 长期记忆注入（T3）之后调 `_is_complex_intent(query)`（双层 try/except 防御）——复杂且 `AGENT_DUAL_MODE` 开启走规划路径（`planner_agent.chat_plan` / `chat_plan_stream`，`tools=_select_tools(use_rag)` 传入、记忆注入上下文随 messages 透传）；规划异常静默降级快速路径（流式先发 `step tool=plan_fallback label=正在直接为您解答…`），再由路由层兜底 Dify（双轨不变）；会话/历史/记忆钩子仍由 chat_agent 统一管理
 - 配置：`AGENT_DUAL_MODE`（默认 `true`；`false` 全部走快速路径，行为与阶段2 完全一致，回退开关）
-- 测试：`tests/test_intent_classifier.py`（38）+ `tests/test_planner_agent.py`（13）+ `tests/test_dual_mode.py`（10）；**测试注意：图内模型调用统一 stream=true，mock handler 需按首条 system 消息内容区分规划节点（含「规划引擎」）与总结节点**；存量测试查询（「我喜欢拍照」「推荐路线」等）必须保持 simple（词表约束）
+- 测试：`tests/test_intent_classifier.py`（38）+ `tests/test_planner_agent.py`（15，含规划偶发空响应重试 2 用例）+ `tests/test_dual_mode.py`（10）；**测试注意：图内模型调用统一 stream=true，mock handler 需按首条 system 消息内容区分规划节点（含「规划引擎」）与总结节点**；存量测试查询（「我喜欢拍照」「推荐路线」等）必须保持 simple（词表约束）
 
 ## 短期记忆持久化（阶段2 T1，船长决策：进程内 TTL 缓存 + SQLite，暂不上 Redis）
 
