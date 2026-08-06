@@ -10,19 +10,13 @@
 
 | 文件 | 说明 |
 |------|------|
-| [recommend-workflow-推荐问句工作流.md](./recommend-workflow-推荐问句工作流.md) | **主文档** — 工作流结构、提示词设计、测试用例、部署清单 |
+| [recommend-workflow-推荐问句工作流.md](./recommend-workflow-推荐问句工作流.md) | 历史主文档（已缩减为指向存档的指针；历史设计与提示词存档见 [`../dify配置/recommend-workflow-推荐工作流.md`](../dify配置/recommend-workflow-推荐工作流.md)） |
 
 ---
 
 ## 快速导航
 
-### 我想...
-
-- **了解工作流整体设计** → 主文档 § 二「工作流结构」
-- **复制 SYSTEM 提示词到 Dify** → 主文档 § 三.1「SYSTEM 提示词」
-- **查看测试用例** → 主文档 § 四「测试用例」
-- **部署确认** → 主文档 § 七「部署检查清单」
-- **理解后端如何调用** → 主文档 § 六「后端调用方式」
+- **历史设计与提示词存档** → [`../dify配置/recommend-workflow-推荐工作流.md`](../dify配置/recommend-workflow-推荐工作流.md)（已标记 superseded，含工作流结构、提示词、测试用例、部署清单）
 
 ### 相关 Dify 配置
 
