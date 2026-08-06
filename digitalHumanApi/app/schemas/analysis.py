@@ -54,6 +54,9 @@ class AIOverviewResponse(BaseModel):
     suggestions: List[str] = []
     ai_summary: str = ""
     total_dialogues: int = 0
+    # 降级标记：true=LLM 分析产出结果；false=回退到纯 DB 统计（LLM 未配置/失败/解析失败）
+    # 供前端/管理后台识别当前报告的数据来源
+    llm_analysis: bool = False
     analysis_timestamp: str = ""
 
     model_config = {"from_attributes": True}

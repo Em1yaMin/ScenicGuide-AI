@@ -1,12 +1,16 @@
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import app.tasks.analysis as analysis_mod
+from app.core.config import settings
 from app.models.dialogue import Dialogue, DialogueRole
 from app.models.evaluation import Evaluation
 from app.models.visitor import Visitor
-from app.tasks.analysis import _normalize_string_list
+from app.services import analytics_service
+from app.tasks.analysis import _normalize_string_list, analysis_loop
 
 
 def test_normalize_string_list_strips_and_dedupes():
@@ -171,3 +175,171 @@ async def test_analysis_overview_days_param(client):
     assert response.status_code == 200
     body = response.json()
     assert body["total_dialogues"] == 0  # 空数据但不会报错
+
+
+# ── LLM 降级链测试（DB 统计兜底） ──
+
+
+class _FakeChain:
+    """模拟 LLM 分析链（返回合法 JSON）。"""
+
+    async def ainvoke(self, inputs):
+        return json.dumps({
+            "hot_questions": [
+                {"question": "门票多少钱", "count": 3, "category": "票务"},
+            ],
+            "satisfaction_summary": "整体满意度平稳，票务咨询为主",
+            "satisfaction_direction": "平稳",
+            "unanswered_questions": [
+                {"question": "怎么退票", "reason": "游客反复追问"},
+            ],
+            "peak_hours": [{"hour": 10, "count": 5, "label": "10:00-10:59"}],
+            "suggestions": ["优化退票流程"],
+        })
+
+
+def _raise_llm_failure():
+    raise RuntimeError("simulated LLM outage")
+
+
+@pytest.mark.anyio
+async def test_overview_llm_failure_falls_back_to_db_stats(client, db_session, monkeypatch):
+    """LLM 分析异常时回退 DB 统计：不失败、输出确定性摘要、降级标记 llm_analysis=False。"""
+    now = datetime.now(timezone.utc)
+    visitor_id = "v-llm-fail"
+    db_session.add(Visitor(id=visitor_id))
+    d0 = Dialogue(
+        visitor_id=visitor_id, content="第一天问题1", role=DialogueRole.user,
+        timestamp=now - timedelta(days=2, hours=1),
+    )
+    d1 = Dialogue(
+        visitor_id=visitor_id, content="第二天问题1", role=DialogueRole.user,
+        timestamp=now - timedelta(days=1, hours=1),
+    )
+    db_session.add_all([d0, d1])
+    await db_session.flush()
+    db_session.add(Evaluation(
+        dialogue_id=d0.id, sentiment_label="neutral",
+        satisfaction_score=2, concern_tags=["路线指引"],
+    ))
+    db_session.add(Evaluation(
+        dialogue_id=d1.id, sentiment_label="positive",
+        satisfaction_score=4, concern_tags=["票务咨询"],
+    ))
+    await db_session.commit()
+
+    # LLM 已配置但调用异常 → 应捕获并回退
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(analytics_service, "_get_analysis_chain", _raise_llm_failure)
+
+    response = await client.get("/api/v1/analysis/overview?days=30")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["llm_analysis"] is False
+    assert body["total_dialogues"] == 2
+    # DB 统计兜底：热门问题来自 concern_tags
+    assert any(h["question"] in ("路线指引", "票务咨询") for h in body["hot_questions"])
+    # 满意度方向由 DB 趋势计算（day0 均分 2 < day1 均分 4 → 上升）
+    assert body["satisfaction_direction"] == "上升"
+    # 摘要包含 DB 统计信息与兜底标记
+    assert "数据库统计" in body["ai_summary"]
+    assert "数据库统计" in body["satisfaction_summary"]
+    assert len(body["suggestions"]) > 0
+    assert body["peak_hours"]
+
+
+@pytest.mark.anyio
+async def test_overview_llm_success_marks_llm_analysis(client, db_session, monkeypatch):
+    """LLM 分析成功时 llm_analysis=True，字段来自 LLM 输出。"""
+    now = datetime.now(timezone.utc)
+    visitor_id = "v-llm-ok"
+    db_session.add(Visitor(id=visitor_id))
+    d = Dialogue(
+        visitor_id=visitor_id, content="门票多少钱", role=DialogueRole.user,
+        timestamp=now - timedelta(hours=1),
+    )
+    db_session.add(d)
+    await db_session.flush()
+    db_session.add(Evaluation(
+        dialogue_id=d.id, sentiment_label="neutral",
+        satisfaction_score=3, concern_tags=["票务咨询"],
+    ))
+    await db_session.commit()
+
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(
+        analytics_service, "_get_analysis_chain", lambda: _FakeChain()
+    )
+
+    response = await client.get("/api/v1/analysis/overview?days=30")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["llm_analysis"] is True
+    assert body["hot_questions"] == [
+        {"question": "门票多少钱", "count": 3, "category": "票务"}
+    ]
+    assert body["suggestions"] == ["优化退票流程"]
+    assert body["unanswered_questions"] == [
+        {"question": "怎么退票", "reason": "游客反复追问"}
+    ]
+    assert "数据库统计" not in body["ai_summary"]
+
+
+@pytest.mark.anyio
+async def test_overview_without_key_uses_db_fallback(client, db_session):
+    """未配置 OPENAI_API_KEY 时跳过 LLM，直接 DB 统计兜底（llm_analysis=False）。"""
+    now = datetime.now(timezone.utc)
+    visitor_id = "v-nokey"
+    db_session.add(Visitor(id=visitor_id))
+    d = Dialogue(
+        visitor_id=visitor_id, content="路线怎么走", role=DialogueRole.user,
+        timestamp=now - timedelta(hours=1),
+    )
+    db_session.add(d)
+    await db_session.flush()
+    db_session.add(Evaluation(
+        dialogue_id=d.id, sentiment_label="neutral",
+        satisfaction_score=3, concern_tags=["路线指引"],
+    ))
+    await db_session.commit()
+
+    # conftest 已固定 settings.OPENAI_API_KEY 为空；此处再显式确保
+    assert not settings.OPENAI_API_KEY
+
+    response = await client.get("/api/v1/analysis/overview?days=30")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["llm_analysis"] is False
+    assert any(h["question"] == "路线指引" for h in body["hot_questions"])
+    assert "数据库统计" in body["ai_summary"]
+
+
+@pytest.mark.anyio
+async def test_analysis_loop_survives_batch_failure(monkeypatch):
+    """分析定时任务在 batch_evaluate 异常时记录日志并继续下一轮，不中断。"""
+    calls = {"n": 0}
+
+    async def flaky_batch() -> int:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("simulated Dify workflow outage")
+        return 0
+
+    original_sleep = asyncio.sleep
+
+    async def short_sleep(_seconds: float) -> None:
+        # 用原始 sleep 避免 patch 后的递归
+        await original_sleep(0.01)
+
+    monkeypatch.setattr(analysis_mod, "batch_evaluate", flaky_batch)
+    monkeypatch.setattr(asyncio, "sleep", short_sleep)
+
+    task = asyncio.create_task(analysis_loop())
+    # 测试自身的等待也用原始 sleep（asyncio.sleep 已被 patch 成 0.01s）
+    await original_sleep(0.1)
+    task.cancel()
+    # analysis_loop 在 except asyncio.CancelledError 中记录日志后正常退出（不 re-raise）
+    await task
+
+    # 第一轮失败后循环仍继续执行了后续轮次
+    assert calls["n"] >= 2

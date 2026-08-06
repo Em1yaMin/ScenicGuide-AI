@@ -114,7 +114,7 @@ cp .env.example .env
 | `DIFY_API_KEY` | Chat Agent 应用 Key（拉取对话） |
 | `DIFY_WORKFLOW_API_KEY` | Workflow 应用 Key（触发量化评估） |
 | `DIFY_LIGHT4AI_USER` | light4ai 调 Dify 时固定的 user 字段 |
-| `OPENAI_API_KEY` | OpenAI API Key（用于 LangChain AI 运营分析，不配置时回退到纯 DB 统计；**当前部署单用 opencode-go 端点**，与 `LLM_*` 同一 key，见 `digitalHumanApi/.env`） |
+| `OPENAI_API_KEY` | OpenAI API Key（用于 LangChain AI 运营分析，不配置时回退到纯 DB 统计；**当前部署单用 opencode-go 端点**，与 `LLM_*` 同一 key，见 `digitalHumanApi/.env`；LLM 分析失败/不可用时响应 `llm_analysis=false` 降级标记，见 `doc/phase3-analytics-verification.md`） |
 | `OPENAI_API_BASE` | OpenAI API 基础地址（可选；当前部署 `https://opencode.ai/zen/go/v1`） |
 | `OPENAI_MODEL` | OpenAI 模型名（默认 `gpt-4o-mini`；当前部署 `deepseek-v4-flash`） |
 | `LLM_API_KEY` | 对话 LLM Key（主端点 opencode-go，阶段1 接入层；与 `OPENAI_*`/`EMBEDDING_*` 完全独立，见 `app/core/llm.py` 与 `doc/llm-adapter-smoke-test.md`） |
@@ -312,6 +312,8 @@ docker-compose up -d --build
 - Nginx 将 `/api/` 反向代理到后端容器 `api:8000`
 - 后端健康检查端点：`/api/v1/health`
 
+> **nginx 代理超时**：`nginx.conf` 中 `/api/` location 的 `proxy_read_timeout` 为 `300s`，与 AI 运营分析的超时预算（`LLM_ANALYSIS_TIMEOUT=240`，opencode-go 端点真实调用实测约 128s，见 `doc/phase3-analytics-verification.md`）对齐——管理后台 `/api/v1/analysis/overview` 经 nginx 代理等待 LLM 分析结果，代理超时小于该预算会被 504 掐断。调整分析超时配置时需同步检查此值。
+
 > **如果 Dify 部署在宿主机而非 Docker 网络中**，容器内无法通过 `localhost` 访问宿主机 Dify。需在 `docker-compose.yml` 的 `api` 服务下添加 `extra_hosts`：
 > ```yaml
 > api:
@@ -338,7 +340,7 @@ docker-compose up -d --build
 | POST | `/dialogue/chat` | 对话（**双轨**：默认 LangChain agent 主链路，结构化工具直查景点/路线 + 知识检索 + 规则推荐，多轮会话**短期记忆持久化**（SQLite 落盘 + TTL，重启可恢复，见下方「短期记忆持久化」）；异常自动回落 Dify；`DIALOGUE_ENGINE=dify` 强制走 Dify，响应字段兼容 `answer/conversation_id/rag_context/rag_sources`；`streaming=true` 时返回 SSE 流式事件，见下方「SSE 流式对话」） |
 | POST | `/dialogue/sync-now` | 手动触发对话抓取 |
 | POST | `/analysis/run-now` | 手动触发量化分析 |
-| GET | `/analysis/overview` | AI 运营分析概览（支持 `?days=7/30/90`） |
+| GET | `/analysis/overview` | AI 运营分析概览（支持 `?days=7/30/90`；LangChain LLM 分析，失败自动回退纯 DB 统计并置 `llm_analysis=false` 降级标记；真实调用约 1-2 分钟（opencode-go 端点延迟高，最长可至 240s 超时预算），见 `doc/phase3-analytics-verification.md`；**docker 部署拓扑下需保证 nginx `/api/` 代理超时 ≥300s**（`nginx.conf` 已配置 `proxy_read_timeout 300s`，若再调大后端分析超时预算需同步调整）） |
 | GET | `/analysis/trends` | 趋势数据（每日对话量 + 满意度均分） |
 | GET | `/admin/dashboard` | 数据大屏聚合数据 |
 | GET | `/admin/report` | 分析报告数据 |

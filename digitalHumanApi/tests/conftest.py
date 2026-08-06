@@ -30,6 +30,18 @@ def _pin_embedding_api_key_off(monkeypatch):
     monkeypatch.setattr(settings, "EMBEDDING_API_KEY", "")
 
 
+@pytest.fixture(autouse=True)
+def _pin_openai_api_key_off(monkeypatch):
+    """测试环境固定关闭运营分析 LLM key（与 CI 一致，不依赖本地 .env）。
+
+    本地 worktree 的 .env 配置了真实 opencode-go key，若不固定关闭，
+    test_analysis 的 overview 用例会触发真实 LLM 调用（实测 20-90s+，慢且不稳定）。
+    LLM 成功/失败路径由测试显式 monkeypatch _get_analysis_chain 模拟，
+    真实 opencode-go 冒烟留到 doc/phase3-analytics-verification.md 验证。
+    """
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "")
+
+
 @pytest.fixture
 async def db_engine():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")

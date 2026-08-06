@@ -36,6 +36,15 @@ from app.schemas.analysis import (
 
 logger = logging.getLogger(__name__)
 
+# ── LLM 超时参数 ──
+# 真实环境实测（2026-08-06，opencode-go + deepseek-v4-flash）：
+# 运营分析 prompt 单次调用约 55-90s（端点延迟高且波动大），
+# 原 request_timeout=60 / wait_for(90) 会稳定超时导致频繁回退 DB 兜底。
+# 故 httpx 超时给到 180s，总等待上限 240s（需大于 httpx 超时，
+# 使底层超时错误正常上抛给降级链捕获）。
+LLM_REQUEST_TIMEOUT = 180
+LLM_ANALYSIS_TIMEOUT = 240
+
 # ── LangChain 初始化（延迟加载，避免启动时无网络/无 key 崩溃） ──
 
 _llm = None
@@ -54,7 +63,7 @@ def _get_llm():
             openai_api_key=settings.OPENAI_API_KEY,
             openai_api_base=settings.OPENAI_API_BASE or None,
             max_tokens=2048,
-            request_timeout=60,
+            request_timeout=LLM_REQUEST_TIMEOUT,
         )
     return _llm
 
@@ -331,6 +340,72 @@ async def _compute_hot_questions_from_db(
     ]
 
 
+# ── DB 统计兜底 ──
+
+def _build_db_fallback_summary(
+    satisfaction_trend: List[SatisfactionTrendItem],
+    hot_questions: List[HotQuestionItem],
+    peak_hours: List[PeakHourItem],
+    eval_summary: Dict[str, Any],
+) -> tuple[str, str, List[str]]:
+    """LLM 不可用时基于 DB 统计生成确定性摘要。
+
+    返回 (satisfaction_direction, satisfaction_summary, suggestions)：
+    - 满意度方向：对比满意度趋势前半段与后半段平均分（阈值 ±0.05）
+    - 摘要：评估覆盖、高频咨询、高峰时段等纯统计描述
+    - 建议：由热点问题/高峰时段推导的确定性运营建议
+    """
+    direction = "平稳"
+    scored = [t for t in satisfaction_trend if t.count > 0]
+    if len(scored) >= 2:
+        mid = len(scored) // 2
+        early = [t.avg_score for t in scored[:mid]]
+        late = [t.avg_score for t in scored[mid:]]
+        diff = sum(late) / len(late) - sum(early) / len(early)
+        if diff > 0.05:
+            direction = "上升"
+        elif diff < -0.05:
+            direction = "下降"
+
+    parts: List[str] = []
+    suggestions: List[str] = []
+
+    score_dist = eval_summary.get("score_distribution", {}) or {}
+    total_scores = sum(int(v) for v in score_dist.values())
+    weighted = sum(
+        int(k) * int(v) for k, v in score_dist.items() if str(k).lstrip("-").isdigit()
+    )
+    avg_score = round(weighted / total_scores, 1) if total_scores else 0.0
+    eval_count = eval_summary.get("evaluation_count", 0) or 0
+    if eval_count:
+        parts.append(f"基于 {eval_count} 条游客评分数据（平均 {avg_score} 分）")
+        suggestions.append("关注低分评价集中反馈的问题，优先优化对应服务环节")
+    else:
+        parts.append("暂无游客评分评估数据")
+
+    if hot_questions:
+        tops = "、".join(h.question for h in hot_questions[:3])
+        parts.append(f"高频咨询：{tops}")
+        suggestions.append(
+            f"在官网/小程序增设高频问题（如：{tops}）的 FAQ 入口"
+        )
+    else:
+        parts.append("暂无评估关联的高频关注点")
+
+    if peak_hours:
+        top_hour = peak_hours[0]
+        parts.append(f"高峰时段：{top_hour.label}")
+        suggestions.append(
+            f"建议在高峰时段（{top_hour.label}）增配服务人员与疏导力量"
+        )
+
+    summary = (
+        f"最近统计显示：{'；'.join(parts)}。"
+        f"满意度趋势{direction}（数据库统计兜底）。"
+    )
+    return direction, summary, suggestions[:3]
+
+
 # ── 公开 API ──
 
 async def get_ai_overview(
@@ -359,6 +434,8 @@ async def get_ai_overview(
     unanswered_questions: List[UnansweredQuestionItem] = []
     suggestions: List[str] = []
     peak_hours_from_ai: List[PeakHourItem] = []
+    # 降级标记：true=LLM 分析产出结果，false=回退纯 DB 统计
+    llm_analysis = False
 
     if total_dialogues == 0:
         logger.info("No dialogues found in last %d days, returning empty overview", days)
@@ -384,10 +461,11 @@ async def get_ai_overview(
             data_summary = _build_data_summary(dialogues, eval_summary, total_dialogues)
             llm_output = await asyncio.wait_for(
                 chain.ainvoke({"days": days, "data_summary": data_summary}),
-                timeout=90,
+                timeout=LLM_ANALYSIS_TIMEOUT,
             )
             ai_raw = _extract_json(llm_output)
             if ai_raw:
+                llm_analysis = True
                 logger.info("LLM analysis succeeded, extracted JSON with keys: %s", list(ai_raw.keys()))
         except Exception:
             logger.exception("LLM analysis failed, falling back to DB-only stats")
@@ -440,6 +518,7 @@ async def get_ai_overview(
             peak_hours_from_ai.clear()
             unanswered_questions.clear()
             suggestions.clear()
+            llm_analysis = False
             satisfaction_direction = "平稳"
             satisfaction_summary = "AI 分析结果解析异常，已回退到数据库统计"
 
@@ -457,6 +536,22 @@ async def get_ai_overview(
     # 构建满意度趋势（简化：使用现有 dashboard 逻辑）
     satisfaction_trend = await _compute_satisfaction_trend(db, days)
 
+    # LLM 失败/未配置/输出不可解析 → DB 统计兜底（产出确定性摘要，不阻断）
+    if not llm_analysis:
+        (
+            satisfaction_direction,
+            satisfaction_summary,
+            suggestions,
+        ) = _build_db_fallback_summary(
+            satisfaction_trend, hot_questions, peak_hours, eval_summary
+        )
+        logger.info(
+            "LLM analysis unavailable, using DB-only stats fallback "
+            "(direction=%s, hot=%d, peaks=%d)",
+            satisfaction_direction, len(hot_questions), len(peak_hours),
+        )
+
+    mode_note = "" if llm_analysis else "（数据库统计模式，LLM 分析不可用）"
     return AIOverviewResponse(
         hot_questions=hot_questions[:10],
         satisfaction_trend=satisfaction_trend,
@@ -470,9 +565,10 @@ async def get_ai_overview(
             f"覆盖 {len(eval_summary.get('daily_counts', {}))} 天数据。"
             f"满意度趋势：{satisfaction_direction}。"
             f"识别到 {len(hot_questions)} 个热门问题、"
-            f"{len(unanswered_questions)} 个待优化问题。"
+            f"{len(unanswered_questions)} 个待优化问题。{mode_note}"
         ),
         total_dialogues=total_dialogues,
+        llm_analysis=llm_analysis,
         analysis_timestamp=datetime.now(timezone.utc).isoformat(),
     )
 
