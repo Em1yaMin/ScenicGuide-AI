@@ -798,11 +798,15 @@ async def chat_stream(
             ):
                 if event.get("type") == "token":
                     plan_tokens.append(event.get("text", ""))
+                elif event.get("type") == "done":
+                    # 规划路径完成：追加历史 + 长期记忆钩子（与快速路径一致：
+                    # 先落盘后 done，客户端收到 done 即关闭连接也不丢失）
+                    plan_answer = "".join(plan_tokens)
+                    _append_history(conversation_id, query, plan_answer, user)
+                    _schedule_memory_extraction(
+                        user, conversation_id, query, plan_answer
+                    )
                 yield event
-            # 规划路径完成：追加历史 + 长期记忆钩子（与快速路径一致）
-            plan_answer = "".join(plan_tokens)
-            _append_history(conversation_id, query, plan_answer, user)
-            _schedule_memory_extraction(user, conversation_id, query, plan_answer)
             return
         except Exception as e:
             # 规划失败安全降级：日志告警 + step 提示，继续快速路径（不中断）
