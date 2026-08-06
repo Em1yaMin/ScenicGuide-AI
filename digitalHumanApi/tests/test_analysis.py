@@ -1,12 +1,16 @@
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import app.tasks.analysis as analysis_mod
+from app.core.config import settings
 from app.models.dialogue import Dialogue, DialogueRole
 from app.models.evaluation import Evaluation
 from app.models.visitor import Visitor
-from app.tasks.analysis import _normalize_string_list
+from app.services import analytics_service
+from app.tasks.analysis import _normalize_string_list, analysis_loop
 
 
 def test_normalize_string_list_strips_and_dedupes():
@@ -174,13 +178,6 @@ async def test_analysis_overview_days_param(client):
 
 
 # ── LLM 降级链测试（DB 统计兜底） ──
-
-import asyncio
-
-import app.tasks.analysis as analysis_mod
-from app.core.config import settings
-from app.services import analytics_service
-from app.tasks.analysis import analysis_loop
 
 
 class _FakeChain:
