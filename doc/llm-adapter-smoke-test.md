@@ -69,10 +69,9 @@ content: '黄山好玩的地方非常多，主要围绕黄山风景区和周边�
 **结论**：opencode-go 网关**容错**——历史 assistant 消息不带 `reasoning_content` 不报错。
 AIMessage `additional_kwargs` 携带 `reasoning_content` 时也会原样透传（实测正常）。
 
-## 3. 备用通道（官方 DeepSeek API）差异说明
+## 3. 备用通道差异说明
 
-备用端点为官方 DeepSeek API（`https://api.deepseek.com/v1`，模型 `deepseek-chat`）。
-未做真实调用（无官方 key），差异按官方文档与社区共识记录：
+**前提（2026-08-06 更新）**：备用端点的行为取决于 `LLM_FALLBACK_*` 配置——**部署默认（船长决策）备用同主端点 opencode-go**（opencode 服务本质转发 DeepSeek 官方 key，差异与主端点相同，本节省略）；**仅当改配官方 DeepSeek API（`https://api.deepseek.com/v1`，模型 `deepseek-chat`）为备用时**以下差异适用（未做真实调用，差异按官方文档与社区共识记录）：
 
 | 项 | opencode-go（主） | 官方 DeepSeek API（备用） |
 |------|------|------|
@@ -80,6 +79,8 @@ AIMessage `additional_kwargs` 携带 `reasoning_content` 时也会原样透传�
 | `max_tokens` 字段 | 不识别 `max_completion_tokens` | 同样只识别 `max_tokens` → 工厂 extra_body 方案通用 |
 | 多轮回传 `reasoning_content` | **不强制**（网关容错） | **强制要求**：历史 assistant 消息缺 `reasoning_content` 会报错 → 备用通道多轮对话需自定义消息转换（把上轮 reasoning 存入 AIMessage.additional_kwargs 回传）；T2 对话链路（chat_agent）尚未实现该转换，主端点 opencode-go 容错不受影响 |
 | 思考 token 统计 | `usage.completion_tokens_details.reasoning_tokens` | 同左 |
+
+> 注意：部署默认备用同主端点（opencode-go）时，上述"备用=官方 DeepSeek"差异不适用；改配官方 DeepSeek 备用时多轮对话受限，需先实现 reasoning 回传转换。
 
 ## 4. 复现方式
 

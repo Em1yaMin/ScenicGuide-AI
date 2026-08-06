@@ -125,6 +125,17 @@ class MinimaxEmbeddings(Embeddings):
             response.raise_for_status()
             data = response.json()
 
+        # Minimax 业务错误：HTTP 200 但响应体携带 base_resp 错误码
+        # （如 status_code=1008 insufficient balance，实测 2026-08-06）。
+        # 若未检查会落入下方"响应条数不符"的误导性错误，故此处先行暴露。
+        base_resp = data.get("base_resp") or {}
+        status_code = base_resp.get("status_code")
+        if status_code not in (None, 0):
+            status_msg = base_resp.get("status_msg") or "unknown error"
+            raise RuntimeError(
+                f"Minimax Embedding API 返回业务错误 status_code={status_code}: {status_msg}"
+            )
+
         # 原生 Minimax 响应: {"vectors": [[...], ...]}（按请求顺序返回）
         vectors = data.get("vectors")
         if isinstance(vectors, list):

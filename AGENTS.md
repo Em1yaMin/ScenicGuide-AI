@@ -40,7 +40,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 ## 本地 RAG 知识库（无外部向量库依赖）
 
-- `app/core/embedding.py` — Embedding 选择工厂 + `MinimaxEmbeddings`（**原生** `/embeddings` 端点，httpx 实现，配置 `EMBEDDING_API_KEY` 启用，与对话 LLM（`LLM_*`）及运营分析（`OPENAI_*`）完全独立）；**原生 API 格式（实测 embo-01，2026-08-06 联调修正）**：请求体 `{"model", "texts", "type"}`（`embed_documents` 传 `type=db`、`embed_query` 传 `type=query`，两者向量空间不同混用会降低检索质量），响应 `{"vectors": [...]}`；响应解析兼容 OpenAI 兼容格式（`data` 数组）便于未来切换；未配置 key 或 API 失败时自动降级本地 TF-IDF（日志告警，`degraded` 标记透出到检索响应）
+- `app/core/embedding.py` — Embedding 选择工厂 + `MinimaxEmbeddings`（**原生** `/embeddings` 端点，httpx 实现，配置 `EMBEDDING_API_KEY` 启用，与对话 LLM（`LLM_*`）及运营分析（`OPENAI_*`）完全独立）；**原生 API 格式（实测 embo-01，2026-08-06 联调修正）**：请求体 `{"model", "texts", "type"}`（`embed_documents` 传 `type=db`、`embed_query` 传 `type=query`，两者向量空间不同混用会降低检索质量），响应 `{"vectors": [...]}`；响应解析兼容 OpenAI 兼容格式（`data` 数组）便于未来切换；**先检查 `base_resp.status_code` 业务错误**（如 1008 insufficient balance，HTTP 200 但 vectors 为 null，真实环境实测 2026-08-06）——先行明确诊断，不误报"响应条数不符"；未配置 key 或 API 失败时自动降级本地 TF-IDF（日志告警，`degraded` 标记透出到检索响应）
 - `app/core/rag.py` — 命名空间隔离向量存储（knowledge / documents / user_memory，各自独立索引与 `rag_data/` 持久化文件；documents 复用旧集合名 `scenic_knowledge` 兼容升级前数据）；检索阶段 numpy 矩阵乘法加速余弦相似度；兼容 langchain_core `Document`/`Embeddings` 接口；**默认文档目录 `DEFAULT_DOC_DIR` 限定到 `doc/景区知识库/`**（三份景区知识 md，git 已纳入），不索引 doc/ 下架构/设计/部署文档；**已知现象：`SimpleVectorStore._load` 每次启动会全量重向量化（向量不落盘），3769 片段约 2 分钟，属已知优化项**
 - `app/services/rag_service.py` — 文档加载、分块、向量化、检索；`RAG_MAX_CONTEXT_LEN`（默认 2000）控制注入上下文长度；`search_documents`/`index_documents` 均接受 `namespace` 参数（默认检索 knowledge+documents 公共命名空间）；`search_documents` 为**统一检索入口**（对话/后台/推荐 Agent 共用），同步实现 `_search_documents_sync` 供推荐 Agent 工具调用；另有 `index_knowledge_entries` 将知识库条目（DB 行）重建到 knowledge 命名空间，供 CRUD 变更后同步
 - `app/routers/rag.py` — `POST /api/rag/search`（`namespace` 参数，响应含 `namespaces`/`embedding_backend`/`degraded` 标记）、`POST /api/rag/index`（默认写入 documents 命名空间，文档源 `doc/景区知识库/`）、`GET /api/rag/status`（各命名空间状态）
@@ -75,9 +75,9 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 ## 对话 LLM 接入层（阶段1，LangChain 工厂）
 
-- `app/core/llm.py` — ChatOpenAI（langchain-openai）工厂：`get_chat_llm()`（按 `LLM_*` 配置构造，主端点缺 key 自动降级备用端点，都缺抛 `LLMConfigError`）、`create_chat_llm()`（显式参数底层构造）、`resolve_endpoint()`；主/备用双端点：`LLM_API_*`（默认 opencode-go `https://opencode.ai/zen/go/v1` + `deepseek-v4-flash`）与 `LLM_FALLBACK_*`（默认官方 DeepSeek API），与 Embedding（`EMBEDDING_*`）、运营分析（`OPENAI_*`）配置完全独立
+- `app/core/llm.py` — ChatOpenAI（langchain-openai）工厂：`get_chat_llm()`（按 `LLM_*` 配置构造，主端点缺 key 自动降级备用端点，都缺抛 `LLMConfigError`）、`create_chat_llm()`（显式参数底层构造）、`resolve_endpoint()`；主/备用双端点：`LLM_API_*`（默认 opencode-go `https://opencode.ai/zen/go/v1` + `deepseek-v4-flash`）与 `LLM_FALLBACK_*`（**代码兜底默认仍为官方 DeepSeek API `https://api.deepseek.com/v1`；部署配置按船长决策 2026-08-06 备用同主端点 opencode-go**——opencode 服务本质转发 DeepSeek 官方 key，无需另配官方备用），与 Embedding（`EMBEDDING_*`）、运营分析（`OPENAI_*`）配置完全独立
 - **DeepSeek 思考格式兼容性**（实测结论，详见 `doc/llm-adapter-smoke-test.md`）：`reasoning_content` 被 langchain-openai 自动剥离（流式思考 chunk 为空串、content 为最终回答、不报错）→ 无需自定义处理；**max_tokens 必须经工厂 `extra_body` 注入原生 `max_tokens` 字段**（langchain-openai 1.4.1 硬编码改名为 `max_completion_tokens`，DeepSeek 系端点静默忽略致长度限制失效）；**不要在 `invoke()` 显式传 max_tokens**
-- 备用通道官方 DeepSeek API 多轮对话要求历史 assistant 消息回传 `reasoning_content`（opencode-go 网关不强制）；对话链路（chat_agent）尚未实现该自定义转换，备用端点多轮对话受限（主端点 opencode-go 容错不受影响）
+- 备用通道官方 DeepSeek API 多轮对话要求历史 assistant 消息回传 `reasoning_content`（opencode-go 网关不强制）；对话链路（chat_agent）尚未实现该自定义转换，备用端点多轮对话受限（**仅当部署改配官方 DeepSeek 备用时适用，见 doc/llm-adapter-smoke-test.md §3；部署默认备用同主端点 opencode-go，不受影响**）
 - 冒烟脚本：`digitalHumanApi/scripts/smoke_llm.py`（`LLM_API_KEY=... python -m scripts.smoke_llm`；`--fallback` 测备用端点）；单测 `tests/test_llm.py`（MockTransport 模拟，不发真实请求）
 
 ## 对话 agent（阶段1 T2+T3：LangChain 主链路 + Dify 双轨 + SSE 流式）
