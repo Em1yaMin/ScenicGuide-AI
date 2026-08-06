@@ -218,6 +218,35 @@ def test_minimax_embeddings_http_error_propagates():
         emb.embed_query("test")
 
 
+def test_minimax_embeddings_base_resp_business_error():
+    """HTTP 200 但响应体携带 base_resp 业务错误时，给出明确错误而非条数不符。
+
+    实测（2026-08-06）：MiniMax 账户余额不足时返回
+    {"vectors": null, "base_resp": {"status_code": 1008, "status_msg": "insufficient balance"}}。
+    未解析 base_resp 时会误报"响应条数不符: 请求 N 条，返回 0 条"，误导排障。
+    本用例覆盖该场景：错误信息须携带真实 status_code 与 status_msg。
+    """
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={
+            "vectors": None,
+            "base_resp": {"status_code": 1008, "status_msg": "insufficient balance"},
+        })
+
+    emb = MinimaxEmbeddings(
+        api_key="k",
+        api_base="https://api.minimaxi.com/v1",
+        model="embo-01",
+        _transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(RuntimeError, match="1008") as exc_info:
+        emb.embed_documents(["a", "b"])
+    assert "insufficient balance" in str(exc_info.value)
+    assert "响应条数不符" not in str(exc_info.value)
+
+
 # ---------------------------------------------------------------------------
 # 工厂：配置 key / 未配置 key
 # ---------------------------------------------------------------------------

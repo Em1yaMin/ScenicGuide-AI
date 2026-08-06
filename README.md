@@ -115,13 +115,13 @@ cp .env.example .env
 | `DIFY_WORKFLOW_API_KEY` | Workflow 应用 Key（触发量化评估） |
 | `DIFY_RECOMMEND_WORKFLOW_API_KEY` | 推荐问句 Workflow 应用 Key（需在 Dify 平台单独创建） |
 | `DIFY_LIGHT4AI_USER` | light4ai 调 Dify 时固定的 user 字段 |
-| `OPENAI_API_KEY` | OpenAI API Key（用于 LangChain AI 运营分析，不配置时回退到纯 DB 统计） |
-| `OPENAI_API_BASE` | OpenAI API 基础地址（可选，默认官方地址） |
-| `OPENAI_MODEL` | OpenAI 模型名（默认 `gpt-4o-mini`） |
+| `OPENAI_API_KEY` | OpenAI API Key（用于 LangChain AI 运营分析，不配置时回退到纯 DB 统计；**当前部署单用 opencode-go 端点**，与 `LLM_*` 同一 key，见 `digitalHumanApi/.env`） |
+| `OPENAI_API_BASE` | OpenAI API 基础地址（可选；当前部署 `https://opencode.ai/zen/go/v1`） |
+| `OPENAI_MODEL` | OpenAI 模型名（默认 `gpt-4o-mini`；当前部署 `deepseek-v4-flash`） |
 | `LLM_API_KEY` | 对话 LLM Key（主端点 opencode-go，阶段1 接入层；与 `OPENAI_*`/`EMBEDDING_*` 完全独立，见 `app/core/llm.py` 与 `doc/llm-adapter-smoke-test.md`） |
 | `LLM_API_BASE` | 对话 LLM 主端点（默认 `https://opencode.ai/zen/go/v1`） |
 | `LLM_MODEL` | 对话 LLM 主模型（默认 `deepseek-v4-flash`） |
-| `LLM_FALLBACK_API_KEY` / `LLM_FALLBACK_API_BASE` / `LLM_FALLBACK_MODEL` | 对话 LLM 备用端点（默认官方 DeepSeek API `https://api.deepseek.com/v1` + `deepseek-chat`），主端点未配置 key 时自动切换 |
+| `LLM_FALLBACK_API_KEY` / `LLM_FALLBACK_API_BASE` / `LLM_FALLBACK_MODEL` | 对话 LLM 备用端点（**船长决策 2026-08-06：备用同主端点 opencode-go**——opencode 服务本质转发 DeepSeek 官方 key，无需另配官方备用；主端点未配置 key 时自动切换） |
 | `LLM_TEMPERATURE` | 对话 LLM 默认采样温度（默认 `0.7`） |
 | `DIALOGUE_ENGINE` | 对话引擎开关（默认 `langchain`：LangChain agent 主链路，异常自动回落 Dify；`dify`：强制走 Dify Chat Agent），见 `app/services/chat_agent.py` |
 | `EMBEDDING_API_KEY` | Minimax Embedding API Key（RAG 向量化，与 OPENAI_*/LLM_* 独立；不配置时自动降级本地 TF-IDF，详见 AGENTS.md「本地 RAG 知识库」） |
