@@ -88,6 +88,18 @@ class Settings(BaseModel):
         os.environ.get("GUEST_TOKEN_EXPIRES_MINUTES", "30")
     )
 
+    # 短期记忆持久化（阶段2 T1：会话历史 SQLite 落盘 + 进程内 TTL 缓存，
+    # 见 app/core/memory_store.py / app/tasks/memory_cleanup.py）
+    # 登录用户与游客均享短期记忆（会话级，按 conversation_id）
+    # 存储文件独立于主库 digital_human.db（标准库 sqlite3，无额外依赖）
+    MEMORY_DB_PATH: str = os.environ.get("MEMORY_DB_PATH", "memory_store.db")
+    # 会话 TTL（天）：滑动窗口，每次对话刷新过期时间；默认 7 天
+    MEMORY_TTL_DAYS: int = int(os.environ.get("MEMORY_TTL_DAYS", "7"))
+    # 过期会话清理周期（秒）：后台任务定期清理（启动时立即清理一次），默认 1 小时
+    MEMORY_CLEANUP_INTERVAL_SECONDS: int = int(
+        os.environ.get("MEMORY_CLEANUP_INTERVAL_SECONDS", "3600")
+    )
+
     @model_validator(mode="after")
     def _validate_dify_config(self) -> "Settings":
         """Validate that Dify API config values are non-empty at startup."""

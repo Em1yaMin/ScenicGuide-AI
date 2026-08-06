@@ -21,6 +21,7 @@ def _pin_dialogue_engine(monkeypatch):
     monkeypatch.setattr(settings, "DIALOGUE_ENGINE", "langchain")
     with chat_agent._conversations_lock:
         chat_agent._conversations.clear()
+        chat_agent._conversation_meta.clear()
         chat_agent._generated_conversation_ids.clear()
 
 

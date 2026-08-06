@@ -7,6 +7,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.core.config import settings
 from app.core.database import Base, get_db
 from app.main import app
+from app.core import memory_store
+
+
+@pytest.fixture(autouse=True)
+def _reset_memory_store():
+    """每个测试重置短期记忆存储为内存模式，避免跨测试污染。
+
+    持久化/重启恢复专项测试自行 reset_store 到临时文件路径（在本 fixture
+    之后执行，覆盖内存模式）。
+    """
+    memory_store.reset_store(db_path=":memory:")
 
 
 @pytest.fixture(autouse=True)

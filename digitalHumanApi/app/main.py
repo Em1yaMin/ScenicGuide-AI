@@ -14,14 +14,16 @@ from app.routers import admin, analysis, auth, dialogue, knowledge, rag, recomme
 from app.schemas.common import ErrorResponse
 from app.schemas.health import HealthResponse
 from app.tasks.analysis import analysis_loop
-from app.tasks.recommend_questions import recommend_loop
+from app.tasks.memory_cleanup import memory_cleanup_loop
 from app.tasks.polling import polling_loop
+from app.tasks.recommend_questions import recommend_loop
 
 logger = logging.getLogger(__name__)
 
 _polling_task: Optional[asyncio.Task] = None
 _analysis_task: Optional[asyncio.Task] = None
 _recommend_task: Optional[asyncio.Task] = None
+_memory_cleanup_task: Optional[asyncio.Task] = None
 
 
 def _handle_task_result(task: asyncio.Task) -> None:
@@ -35,7 +37,7 @@ def _handle_task_result(task: asyncio.Task) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _polling_task, _analysis_task, _recommend_task
+    global _polling_task, _analysis_task, _recommend_task, _memory_cleanup_task
 
     # Phase 0: configure logging early — before any tasks are spawned
     logging.basicConfig(
@@ -55,6 +57,9 @@ async def lifespan(app: FastAPI):
     _analysis_task.add_done_callback(_handle_task_result)
     _recommend_task = asyncio.create_task(recommend_loop())
     _recommend_task.add_done_callback(_handle_task_result)
+    # 短期记忆过期清理（启动立即执行一次 + 定期，见 app/tasks/memory_cleanup.py）
+    _memory_cleanup_task = asyncio.create_task(memory_cleanup_loop())
+    _memory_cleanup_task.add_done_callback(_handle_task_result)
 
     yield
 
@@ -67,6 +72,9 @@ async def lifespan(app: FastAPI):
     _recommend_task.cancel()
     with suppress(asyncio.CancelledError):
         await _recommend_task
+    _memory_cleanup_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await _memory_cleanup_task
     await engine.dispose()
 
 
