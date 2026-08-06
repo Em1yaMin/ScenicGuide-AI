@@ -23,7 +23,7 @@ services/
   dify_client.py      # DifyClient 类 + dify_client 单例 — Dify API 封装
   recommend_agent.py  # LangChain Tool Calling 个性化路线推荐 Agent
   auth_service.py     # register_user/authenticate_user/签发 user+guest token — 用户体系
-  chat_agent.py       # chat()/chat_stream() — LangChain 对话 agent 主链路（结构化工具 + 知识检索 + 进程内多轮会话；stream 模式产 SSE 事件：step/token/done）
+  chat_agent.py       # chat()/chat_stream() — LangChain 对话 agent 主链路（结构化工具 + 知识检索 + 多轮会话短期记忆持久化：进程内缓存 + SQLite 双写，重启可恢复；stream 模式产 SSE 事件：step/token/done）
   dify_stream.py      # stream_dify_chat() — Dify Chat Agent 流式客户端（response_mode=streaming，SSE 解析 + ThinkFilter 过滤 think 块，双轨流式的兜底链路）
 ```
 

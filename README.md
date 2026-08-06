@@ -127,7 +127,7 @@ cp .env.example .env
 | `EMBEDDING_API_KEY` | Minimax Embedding API Key（RAG 向量化，与 OPENAI_*/LLM_* 独立；不配置时自动降级本地 TF-IDF，详见 AGENTS.md「本地 RAG 知识库」） |
 | `EMBEDDING_API_BASE` | Minimax Embedding 端点（默认 `https://api.minimaxi.com/v1`，**原生 API 格式**：请求 `texts`+`type`（query/db）、响应 `vectors`，实测模型 `embo-01`，见 `doc/phase1-e2e-verification.md`） |
 | `EMBEDDING_MODEL` | Embedding 模型名（默认 `embo-01`） |
-| `MEMORY_DB_PATH` | 短期记忆 SQLite 存储路径（默认 `memory_store.db`，独立于主库 digital_human.db，标准库 sqlite3，无额外依赖） |
+| `MEMORY_DB_PATH` | 短期记忆 SQLite 存储路径（默认 `memory_store.db`，独立于主库 digital_human.db，标准库 sqlite3，无额外依赖，见 AGENTS.md「短期记忆持久化」） |
 | `MEMORY_TTL_DAYS` | 会话 TTL（天，默认 7）：滑动窗口，每次对话刷新过期时间，到期会话由后台任务清理 |
 | `MEMORY_CLEANUP_INTERVAL_SECONDS` | 过期会话清理周期（秒，默认 3600）：启动时立即清理一次 + 定期清理 |
 | `SSH_HOST` / `SSH_PORT` / `SSH_USER` / `SSH_PASSWORD` | 部署 Dify 的远程服务器（可选） |
@@ -393,14 +393,15 @@ Dify 兜底链路同样流式（`response_mode=streaming`），`<think>...</thin
 
 ## 短期记忆持久化（阶段2 T1）
 
-多轮会话上下文已从**进程内 dict（重启即失）**升级为**SQLite 落盘 + 进程内 TTL 缓存**（船长决策 2026-08-05：暂不上 Redis；登录用户与游客均享短期记忆，会话级、按 `conversation_id`）。
+多轮会话上下文已从**进程内 dict（重启即失）**升级为**SQLite 落盘 + 进程内 TTL 缓存**（登录用户与游客均享短期记忆，会话级、按 `conversation_id`）：
 
-- **存储层**：`app/core/memory_store.py` — 标准库 sqlite3（无新增依赖），单表 `conversation_sessions`（conversation_id / user / source / messages JSON 消息序列 / created_at / last_active_at / ttl_expires_at），独立文件（默认 `memory_store.db`，不动主库 digital_human.db）
-- **读写策略 = 读走缓存 + 写双写**：进程内 `_conversations` 热缓存不变（`_MAX_CONVERSATIONS` LRU、`_MAX_HISTORY_MESSAGES` 上限语义不变），每次追加即时落盘（崩溃无丢失窗口）；缓存未命中时从 SQLite **懒恢复**（重启后同 `conversation_id` 续聊不丢多轮上下文）；LRU 淘汰只出缓存、不出库
-- **TTL 滑动窗口**：默认 7 天（`MEMORY_TTL_DAYS`），每次对话刷新过期时间；过期会话由后台任务 `app/tasks/memory_cleanup.py` 定期清理（启动立即执行一次 + 每 `MEMORY_CLEANUP_INTERVAL_SECONDS` 秒，默认 1 小时）＋ 访问时惰性清理双保险
-- **双轨回落兼容**：会话归属判定（`has_conversation`）随 `source` 字段持久化（`langchain`=本模块生成 uuid / `client`=客户端传入），重启恢复后 LangChain 生成的 id 对 Dify 依旧未知（回落传空串新建会话），Dify 自己的 id 原样透传延续上下文
+- **重启恢复**：重启后同 `conversation_id` 续聊不丢多轮上下文（SQLite 懒恢复；LRU 淘汰只出缓存、不出库）
+- **TTL 滑动窗口**：默认 7 天（`MEMORY_TTL_DAYS`），每次对话刷新过期时间；过期会话由后台任务定期清理（启动立即执行一次 + 每 `MEMORY_CLEANUP_INTERVAL_SECONDS` 秒，默认 1 小时）＋ 访问时惰性清理双保险
+- **双轨回落兼容**：会话归属判定（`has_conversation`）随 `source` 字段持久化——LangChain 生成的 id 对 Dify 依旧未知（回落传空串新建会话），Dify 自己的 id 原样透传延续上下文
 - **降级不阻断**：SQLite 写失败仅告警，记忆降级为进程内，对话不中断
 - 配置项：`MEMORY_DB_PATH` / `MEMORY_TTL_DAYS` / `MEMORY_CLEANUP_INTERVAL_SECONDS`，见 `digitalHumanApi/.env.example`
+
+存储层与读写策略等实现细节见 AGENTS.md「短期记忆持久化」。
 
 ## 用户体系（注册/登录/JWT）
 
