@@ -6,14 +6,14 @@
 
 ## 一、组件关系
 
-系统在 Dify 上需要创建 **2 个应用 + 1 个知识库**：
+系统在 Dify 上需要创建 **1 个应用 + 1 个知识库**（阶段4 首项起量化评估已本地 LLM 化，量化评估工作流不再需要，原设计文档 [quantitative-workflow-量化工作流.md](./quantitative-workflow-量化工作流.md) 为历史存档）：
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  Dify 平台 (Docker 部署)                                   │
 │                                                           │
 │  ┌─────────────────────┐    ┌────────────────────────┐   │
-│  │ 知识库               │    │ 工作流应用              │   │
+│  │ 知识库               │    │ 工作流应用（历史存档）  │   │
 │  │ (景区文档资料)        │    │ 量化评估工作流           │   │
 │  │                      │    │ DIFY_WORKFLOW_API_KEY  │   │
 │  └─────────┬───────────┘    └───────────┬────────────┘   │
@@ -36,6 +36,8 @@
 ```
 
 > ADH 默认引擎为 LangChainAgent（走本后端 `/api/v1/dialogue/chat`，后端异常自动回落聊天助手）；DifyAgent 直连保留可切换。聊天助手 API Key 现主要供后端回落与轮询链路使用。
+
+> 上图「量化评估工作流」为历史组件：阶段4 首项（2026-08-07）起量化评估已本地 LLM 化（`app/services/evaluation_service.py`，`LLM_*` 配置 opencode-go），不再创建/调用该工作流，详见 `doc/dify-dependency-audit.md` §3.2。
 
 ### 组件清单
 
@@ -121,16 +123,9 @@ PARAMETERS:
 6. 用测试用例验证（见 4.1-4.4 节）
 7. 发布 → 获取 API Key → 填入 `.env` 的 `DIFY_API_KEY`
 
-### Step 4: 创建量化评估工作流
+### Step 4: 量化评估（已 superseded）
 
-见 [量化评估工作流设计](./quantitative-workflow-量化工作流.md)：
-
-1. 创建「工作流」类型应用
-2. 添加 Start → LLM → End 节点（见 2.2 节）
-3. 填入 LLM 节点提示词（见 3.1 节）
-4. 配置 End 节点输出变量
-5. 用测试用例验证（见 4.1-4.5 节）
-6. 发布 → 获取 API Key → 填入 `.env` 的 `DIFY_WORKFLOW_API_KEY`
+> 阶段4 首项（2026-08-07）起量化评估已本地 LLM 化（`app/services/evaluation_service.py`，`LLM_*` 配置 opencode-go），**无需在 Dify 创建量化评估工作流**，`DIFY_WORKFLOW_API_KEY` 已从后端 config/docker-compose/CI/.env.example 移除。原「创建量化评估工作流」步骤（Start → LLM → End 节点、提示词、输出变量、测试用例 4.1-4.5）为历史存档，见 [quantitative-workflow-量化工作流.md](./quantitative-workflow-量化工作流.md)。
 
 ### Step 5: 端到端验证
 
@@ -188,9 +183,9 @@ curl http://localhost:8000/api/v1/admin/dashboard
 | 数字人回答质量差 | 知识库内容不足或提示词未生效 | 1. 检查知识库是否关联到聊天助手 2. 在 Dify 预览中测试 3. 检查分段是否合理 |
 | 数字人回答空白 | 对话链路异常 | 1. 检查本后端 `/api/v1/dialogue/chat`（LangChainAgent 的 `LLM_API_URL`）2. 若切回 DifyAgent 直连，检查 `difyAgent.yaml` 的 API Key 3. 检查 Dify 日志 |
 | 对话没被抓取 | 轮询用户与对话 user 不一致 | 1. 检查 `.env` 中 `DIFY_LIGHT4AI_USER` 2. 检查 ADH 引擎 user 配置（LangChainAgent `LLM_API_USER`／DifyAgent `DIFY_API_USER`）是否一致 3. 用 Dify API 直接测 `/conversations?user=xxx` |
-| 工作流评估失败 | 输出格式不正确 | 1. 在 Dify 工作流中手动测试 2. 检查 LLM 输出是否为合法 JSON 3. 检查 LLM 温度是否过高导致格式不稳定 |
+| 量化评估失败 | 本地 LLM 输出格式问题或端点异常 | 1. 检查 `LLM_API_KEY` 是否配置（opencode-go，与对话 LLM 同 key）2. 单条失败会静默降级（该对话下轮重试），大量持续失败检查端点可达性（单条超时预算 120s，见 `doc/phase3-analytics-verification.md`）3. 评估提示词与解析逻辑见 `app/services/evaluation_service.py` |
 | 大屏无数据 | evaluations 表为空 | 1. 确认 analysis_loop 正在运行 2. 阶段4 起评估由本地 LLM 产出（检查 `LLM_API_KEY` 与 `app/services/evaluation_service.py`，不再需要 `DIFY_WORKFLOW_API_KEY`） 3. 手动触发 `/api/v1/analysis/run-now` |
-| 评分异常（全满分/全低分） | 提示词约束过强或过弱 | 1. 用测试用例 4.1-4.5 在 Dify 工作流中逐一验证 2. 调整评分标准描述 3. 考虑提高 Temperature 增加评分多样性 |
+| 评分异常（全满分/全低分） | 提示词约束过强或过弱 | 1. 用测试用例 4.1-4.5 验证（评估提示词见 `app/services/evaluation_service.py` 的 `_EVALUATION_SYSTEM_PROMPT`）2. 调整评分标准描述 3. 考虑调整 `_EVAL_TEMPERATURE` 增加评分多样性 |
 
 ---
 

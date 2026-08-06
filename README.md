@@ -1,6 +1,6 @@
 # 景区导览 AI 数字人系统
 
-景区导览 AI 数字人系统 — Python FastAPI 后端 + Vue 3 前端单体应用，通过 Docker Compose 部署。后端集成 Dify AI 平台提供对话双轨回落与对话/评估数据抓取（**阶段3 收官后 Dify 依赖面已收敛**：推荐问句与分析链路已本地化，仅对话回落与历史数据接口保留，见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md)），前端提供访客端（数字人对话）和管理后台（数据大屏 + 报告）。
+景区导览 AI 数字人系统 — Python FastAPI 后端 + Vue 3 前端单体应用，通过 Docker Compose 部署。后端集成 Dify AI 平台提供对话双轨回落与对话/评估数据抓取（**阶段4 收官后 Dify 依赖面已收敛**：推荐问句、分析链路与量化评估均已本地化，仅对话回落与历史数据接口保留，见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md)），前端提供访客端（数字人对话）和管理后台（数据大屏 + 报告）。
 
 ## 技术栈
 
@@ -9,7 +9,7 @@
 | 后端 | Python 3.9+ · FastAPI · SQLAlchemy 2.0 (async) · SQLite (aiosqlite) · httpx · LangChain |
 | 前端 | Vue 3 · TypeScript · Vite 8 · Pinia · Vue Router · ECharts |
 | 部署 | Docker Compose · Nginx |
-| 外部服务 | Dify AI 平台（Chat Agent 对话双轨回落 + Workflow 量化分析）、LangChain agent（对话主链路）+ OpenAI（AI 运营分析）、对话 LLM（opencode-go DeepSeek，见 `doc/llm-adapter-smoke-test.md`）、本地 Live2D 数字人（live2d-frontend） |
+| 外部服务 | Dify AI 平台（Chat Agent 对话双轨回落 + 历史数据接口；量化评估已本地 LLM 化）、LangChain agent（对话主链路）+ OpenAI（AI 运营分析）、对话 LLM（opencode-go DeepSeek，见 `doc/llm-adapter-smoke-test.md`）、本地 Live2D 数字人（live2d-frontend） |
 
 ## 本地数字人依赖
 
@@ -536,7 +536,6 @@ A: 语音功能需要**安全上下文**（HTTPS 或 localhost）。ADH 数字�
 **Q: ADH 数字人凭据在哪里配置？**
 A: 凭据不写入代码库，配置在 ADH 引擎配置文件中：`live2d-frontend/configs/engines/tts/minimaxTTS.yaml`（MiniMax TTS）、`live2d-frontend/configs/engines/asr/tencentAPI.yaml`（腾讯云 ASR）、`live2d-frontend/configs/agents/langchainAgent.yaml`（默认引擎，`LLM_API_URL` 指向本后端，可选 Bearer token）、`live2d-frontend/configs/agents/difyAgent.yaml`（Dify Agent，保留可切换直连）。修改后需重启 ADH 后端生效。
 
-## Dify Workflow 量化分析规格
+## Dify Workflow 量化分析规格（历史存档）
 
-Workflow 的入参、输出格式、节点编排、后端解析容错等完整规格请查阅：
-[`doc/dify配置/workflow-spec.md`](doc/dify配置/workflow-spec.md)。
+阶段4 首项（2026-08-07）起量化评估已本地 LLM 化（`app/services/evaluation_service.py`，`LLM_API_*` 配置 opencode-go），**不再调用 Dify Workflow**。原 Workflow 的入参、输出格式、节点编排、后端解析容错等历史规格存档于 [`doc/dify配置/workflow-spec.md`](doc/dify配置/workflow-spec.md)。

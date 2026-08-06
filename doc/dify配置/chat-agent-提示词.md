@@ -182,7 +182,7 @@ Dify 聊天助手中使用 `{{}}` 定义变量，在提示词中通过变量动�
 ```
 游客 → 数字人前端(ADH) → 本后端 /api/v1/dialogue/chat（LangChain 主链路，异常回落 Dify Chat Agent）
                               ↓ (旁路轮询)
-                         FastAPI → 对话入库 → 量化工作流 → 数据大屏
+                         FastAPI → 对话入库 → 本地 LLM 量化评估 → 数据大屏
 ```
 
 ### 6.2 数字人 live2d-frontend（ADH）
