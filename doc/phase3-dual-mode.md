@@ -100,7 +100,7 @@ done  conversation_id / rag_context / rag_sources
 | `tests/test_dual_mode.py` | chat/chat_stream 分流、规划失败/分类失败降级、`AGENT_DUAL_MODE=false` 回退、记忆注入透传（10 例） |
 | 存量回归 | 全部既有对话/记忆/路由测试保留通过 |
 
-全量：**310 passed**（存量 267 + 新增 43；含船长决策 2026-08-06 词表收窄后的全量回归）。
+全量：**314 passed**（存量 253 + 新增 61；含船长决策 2026-08-06 词表收窄后的全量回归）。
 
 ## 4. 真实环境冒烟验证（2026-08-06）
 

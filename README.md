@@ -123,6 +123,7 @@ cp .env.example .env
 | `LLM_FALLBACK_API_KEY` / `LLM_FALLBACK_API_BASE` / `LLM_FALLBACK_MODEL` | 对话 LLM 备用端点（**船长决策 2026-08-06：备用同主端点 opencode-go**——opencode 服务本质转发 DeepSeek 官方 key，无需另配官方备用；主端点未配置 key 时自动切换） |
 | `LLM_TEMPERATURE` | 对话 LLM 默认采样温度（默认 `0.7`） |
 | `DIALOGUE_ENGINE` | 对话引擎开关（默认 `langchain`：LangChain agent 主链路，异常自动回落 Dify；`dify`：强制走 Dify Chat Agent），见 `app/services/chat_agent.py` |
+| `AGENT_DUAL_MODE` | 双模式对话开关（默认 `true`：简单问答走快速路径、复杂任务走 LangGraph 规划路径；`false` 全部走快速路径，回退到阶段2 行为），见「双模式对话」节 |
 | `EMBEDDING_API_KEY` | Minimax Embedding API Key（RAG 向量化，与 OPENAI_*/LLM_* 独立；不配置时自动降级本地 TF-IDF，详见 AGENTS.md「本地 RAG 知识库」） |
 | `EMBEDDING_API_BASE` | Minimax Embedding 端点（默认 `https://api.minimaxi.com/v1`，**原生 API 格式**：请求 `texts`+`type`（query/db）、响应 `vectors`，实测模型 `embo-01`，见 `doc/phase1-e2e-verification.md`） |
 | `EMBEDDING_MODEL` | Embedding 模型名（默认 `embo-01`） |
@@ -485,7 +486,7 @@ pytest -v
 | 阶段2 T2 长期记忆写入 | ✅ 实现完成（对话后后台 LLM 提取用户事实/偏好写入 user_memory 向量库，按 user 隔离、同事实覆盖、条数上限，游客不写，失败静默降级） |
 | 阶段2 T3 长期记忆检索注入 | ✅ 实现完成（对话首轮按 user 检索记忆注入 agent 上下文，仅首轮注入/游客跳过/时效过滤/异常静默降级，注入逻辑与端到端单测覆盖，全量 248 测试全绿） |
 | 阶段2 T4 登录生效联调（收官） | ✅ 通过（真实环境：登录用户注册/登录→多轮对话→长期记忆写入 user_memory（5 条）→新会话检索注入（回答引用用户画像）；游客无 token / guest token 降级正确（短期正常、无长期记忆、无注入）；同事实覆盖去重；无联调缺陷，详见 [`doc/phase2-memory-verification.md`](doc/phase2-memory-verification.md)） |
-| 阶段3 T1 双模式对话 | ✅ 实现完成（意图分类层分流：简单问答→快速路径零延迟、复杂任务→LangGraph 规划图（规划→多步执行→总结）SSE 步骤可视化；分类失败/规划异常静默降级快速路径→Dify；`AGENT_DUAL_MODE=false` 可整体回退；分类/规划/双模式集成单测 + 全量 304 测试全绿，真实环境冒烟验证见 [`doc/phase3-dual-mode.md`](doc/phase3-dual-mode.md)） |
+| 阶段3 T1 双模式对话 | ✅ 实现完成（意图分类层分流：简单问答→快速路径零延迟、复杂任务→LangGraph 规划图（规划→多步执行→总结）SSE 步骤可视化；分类失败/规划异常静默降级快速路径→Dify；`AGENT_DUAL_MODE=false` 可整体回退；分类/规划/双模式集成单测 + 全量 314 测试全绿，真实环境冒烟验证见 [`doc/phase3-dual-mode.md`](doc/phase3-dual-mode.md)） |
 | Docker Compose | 已配置，未在本次验收中实际构建 |
 
 ## 常见问题
