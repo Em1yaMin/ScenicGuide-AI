@@ -43,7 +43,7 @@
 ### 3.2 ~~Dify Workflow 量化评估~~（✅ 已清理：阶段4 首项，2026-08-07 船长决策方案A）
 
 - **原现状**：`analysis_loop`（300s）→ `batch_evaluate` → 对未评估对话调 Dify Workflow 量化评估 → Evaluation 表。管理后台 `admin_service.py`（Dashboard 情感趋势/满意度分布/热点问题/景点热度）与 `ReportView` 全部消费 Evaluation 表。
-- **已实施（方案A）**：`evaluate_dialogue` 改为本地 LLM 评估——`app/services/evaluation_service.py`（复用 `app/core/llm.py` 工厂，`LLM_*` 配置 opencode-go，prompt 语义移植自原 Workflow 提示词），输出解析 `_parse_evaluation_output`（think 标签/代码围栏/JSON/别名/类型归一/全空判定），失败静默降级返回 None（该对话本轮跳过、下轮重试）；`batch_evaluate` 三阶段化（查未评估 → **并发**本地 LLM 评估（`asyncio.gather` + 信号量 4 + `asyncio.to_thread` 非阻塞）→ 串行写 Evaluation 并提交）；Evaluation 表结构与管理后台消费**不变**。
+- **已实施（方案A）**：`evaluate_dialogue` 改为本地 LLM 评估——`app/services/evaluation_service.py`（复用 `app/core/llm.py` 工厂，`LLM_*` 配置 opencode-go，prompt 语义移植自原 Workflow 提示词），输出解析 `_parse_evaluation_output`（think 标签/代码围栏/JSON/别名/类型归一/全空判定，含 suggestions 改进建议字段——报告「改进建议」区数据源，1-3 条、无建议为空数组），失败静默降级返回 None（该对话本轮跳过、下轮重试）；`batch_evaluate` 三阶段化（查未评估 → **并发**本地 LLM 评估（`asyncio.gather` + 信号量 4 + `asyncio.to_thread` 非阻塞）→ 串行写 Evaluation 并提交）；Evaluation 表结构与管理后台消费**不变**。
 - **依赖移除**：`dify_client.trigger_workflow` 已移除（polling/backfill 用的 `get_conversations`/`get_conversation_messages` 保留）；`dify_helpers.py` 已删除；`DIFY_WORKFLOW_API_KEY` 已从 config（含校验器）/docker-compose/CI/.env.example 移除。
 - **测试**：新增 `tests/test_evaluation_service.py`（解析/评估/降级/Evaluation 映射），`tests/test_analysis.py` 新增批量写入与部分失败静默降级用例，`test_analysis_loop_survives_batch_failure` 适配（`batch_evaluate` 符号保留）。
 - **真实调用验证**（2026-08-07，opencode-go + deepseek-v4-flash）：三类样本（中性咨询/负面投诉/正面感谢）分类与字段提取正确，单条 3-7s（并发 4 时批量 50 约 90s 内完成，300s 循环周期足够）；端到端 `batch_evaluate` → Evaluation 表写入正常。

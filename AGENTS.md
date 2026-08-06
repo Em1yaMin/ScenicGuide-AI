@@ -107,7 +107,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 船长决策 2026-08-06：量化评估脱离 Dify，Evaluation 表继续产出（管理后台 Dashboard/Report 情感/满意度/热点/景点热度数据源**不变**），对话双轨回落与历史数据接口保留不动。
 
-- `app/services/evaluation_service.py` — 本地 LLM 评估（复用 `app/core/llm.py` 工厂 `get_chat_llm`，`LLM_*` 配置 opencode-go；prompt 语义移植自原 Dify 量化工作流，见 `doc/dify配置/quantitative-workflow-量化工作流.md`——现为历史存档）：输出情感（positive/neutral/negative，happy/confused 归一）/满意度（1-5，越界钳制）/关注点/涉及景点
+- `app/services/evaluation_service.py` — 本地 LLM 评估（复用 `app/core/llm.py` 工厂 `get_chat_llm`，`LLM_*` 配置 opencode-go；prompt 语义移植自原 Dify 量化工作流，见 `doc/dify配置/quantitative-workflow-量化工作流.md`——现为历史存档）：输出情感（positive/neutral/negative，happy/confused 归一）/满意度（1-5，越界钳制）/关注点/涉及景点/改进建议（suggestions，1-3 条，无建议为空数组）
   - `_parse_evaluation_output` 容错解析：剥 `<think>` 标签/```json``` 围栏/JSON 解码/字段别名兜底（sentiment/concerns/spots）/类型归一/**全空判定**（字段全缺视为解析失败返回 None，不写全 NULL 垃圾行）
   - `evaluate_content(content, llm=None)`（可注入 llm 测试）：LLM 未配置（LLMConfigError）/调用异常/解析失败均返回 None 不抛错，调用方本轮跳过、下轮重试；`asyncio.to_thread` 派发 invoke（事件循环不阻塞）；单条超时预算 120s（opencode-go 延迟高，参考 `doc/phase3-analytics-verification.md` 经验；实测单条 3-7s）
 - `app/tasks/analysis.py` — `analysis_loop`（300s）→ `batch_evaluate` **三阶段化**：①查未评估对话（LEFT JOIN）②**并发**本地 LLM 评估（`asyncio.gather` + `EVAL_CONCURRENCY=4` 信号量限流；`evaluate_dialogue` 只读 content 构造脱库 ORM 对象，共享会话安全）③串行去重校验 + 写 Evaluation 并提交；单条失败（None/异常）静默跳过不阻断批次；`evaluate_dialogue`/`batch_evaluate` 符号保留（`/api/v1/analysis/run-now` 与测试兼容）；`MAX_BATCH_SIZE=50`

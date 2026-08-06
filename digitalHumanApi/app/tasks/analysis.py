@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Any, List, Optional
+from typing import List, Optional
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +9,7 @@ from app.core.database import async_session_factory
 from app.models.dialogue import Dialogue
 from app.models.evaluation import Evaluation
 from app.services import evaluation_service
+from app.services.evaluation_service import normalize_string_list
 
 logger = logging.getLogger(__name__)
 
@@ -18,19 +19,9 @@ MAX_BATCH_SIZE = 50  # Limit evaluations per cycle
 EVAL_CONCURRENCY = 4
 
 
-def _normalize_string_list(raw: Any) -> Optional[List[str]]:
-    """Strip whitespace from a list of strings; drop non-string/empty items."""
-    if not isinstance(raw, list):
-        return None
-    normalized: List[str] = []
-    seen: set = set()
-    for item in raw:
-        if isinstance(item, str):
-            stripped = item.strip()
-            if stripped and stripped not in seen:
-                normalized.append(stripped)
-                seen.add(stripped)
-    return normalized if normalized else None
+# 复用 evaluation_service 导出的归一化助手（strip/去重/空返 None），
+# 消除重复实现；保留本名符号兼容（tests/test_analysis.py 直接引用）
+_normalize_string_list = normalize_string_list
 
 
 async def evaluate_dialogue(

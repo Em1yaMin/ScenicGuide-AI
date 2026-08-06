@@ -489,7 +489,7 @@ pytest -v
 | 阶段2 T4 登录生效联调（收官） | ✅ 通过（真实环境：登录用户注册/登录→多轮对话→长期记忆写入 user_memory（5 条）→新会话检索注入（回答引用用户画像）；游客无 token / guest token 降级正确（短期正常、无长期记忆、无注入）；同事实覆盖去重；无联调缺陷，详见 [`doc/phase2-memory-verification.md`](doc/phase2-memory-verification.md)） |
 | 阶段3 收官全链路联调 | ✅ 通过（真实环境：简单问答快速路径 / 复杂任务规划路径（SSE 步骤可视化）/ 推荐问句本地生成（脱离 Dify）/ 分析链路 LLM + DB 兜底降级标记 / 记忆系统（长期写入+注入+游客隔离）/ 双轨回落；联调发现并修复规划路径偶发空响应（opencode-go 长 prompt 思考耗尽）→ 增加重试；全量 320 测试全绿，详见 [`doc/phase3-e2e-verification.md`](doc/phase3-e2e-verification.md)） |
 | 阶段3 Dify 依赖盘点 | ✅ 完成（推荐/分析已脱离 Dify；剩余为对话双轨回落 + 历史数据接口 + Workflow 量化评估，清理建议见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md)） |
-| 阶段4 量化评估本地化 | ✅ 完成（真实调用：本地 LLM 评估产出情感/满意度/关注点/景点，Evaluation 表与管理后台消费不变；`trigger_workflow`/`dify_helpers`/`DIFY_WORKFLOW_API_KEY` 已移除；全量测试全绿，详见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md) §2） |
+| 阶段4 量化评估本地化 | ✅ 完成（真实调用：本地 LLM 评估产出情感/满意度/关注点/景点/改进建议，Evaluation 表与管理后台消费不变；`trigger_workflow`/`dify_helpers`/`DIFY_WORKFLOW_API_KEY` 已移除；全量测试全绿，详见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md) §2） |
 | Docker Compose | 已配置，未在本次验收中实际构建 |
 
 ## 常见问题

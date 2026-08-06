@@ -3,8 +3,8 @@
 从「调用 Dify Workflow 量化评估」改为「本地 LLM 评估」：复用 `app/core/llm.py` 工厂
 （`LLM_API_*` 配置 opencode-go），prompt 语义对齐原 Dify 量化工作流
 （见 `doc/dify配置/quantitative-workflow-量化工作流.md` —— 现为历史存档）——
-输出情感（positive/neutral/negative）、满意度评分（1-5）、关注点标签、涉及景点，
-Evaluation 表写入与管理后台消费不变。
+输出情感（positive/neutral/negative）、满意度评分（1-5）、关注点标签、涉及景点、
+改进建议（suggestions），Evaluation 表写入与管理后台消费不变。
 
 失败降级：LLM 未配置（LLMConfigError）/调用异常/解析失败均返回 None（不抛错、
 不阻断 `analysis_loop`），该对话本轮跳过、下轮自动重试。
@@ -87,13 +87,22 @@ _EVALUATION_SYSTEM_PROMPT = """\
 - 若不涉及具体景点，返回空数组 []
 - 去重（同一景点只出现一次）
 
+## 5. 改进建议 (suggestions)
+如果对话反映出可改进的服务点，提出 1-3 条具体建议，字符串数组。
+规则：
+- 针对具体问题提建议，不使用套话（如「提升服务质量」这种空泛建议不要）
+- 建议格式：问题现象 + 改进方向，如「游客多次询问XX景点位置，建议在介绍中增加方位描述」
+- 如果对话顺利无明显问题，返回空数组 []
+- 最多 3 条
+
 # 输出格式
 只输出一个 JSON 对象，不要有任何解释文字。JSON 格式如下：
 {
   "sentiment_label": "positive|negative|neutral",
   "satisfaction_score": 1-5的整数,
   "concern_tags": ["标签1", "标签2"],
-  "mentioned_spots": ["景点1"]
+  "mentioned_spots": ["景点1"],
+  "suggestions": ["建议1"]  // 无建议时为空数组[]
 }
 
 注意：
@@ -111,13 +120,33 @@ _SENTIMENT_ALIASES = {
 }
 
 
+def normalize_string_list(raw: Any) -> Optional[List[str]]:
+    """归一化字符串列表：strip 空白、去重、剔除空串与非字符串项。
+
+    空输入/非列表/全空 → None（与 tasks/analysis.py 旧 `_normalize_string_list`
+    语义一致，analysis 侧复用本助手）。
+    """
+    if not isinstance(raw, list):
+        return None
+    cleaned: List[str] = []
+    seen: set = set()
+    for item in raw:
+        if isinstance(item, str):
+            stripped = item.strip()
+            if stripped and stripped not in seen:
+                cleaned.append(stripped)
+                seen.add(stripped)
+    return cleaned if cleaned else None
+
+
 def _parse_evaluation_output(text: Any) -> Optional[Dict[str, Any]]:
     """解析本地 LLM 评估输出的 JSON 文本（容错解析，行为对齐旧 Dify 输出解析）。
 
     三层防御：
     1. 剥离 <think>...</think> 推理标签
     2. 提取 ```json ... ``` 代码围栏内容
-    3. json.loads 解码后归一字段（别名兜底：sentiment/concerns/spots）
+    3. json.loads 解码后归一字段（别名兜底：sentiment/concerns/spots；
+       suggestions 无别名，缺失/空列表 → None）
     4. 类型校验（satisfaction_score 转 int，列表类字段过滤非法项）
 
     任何失败返回 None（调用方降级，不抛错）。
@@ -161,21 +190,15 @@ def _parse_evaluation_output(text: Any) -> Optional[Dict[str, Any]]:
         except (ValueError, TypeError):
             satisfaction_score = None
 
-    def _clean_list(raw: Any) -> Optional[List[str]]:
-        if not isinstance(raw, list):
-            return None
-        cleaned: List[str] = []
-        seen: set = set()
-        for item in raw:
-            if isinstance(item, str):
-                stripped = item.strip()
-                if stripped and stripped not in seen:
-                    cleaned.append(stripped)
-                    seen.add(stripped)
-        return cleaned if cleaned else None
-
-    concern_tags = _clean_list(parsed.get("concern_tags") or parsed.get("concerns"))
-    mentioned_spots = _clean_list(parsed.get("mentioned_spots") or parsed.get("spots"))
+    concern_tags = normalize_string_list(
+        parsed.get("concern_tags") or parsed.get("concerns")
+    )
+    mentioned_spots = normalize_string_list(
+        parsed.get("mentioned_spots") or parsed.get("spots")
+    )
+    # suggestions 为可选字段（原 Workflow §1.3 第5项）：空列表/缺失 → None
+    # （不参与全空判定，管理后台报告「改进建议」区按需消费非空列表）
+    suggestions = normalize_string_list(parsed.get("suggestions"))
 
     # 全空输出（如 LLM 返回 {} / 空 JSON 但字段全缺）视为解析失败 → None，
     # 由调用方本轮跳过、下轮重试（不写全 NULL 垃圾评估行）
@@ -193,6 +216,7 @@ def _parse_evaluation_output(text: Any) -> Optional[Dict[str, Any]]:
         "satisfaction_score": satisfaction_score,
         "concern_tags": concern_tags,
         "mentioned_spots": mentioned_spots,
+        "suggestions": suggestions,
     }
 
 
@@ -208,8 +232,8 @@ async def evaluate_content(
 
     Returns:
         归一化评估 dict（sentiment_label/satisfaction_score/concern_tags/
-        mentioned_spots）；任何失败（LLM 未配置/调用异常/解析失败）返回 None，
-        不抛错——analysis_loop 本轮跳过该对话，下轮自动重试。
+        mentioned_spots/suggestions）；任何失败（LLM 未配置/调用异常/解析失败）
+        返回 None，不抛错——analysis_loop 本轮跳过该对话，下轮自动重试。
     """
     if not content or not content.strip():
         logger.debug("评估跳过：对话内容为空")
