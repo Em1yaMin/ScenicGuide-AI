@@ -172,6 +172,13 @@ async def save_user_memory(user: str, facts: List[MemoryEntry]) -> dict:
         {"written": int, "overwritten": int, "total": int, "user": str,
          "skipped": bool}；skipped=True 表示游客/无有效事实未写入
     """
+    return await asyncio.get_running_loop().run_in_executor(
+        None, _save_user_memory_sync, user, facts
+    )
+
+
+def _save_user_memory_sync(user: str, facts: List[MemoryEntry]) -> dict:
+    """save_user_memory 的同步实现（经 run_in_executor 在事件循环外执行）。"""
     if is_guest_user(user) or not facts:
         return {
             "written": 0,
@@ -181,7 +188,17 @@ async def save_user_memory(user: str, facts: List[MemoryEntry]) -> dict:
             "skipped": True,
         }
 
-    incoming = [f for f in facts if f.content]
+    # 批内去重：同规范化 content 只保留首条（与跨批覆盖语义一致，防重复膨胀）
+    incoming: List[MemoryEntry] = []
+    seen_keys = set()
+    for f in facts:
+        if not f.content:
+            continue
+        key = _normalize_content(f.content)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        incoming.append(f)
     if not incoming:
         return {
             "written": 0,
@@ -196,11 +213,10 @@ async def save_user_memory(user: str, facts: List[MemoryEntry]) -> dict:
     overwritten = 0
     with _vector_index_lock:
         # 覆盖：删除同 user 且规范化 content 与任一新事实相同的旧条目
-        incoming_keys = {_normalize_content(f.content) for f in incoming}
         overwritten = store.delete_documents(
             lambda doc: (
                 doc.metadata.get("user") == user
-                and _normalize_content(doc.page_content) in incoming_keys
+                and _normalize_content(doc.page_content) in seen_keys
             )
         )
 
@@ -292,6 +308,19 @@ async def search_user_memory(
     """
     if is_guest_user(user) or not query:
         return []
+    return await asyncio.get_running_loop().run_in_executor(
+        None, _search_user_memory_sync, user, query, top_k
+    )
+
+
+def _search_user_memory_sync(
+    user: str,
+    query: str,
+    top_k: int = 3,
+) -> List[MemoryEntry]:
+    """search_user_memory 的同步实现（经 run_in_executor 在事件循环外执行）。"""
+    if is_guest_user(user) or not query:
+        return []
     store = _memory_store()
     try:
         with _vector_index_lock:
@@ -317,6 +346,15 @@ async def search_user_memory(
 
 async def count_user_memory(user: str) -> int:
     """统计指定用户的记忆条数（测试/管理/可观测用）。"""
+    if is_guest_user(user):
+        return 0
+    return await asyncio.get_running_loop().run_in_executor(
+        None, _count_user_memory_sync, user
+    )
+
+
+def _count_user_memory_sync(user: str) -> int:
+    """count_user_memory 的同步实现（经 run_in_executor 在事件循环外执行）。"""
     if is_guest_user(user):
         return 0
     with _vector_index_lock:
