@@ -123,6 +123,7 @@ cp .env.example .env
 | `LLM_FALLBACK_API_KEY` / `LLM_FALLBACK_API_BASE` / `LLM_FALLBACK_MODEL` | 对话 LLM 备用端点（**船长决策 2026-08-06：备用同主端点 opencode-go**——opencode 服务本质转发 DeepSeek 官方 key，无需另配官方备用；主端点未配置 key 时自动切换） |
 | `LLM_TEMPERATURE` | 对话 LLM 默认采样温度（默认 `0.7`） |
 | `DIALOGUE_ENGINE` | 对话引擎开关（默认 `langchain`：LangChain agent 主链路，异常自动回落 Dify；`dify`：强制走 Dify Chat Agent），见 `app/services/chat_agent.py` |
+| `AGENT_DUAL_MODE` | 双模式对话开关（默认 `true`：简单问答走快速路径、复杂任务走 LangGraph 规划路径；`false` 全部走快速路径，回退到阶段2 行为），见「双模式对话」节 |
 | `EMBEDDING_API_KEY` | Minimax Embedding API Key（RAG 向量化，与 OPENAI_*/LLM_* 独立；不配置时自动降级本地 TF-IDF，详见 AGENTS.md「本地 RAG 知识库」） |
 | `EMBEDDING_API_BASE` | Minimax Embedding 端点（默认 `https://api.minimaxi.com/v1`，**原生 API 格式**：请求 `texts`+`type`（query/db）、响应 `vectors`，实测模型 `embo-01`，见 `doc/phase1-e2e-verification.md`） |
 | `EMBEDDING_MODEL` | Embedding 模型名（默认 `embo-01`） |
@@ -392,6 +393,27 @@ Dify 兜底链路同样流式（`response_mode=streaming`），`<think>...</thin
 
 `digitalHumanVue/src/composables/useDialogueStream.ts` 以 fetch + ReadableStream 逐帧解析 SSE（无额外依赖），`ChatView.vue` 右侧面板提供文本对话：步骤 chips 可视化思考过程、回答逐字渲染（含光标）、推荐问句一键发送、主链路回落提示。
 
+## 双模式对话（阶段3 T1：简单问答 / 复杂规划）
+
+船长决策 2026-08-06 方案B：对话入口先做**意图分类**（`app/services/intent_classifier.py`，轻量规则、零延迟），按任务复杂度分流：
+
+| 分类 | 判定 | 路径 | 特征 |
+|------|------|------|------|
+| 简单 | 单工具可答（开放时间 / 在哪 / 怎么去…） | 快速路径：现有 `create_agent` 流程 | 零延迟增加，行为与阶段2 一致 |
+| 复杂 | 明确多步规划意图（规划 / 安排 / 行程 / 一日游 / 路线推荐 / 预算…） | 规划路径：LangGraph 显式图（`app/services/planner_agent.py`） | 规划 → 多步执行 → 总结，SSE 步骤可视化思考过程 |
+
+**规划路径**（LangGraph 状态图，零新依赖）：
+
+- **规划**：LLM 按用户需求生成步骤序列（≤6 步，每步一个工具调用，JSON 输出经 `llm.astream` 累积后解析——图内模型调用被 langgraph 统一转为流式，`with_structured_output` 不兼容流式分块）；工具集复用快速路径的 6+1 工具（结构化直查 + 知识检索 + 规则推荐）
+- **执行**：逐步骤确定性调用工具（`BaseTool.ainvoke` 线程池执行，`recommend_routes` 内含 `asyncio.run` 安全）；单步失败记录错误继续，不中断
+- **总结**：LLM 聚合全部工具结果生成结构化最终回答（流式逐字输出，经 `stream_mode="messages"` 按 `langgraph_node=="summarize"` 区分）
+
+**SSE 事件序列（复用现有 step/token/done 契约，前端零改动）**：`step(正在为您规划行程…) → step(每个工具执行) → step(正在生成行程安排…) → token(总结增量) → done`。长期记忆注入（T3）在规划路径同样生效（记忆上下文随 messages 进入规划与总结阶段）。
+
+**安全降级（双轨回落不变）**：分类失败默认简单（快速路径）；规划路径任何异常（规划生成失败 / 步骤全非法 / 总结为空 / LLM 故障）静默降级快速路径，再由路由层兜底 Dify——对话永不中断。安全边界不变：工具集不含预订/账号/支付类操作，prompt 引导人工客服。分类词表经船长决策 2026-08-06 收窄（纯人群/导航单轮查询如「带老人去合适吗」「灵山怎么走」不判复杂，走快速路径避免延迟增量；组合规划类查询如「规划灵山一日游，带老人小孩，喜欢拍照」仍判复杂）。
+
+**回退开关**：`AGENT_DUAL_MODE=false`（`digitalHumanApi/.env`）全部走快速路径，行为与阶段2 完全一致。详见 [`doc/phase3-dual-mode.md`](doc/phase3-dual-mode.md)。
+
 ## 短期记忆持久化（阶段2 T1）
 
 多轮会话上下文已从**进程内 dict（重启即失）**升级为**SQLite 落盘 + 进程内 TTL 缓存**（登录用户与游客均享短期记忆，会话级、按 `conversation_id`）：
@@ -466,6 +488,7 @@ pytest -v
 | 阶段2 T2 长期记忆写入 | ✅ 实现完成（对话后后台 LLM 提取用户事实/偏好写入 user_memory 向量库，按 user 隔离、同事实覆盖、条数上限，游客不写，失败静默降级） |
 | 阶段2 T3 长期记忆检索注入 | ✅ 实现完成（对话首轮按 user 检索记忆注入 agent 上下文，仅首轮注入/游客跳过/时效过滤/异常静默降级，注入逻辑与端到端单测覆盖，全量 248 测试全绿） |
 | 阶段2 T4 登录生效联调（收官） | ✅ 通过（真实环境：登录用户注册/登录→多轮对话→长期记忆写入 user_memory（5 条）→新会话检索注入（回答引用用户画像）；游客无 token / guest token 降级正确（短期正常、无长期记忆、无注入）；同事实覆盖去重；无联调缺陷，详见 [`doc/phase2-memory-verification.md`](doc/phase2-memory-verification.md)） |
+| 阶段3 T1 双模式对话 | ✅ 实现完成（意图分类层分流：简单问答→快速路径零延迟、复杂任务→LangGraph 规划图（规划→多步执行→总结）SSE 步骤可视化；分类失败/规划异常静默降级快速路径→Dify；`AGENT_DUAL_MODE=false` 可整体回退；分类/规划/双模式集成单测 + 全量 314 测试全绿，真实环境冒烟验证见 [`doc/phase3-dual-mode.md`](doc/phase3-dual-mode.md)） |
 | Docker Compose | 已配置，未在本次验收中实际构建 |
 
 ## 常见问题
