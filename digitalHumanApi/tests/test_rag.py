@@ -125,3 +125,50 @@ def test_tfidf_embedding_dimension_and_zero_guard():
     # 零向量（无 token 命中）时相似度应为 0 而非 NaN
     vec = emb.embed_query("")
     assert math.isfinite(sum(vec))
+
+
+def test_delete_documents_and_filtered_search(tmp_path):
+    """delete_documents 按谓词删除（向量同步清除、持久化一致）；
+    similarity_search_with_score_filtered 仅在该谓词子集内检索。
+
+    支撑用户长期记忆的覆盖更新与按 user 隔离检索。
+    """
+    store = SimpleVectorStore(collection_name="mem", persist_dir=tmp_path)
+    store.add_documents(
+        [
+            Document(page_content="喜欢拍照", metadata={"user": "u1"}),
+            Document(page_content="带老人小孩", metadata={"user": "u1"}),
+            Document(page_content="偏好半日游", metadata={"user": "u2"}),
+        ]
+    )
+    assert store.count() == 3
+
+    # 过滤子集检索：u1 只能命中 u1 的记忆
+    hits = store.similarity_search_with_score_filtered(
+        "拍照", k=5, predicate=lambda d: d.metadata.get("user") == "u1"
+    )
+    assert all(d.metadata.get("user") == "u1" for d, _ in hits)
+    assert any("拍照" in d.page_content for d, _ in hits)
+    # 无谓词时等同全量检索（numpy 矩阵与逐向量实现存在浮点末位差异，按内容+取整分数比较）
+    filtered = store.similarity_search_with_score_filtered(
+        "拍照", k=5, predicate=None
+    )
+    full = store.similarity_search_with_score("拍照", k=5)
+    assert [d.page_content for d, _ in filtered] == [d.page_content for d, _ in full]
+    assert [round(s, 4) for _, s in filtered] == [round(s, 4) for _, s in full]
+
+    # 删除 u1 的「喜欢拍照」（谓词按 user + 内容匹配）
+    removed = store.delete_documents(
+        lambda d: d.metadata.get("user") == "u1" and "拍照" in d.page_content
+    )
+    assert removed == 1
+    assert store.count() == 2
+
+    # 无匹配谓词：返回 0 且不改变存储
+    assert store.delete_documents(lambda d: False) == 0
+    assert store.count() == 2
+
+    # 持久化重载后删除结果保持一致
+    store2 = SimpleVectorStore(collection_name="mem", persist_dir=tmp_path)
+    assert store2.count() == 2
+    assert all("拍照" not in d.page_content for d in store2._documents)

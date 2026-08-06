@@ -13,8 +13,10 @@
 - **推荐能力**：`recommend_routes` 包装 recommend_agent.recommend（规则引擎
   评分 + 结构化直查），供 agent 在识别到游览偏好时调用
 - **多轮上下文**：进程内会话（conversation_id → 消息历史 dict，线程锁保护；
-  阶段2 T1 起短期记忆持久化：SQLite 落盘 + 进程内 TTL 缓存，重启可恢复，
-  详见下方「进程内会话存储」节；长期记忆为后续阶段）
+  阶段2 T1 短期记忆已持久化：SQLite 落盘 + 进程内 TTL 缓存，重启可恢复，
+  详见下方「进程内会话存储」节；阶段2 T2 长期记忆已接入：对话完成后台
+  提取用户事实/偏好写入 user_memory 向量库（按 user 隔离，游客不写），
+  见 app/services/memory_service.py）
 - **安全边界**：预订/账号/支付等操作类需求不提供工具、永不自动办理，
   system prompt 要求 agent 引导游客联系人工客服
 
@@ -39,7 +41,7 @@ from langchain_core.tools import tool
 from app.core import memory_store
 from app.core.config import settings
 from app.core.llm import get_chat_llm
-from app.services import recommend_agent
+from app.services import memory_service, recommend_agent
 from app.services.rag_service import build_rag_context
 
 logger = logging.getLogger(__name__)
@@ -70,6 +72,47 @@ _MAX_CONVERSATIONS = 1000
 _MAX_AGENT_STEPS = 25
 # 知识检索工具的调用名（用于从 agent 返回中提取 RAG 来源）
 _KNOWLEDGE_TOOL_NAME = "search_knowledge"
+
+# 长期记忆提取钩子（阶段2 T2）：对话完成后后台异步提取用户事实/偏好，写入
+# user_memory 向量库（按 user 隔离；游客不写；任何失败静默降级不阻塞响应）。
+# 测试可 monkeypatch 替换为 no-op 以保持既有用例对外无网络依赖。
+_memory_extract_hook = memory_service.extract_and_store
+# 后台任务句柄集合（防 GC；done 回调消费异常，避免 asyncio 未检索异常告警）
+_memory_tasks: "set[asyncio.Task]" = set()
+
+
+def _on_memory_task_done(task: asyncio.Task) -> None:
+    """回收后台任务引用并消费异常（防 asyncio 未检索异常告警）。"""
+    _memory_tasks.discard(task)
+    if task.cancelled():
+        return
+    try:
+        exc = task.exception()
+    except asyncio.CancelledError:
+        return
+    if exc is not None:
+        logger.warning("长期记忆提取后台任务失败（静默降级）: %s", exc)
+
+
+def _schedule_memory_extraction(
+    user: str, conversation_id: str, query: str, answer: str
+) -> None:
+    """对话完成后调度长期记忆提取（尽力而为：不 await、不阻塞、不抛错）。
+
+    游客（visitor / guest-*）不产生长期记忆，直接跳过；登录用户提取失败
+    由 extract_and_store 内部静默降级，不影响对话响应。
+    """
+    if memory_service.is_guest_user(user):
+        return
+    try:
+        task = asyncio.create_task(
+            _memory_extract_hook(user, conversation_id, query, answer)
+        )
+        _memory_tasks.add(task)
+        task.add_done_callback(_on_memory_task_done)
+    except Exception as e:
+        # 事件循环不可用等极端情况：静默忽略（绝不阻断对话）
+        logger.warning("长期记忆提取调度失败（忽略）: %s", e)
 
 # 工具名 → 步骤展示文案（SSE step 事件透出到前端，思考过程可视化）
 _STEP_LABELS: Dict[str, str] = {
@@ -509,6 +552,10 @@ async def chat(
     # 5. 追加历史（进程内 + SQLite 双写，短期记忆持久化）
     _append_history(conversation_id, query, answer, user)
 
+    # 6. 长期记忆钩子（阶段2 T2）：对话完成后后台异步提取用户事实/偏好，
+    #    写入 user_memory 向量库（按 user 隔离；游客不写；失败静默降级）
+    _schedule_memory_extraction(user, conversation_id, query, answer)
+
     logger.info(
         "对话完成: engine=langchain user=%s conversation=%s tools=%d answer_len=%d",
         user,
@@ -616,3 +663,7 @@ async def chat_stream(
         "rag_context": rag_context,
         "rag_sources": rag_sources,
     }
+
+    # 长期记忆钩子（阶段2 T2）：done 事件后后台异步提取（尽力而为，
+    # 客户端中断流式也不会阻塞响应；失败由 extract_and_store 静默降级）
+    _schedule_memory_extraction(user, conversation_id, query, answer)

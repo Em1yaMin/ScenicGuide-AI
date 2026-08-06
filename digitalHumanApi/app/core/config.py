@@ -100,6 +100,13 @@ class Settings(BaseModel):
         os.environ.get("MEMORY_CLEANUP_INTERVAL_SECONDS", "3600")
     )
 
+    # 长期记忆（阶段2 T2：对话完成后提取用户事实/偏好，写入 user_memory 向量库，
+    # 见 app/services/memory_service.py 与 doc/long-term-memory.md）
+    # MEMORY_ENABLED: 记忆提取总开关（默认开启；生产可按 LLM 成本关闭）
+    MEMORY_ENABLED: bool = os.environ.get("MEMORY_ENABLED", "true").lower() == "true"
+    # 每用户记忆条数上限（超限淘汰 timestamp 最旧条目，防记忆无限膨胀）
+    MEMORY_MAX_PER_USER: int = int(os.environ.get("MEMORY_MAX_PER_USER", "200"))
+
     @model_validator(mode="after")
     def _validate_dify_config(self) -> "Settings":
         """Validate that Dify API config values are non-empty at startup."""
