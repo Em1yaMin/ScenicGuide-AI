@@ -16,9 +16,9 @@ jobs:
       # app/core/config.py 的 Settings 在导入时校验 Dify 配置非空（无 .env 会抛错）。
       # 测试本身不调用真实 Dify/OpenAI API（纯函数 + 内存 SQLite + 内联 stub），
       # 因此 CI 只注入占位值，不依赖任何密钥。
-      # 阶段4：Dify Workflow 量化评估已本地化，DIFY_WORKFLOW_API_KEY 不再需要。
       DIFY_API_URL: https://dify.dummy.invalid/v1
       DIFY_API_KEY: ci-dummy-key
+      DIFY_WORKFLOW_API_KEY: ci-dummy-key
     steps:
       - name: Checkout
         uses: actions/checkout@v4
