@@ -1,7 +1,7 @@
 """Embedding 升级（Minimax）与命名空间隔离测试。
 
 覆盖：
-1. MinimaxEmbeddings 客户端：OpenAI 兼容请求格式（httpx.MockTransport）、
+1. MinimaxEmbeddings 客户端：Minimax 原生请求格式 texts+type（httpx.MockTransport）、
    批量分批、未配置 key 时报错。
 2. get_embedding_model 工厂：配置 key → Minimax；未配置 → TF-IDF 降级。
 3. 自定义 embedding（确定性向量）接入 SimpleVectorStore：向量化、检索、持久化重载。
@@ -99,7 +99,7 @@ class FailingEmbeddings(Embeddings):
 # ---------------------------------------------------------------------------
 
 def _mock_minimax_transport(captured: dict, fail: bool = False):
-    """构造返回固定向量的 MockTransport，并捕获请求细节。"""
+    """构造返回固定向量的 MockTransport，并捕获请求细节（原生格式）。"""
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["url"] = str(request.url)
@@ -108,10 +108,10 @@ def _mock_minimax_transport(captured: dict, fail: bool = False):
         captured["body"] = json.loads(request.content)
         if fail:
             return httpx.Response(401, json={"error": "unauthorized"})
-        texts = captured["body"]["input"]
+        texts = captured["body"]["texts"]
         return httpx.Response(200, json={
-            "data": [
-                {"embedding": [float(i + 1) / 10, 0.2, 0.3], "index": i}
+            "vectors": [
+                [float(i + 1) / 10, 0.2, 0.3]
                 for i in range(len(texts))
             ],
             "model": captured["body"]["model"],
@@ -120,13 +120,13 @@ def _mock_minimax_transport(captured: dict, fail: bool = False):
     return httpx.MockTransport(handler)
 
 
-def test_minimax_embeddings_openai_compatible_request():
-    """请求格式符合 OpenAI 兼容 /embeddings 端点约定。"""
+def test_minimax_embeddings_native_request():
+    """请求格式符合 Minimax 原生 /embeddings 端点约定（texts+type，实测 embo-01）。"""
     captured = {}
     emb = MinimaxEmbeddings(
         api_key="test-key",
         api_base="https://api.minimaxi.com/v1",
-        model="embedding-1",
+        model="embo-01",
         _transport=_mock_minimax_transport(captured),
     )
     vecs = emb.embed_documents(["你好", "世界"])
@@ -134,11 +134,40 @@ def test_minimax_embeddings_openai_compatible_request():
     assert captured["url"] == "https://api.minimaxi.com/v1/embeddings"
     assert captured["method"] == "POST"
     assert captured["authorization"] == "Bearer test-key"
-    assert captured["body"] == {"model": "embedding-1", "input": ["你好", "世界"]}
+    assert captured["body"] == {
+        "model": "embo-01", "texts": ["你好", "世界"], "type": "db"
+    }
 
-    # embed_query 走同一端点
+    # embed_query 走同一端点，type=query（检索查询向量）
     q_vec = emb.embed_query("查询")
     assert q_vec == [0.1, 0.2, 0.3]
+    assert captured["body"]["type"] == "query"
+
+
+def test_minimax_embeddings_parses_openai_compat_response():
+    """兼容解析 OpenAI 兼容响应格式（data 数组 + index 排序）。"""
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        texts = captured["body"]["texts"]
+        return httpx.Response(200, json={
+            "data": [
+                {"embedding": [float(i + 1) / 10, 0.2, 0.3], "index": i}
+                for i in range(len(texts))
+            ],
+            "model": captured["body"]["model"],
+        })
+
+    emb = MinimaxEmbeddings(
+        api_key="k",
+        api_base="https://api.minimaxi.com/v1",
+        model="embo-01",
+        _transport=httpx.MockTransport(handler),
+    )
+    vecs = emb.embed_documents(["a", "b"])
+    assert vecs == [[0.1, 0.2, 0.3], [0.2, 0.2, 0.3]]
+    assert captured["body"]["type"] == "db"
 
 
 def test_minimax_embeddings_batches_large_inputs():
@@ -148,10 +177,10 @@ def test_minimax_embeddings_batches_large_inputs():
     def handler(request: httpx.Request) -> httpx.Response:
         captured["count"] += 1
         body = json.loads(request.content)
-        texts = body["input"]
+        texts = body["texts"]
         return httpx.Response(200, json={
-            "data": [
-                {"embedding": [float(i), 0.0, 0.0], "index": i}
+            "vectors": [
+                [float(i), 0.0, 0.0]
                 for i in range(len(texts))
             ],
             "model": body["model"],
