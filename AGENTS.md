@@ -4,7 +4,7 @@
 
 # Project Overview
 
-景区导览 AI 数字人系统 — Python FastAPI 后端 + Vue 3 前端单体应用，通过 Docker Compose 部署。后端集成 Dify AI 平台提供对话抓取与情感分析，另含纯本地推荐引擎、本地 RAG 知识库和 AI 运营分析。前端提供访客端（数字人对话）和管理后台（数据大屏 + 报告 + 知识库管理）。
+景区导览 AI 数字人系统 — Python FastAPI 后端 + Vue 3 前端单体应用，通过 Docker Compose 部署。后端集成 Dify AI 平台仅提供对话双轨回落与历史数据抓取（阶段4 起量化评估等分析链路已本地 LLM 化，见「Dify 依赖面」专节），另含纯本地推荐引擎、本地 RAG 知识库和 AI 运营分析。前端提供访客端（数字人对话）和管理后台（数据大屏 + 报告 + 知识库管理）。
 
 # Architecture
 
@@ -31,7 +31,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 ```
 
 请求流: Vue → fetch(/api/*) → Vite proxy → FastAPI → SQLite
-数据流: Dify API ← polling task → SQLite → analysis task → Dify Workflow → SQLite
+数据流: Dify API ← polling task → SQLite → analysis task → 本地 LLM 量化评估 → SQLite（Evaluation 表，阶段4 起不再经 Dify Workflow）
 
 ## 个性化推荐（纯本地，无外部 API）
 
@@ -96,7 +96,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 ## Dify 依赖面（阶段4 收官：退场依据见 doc/dify-dependency-audit.md）
 
-船长决策 2026-08-06 方案B：阶段4 Dify 退场工作并入阶段3 顺手推进——盘点并清理 Dify 依赖面，**除对话双轨回落保留外其余尽量清理**。阶段4 首项（2026-08-07 方案A）已落地：**量化评估已本地化**。当前 Dify 依赖仅剩两类（推荐问句、分析接口、量化评估均已脱离 Dify）：
+船长决策 2026-08-06 方案B：阶段4 Dify 退场工作并入阶段3 顺手推进——盘点并清理 Dify 依赖面，**除对话双轨回落保留外其余尽量清理**。阶段4 首项（2026-08-07 方案A）已落地：**量化评估已本地化**。阶段4 收官（2026-08-07）：**模拟 Dify 不可达全链路自检通过**（对话双模式/流式/记忆、推荐问句、分析、量化评估→Evaluation→管理后台报告全部正常；仅保留项明确降级不崩溃，自检无代码缺陷），详见 `doc/phase4-e2e-verification.md`。**Dify 依赖面定稿**——当前 Dify 依赖仅剩两类（推荐问句、分析接口、量化评估均已脱离 Dify）：
 
 1. **对话双轨回落（保留，演示兜底）**：`dialogue.py` 的 `_call_dify_chat`/`_call_dify_chat_stream` + `app/services/dify_stream.py`（SSE 消费 + ThinkFilter）；`DIFY_API_URL`/`DIFY_API_KEY`
 2. **历史数据接口（保留）**：`tasks/polling.py`（30s 轮询拉对话入库）、`tasks/backfill.py`（一次性补拉 CLI）、`services/dify_client.py` 的 `get_conversations`/`get_conversation_messages`；`DIFY_LIGHT4AI_USER`（空则轮询空转）

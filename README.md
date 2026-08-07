@@ -1,6 +1,6 @@
 # 景区导览 AI 数字人系统
 
-景区导览 AI 数字人系统 — Python FastAPI 后端 + Vue 3 前端单体应用，通过 Docker Compose 部署。后端集成 Dify AI 平台提供对话双轨回落与对话/评估数据抓取（**阶段4 收官后 Dify 依赖面已收敛**：推荐问句、分析链路与量化评估均已本地化，仅对话回落与历史数据接口保留，见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md)），前端提供访客端（数字人对话）和管理后台（数据大屏 + 报告）。
+景区导览 AI 数字人系统 — Python FastAPI 后端 + Vue 3 前端单体应用，通过 Docker Compose 部署。后端集成 Dify AI 平台提供对话双轨回落与对话/评估数据抓取（**阶段4 收官后 Dify 依赖面已收敛**：推荐问句、分析链路与量化评估均已本地化，仅对话回落与历史数据接口保留，见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md)；**模拟 Dify 不可达的全链路自检通过**，见 [`doc/phase4-e2e-verification.md`](doc/phase4-e2e-verification.md)），前端提供访客端（数字人对话）和管理后台（数据大屏 + 报告）。
 
 ## 技术栈
 
@@ -261,7 +261,7 @@ pnpm run dev    # 或 node node_modules\next\dist\bin\next dev -p 3000
 |------|------|
 | `NEXT_PUBLIC_ADH_SERVER_PORT` | **必须配置为 `8001`**。不配置则前端请求打到 8000 主后端，报 CORS/400，数字人显示 "Soul is death!" |
 
-**主后端** — `digitalHumanApi/.env`：按上方「1. 配置环境变量」填写 `DIFY_API_URL`、`DIFY_API_KEY`、`LLM_API_KEY` 等（`DIFY_*` 启动时校验非空，缺失会启动失败；阶段4 起量化评估已本地化，不再需要 `DIFY_WORKFLOW_API_KEY`，见 `doc/dify-dependency-audit.md`）。
+**主后端** — `digitalHumanApi/.env`：按上方「1. 配置环境变量」填写 `DIFY_API_URL`、`DIFY_API_KEY`、`LLM_API_KEY` 等（`DIFY_*` 启动时校验非空，缺失会启动失败；阶段4 起量化评估已本地化，不再需要 `DIFY_WORKFLOW_API_KEY`，见 `doc/dify-dependency-audit.md`。**Dify 不可达（地址失效/服务下线）不影响核心链路**——对话（LangChain 本地链路）、推荐问句、分析、量化评估、记忆系统均正常，仅对话回落与历史数据接口降级（礼貌报错/重试后跳过，不崩溃），见 `doc/phase4-e2e-verification.md`）。
 
 ### 3. 启动步骤（开发模式）
 
@@ -477,7 +477,7 @@ pytest -v
 | 后端启动 | ✅ 正常（健康检查 200，后台轮询已连接 Dify 并拉取到对话） |
 | 前端启动 | ✅ 正常（Vite 8 ready，页面 HTTP 200） |
 | Dify 对话抓取 | ✅ 正常（`/messages` 拉取返回 200） |
-| Dify Workflow 量化分析 | ✅ 正常（16 条对话全部评估完成，大屏/报告有真实数据） |
+| Dify Workflow 量化分析（早期验收记录；阶段4 起已本地 LLM 化，见下方「阶段4 量化评估本地化」行） | ✅ 正常（16 条对话全部评估完成，大屏/报告有真实数据） |
 | 数据大屏 | ✅ 正常（sentiment_trend 全量连续查询，从最早对话日到今天、缺失日零值回填 / satisfaction / hot_issues 均有数据） |
 | 手动触发端点 | ✅ 正常（`POST /sync-now` + `/run-now` 手动触发后台逻辑） |
 | 本地数字人部署 | ✅ 已部署（TencentAPI ASR + LangChainAgent + MiniMax TTS） |
@@ -490,6 +490,7 @@ pytest -v
 | 阶段3 收官全链路联调 | ✅ 通过（真实环境：简单问答快速路径 / 复杂任务规划路径（SSE 步骤可视化）/ 推荐问句本地生成（脱离 Dify）/ 分析链路 LLM + DB 兜底降级标记 / 记忆系统（长期写入+注入+游客隔离）/ 双轨回落；联调发现并修复规划路径偶发空响应（opencode-go 长 prompt 思考耗尽）→ 增加重试；全量 320 测试全绿，详见 [`doc/phase3-e2e-verification.md`](doc/phase3-e2e-verification.md)） |
 | 阶段3 Dify 依赖盘点 | ✅ 完成（推荐/分析已脱离 Dify；剩余为对话双轨回落 + 历史数据接口 + Workflow 量化评估，清理建议见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md)） |
 | 阶段4 量化评估本地化 | ✅ 完成（真实调用：本地 LLM 评估产出情感/满意度/关注点/景点/改进建议，Evaluation 表与管理后台消费不变；`trigger_workflow`/`dify_helpers`/`DIFY_WORKFLOW_API_KEY` 已移除；全量测试全绿，详见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md) §2） |
+| 阶段4 收官：脱离 Dify 全链路自检 | ✅ 通过（真实环境模拟 **Dify 不可达**：对话快速/规划/流式/多轮记忆、推荐问句本地生成、分析链路（LLM+DB 兜底）、量化评估 → Evaluation 表 → 管理后台报告（含 suggestions）、记忆系统（长期/短期/游客隔离）全部正常；仅保留项明确降级——历史数据接口重试后 `synced=0` 不崩溃、对话回落礼貌报错不崩溃；自检未发现代码缺陷，详见 [`doc/phase4-e2e-verification.md`](doc/phase4-e2e-verification.md)） |
 | Docker Compose | 已配置，未在本次验收中实际构建 |
 
 ## 常见问题
