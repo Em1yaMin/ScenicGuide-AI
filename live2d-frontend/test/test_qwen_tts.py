@@ -44,8 +44,9 @@ def _make_cfg(**overrides):
 def _fake_synthesizer_factory(monkeypatch, captured: dict, result: bytes = MINI_MP3, error: Exception = None):
     """构造 FakeSpeechSynthesizer 并注入 qwenTTS 的懒导入位置。
 
-    通过 monkeypatch 把 dashscope.audio.tts_v2 的 SpeechSynthesizer/AudioFormat
-    替换为本地桩（不依赖真实 SDK 安装）。
+    通过 monkeypatch 把 dashscope 包（父模块 + audio.tts_v2 子模块）替换为本地桩
+    （不依赖真实 SDK 安装）：引擎内先 `import dashscope` 设置 api_key，再
+    from-import 子模块，两者都需短路到假模块。
     """
     class FakeAudioFormat:
         MP3_24000HZ_MONO_256KBPS = "mp3-24000-mono-256kbps"
@@ -62,12 +63,16 @@ def _fake_synthesizer_factory(monkeypatch, captured: dict, result: bytes = MINI_
             return result
 
     import types
+    import sys
+
+    fake_parent = types.ModuleType("dashscope")
+    fake_parent.api_key = None
     fake_module = types.ModuleType("dashscope.audio.tts_v2")
     fake_module.SpeechSynthesizer = FakeSpeechSynthesizer
     fake_module.AudioFormat = FakeAudioFormat
 
-    import sys
-    sys.modules["dashscope.audio.tts_v2"] = fake_module
+    monkeypatch.setitem(sys.modules, "dashscope", fake_parent)
+    monkeypatch.setitem(sys.modules, "dashscope.audio.tts_v2", fake_module)
     # 引擎内 `from dashscope.audio.tts_v2 import ...` 走已注入的模块
     return fake_module
 
