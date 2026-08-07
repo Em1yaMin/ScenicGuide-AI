@@ -93,6 +93,8 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
     const [micRecording, setMicRecording] = useState(false);
     const [micRecordAlert, setmicRecordAlert] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
+    // Agent 工具调用步骤（LangChainAgent 步骤帧，如"正在检索知识库…"）
+    const [agentSteps, setAgentSteps] = useState<{ tool: string; label: string }[]>([]);
     const inputRef = useRef<HTMLInputElement>(null);
     const chatbotRef = useRef<HTMLDivElement>(null);
     
@@ -113,6 +115,8 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
 
     const chatWithAI = (message: string) => {
         console.log("chatWithAI: ", message);
+        // 新一轮对话：清空上一轮步骤提示
+        setAgentSteps([]);
         addChatRecord({ role: ChatRole.HUMAN, content: message });
         // 请求AI
         let responseText = "";
@@ -189,6 +193,17 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
                 )
             }
             setIsProcessing(false);
+        }, (step: { tool: string; label: string }) => {
+            // 工具调用步骤：追加到步骤提示列表（连续重复步骤去重，避免同一
+            // 工具多次调用时刷屏），按序显示直到下一轮对话
+            console.log("agent step: ", step);
+            setAgentSteps((prev) => {
+                const last = prev[prev.length - 1];
+                if (last && last.tool === step.tool && last.label === step.label) {
+                    return prev;
+                }
+                return [...prev, step];
+            });
         });
     }
 
@@ -386,6 +401,27 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
                                 </div>
                             </div>
                         ))
+                        :
+                        <></>
+                }
+                {
+                    // 工具调用步骤提示：随回答进度按序追加显示（下一轮对话时清空）
+                    agentSteps.length > 0 ?
+                        <div className="chat-message">
+                            <div className="flex items-end">
+                                <div className="flex flex-col space-y-1 text-xs max-w-xs mx-2 order-2 items-start">
+                                    {agentSteps.map((step, i) => (
+                                        <div key={`${step.tool}-${i}`} className="px-3 py-1.5 rounded-lg rounded-bl-none bg-gray-200/80 text-gray-500">
+                                            <span className="inline-flex items-center gap-1.5">
+                                                <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                                                <span>🔍 {step.label || step.tool}</span>
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
+                                <img src="/icons/ai_icon.svg" className="w-6 h-6 rounded-full order-1 self-start" />
+                            </div>
+                        </div>
                         :
                         <></>
                 }

@@ -31,9 +31,9 @@ PC端页面预览：
 * 数字人模式：专注于数字人交互  
 * 沉浸模式（预留给语音唤醒的模式，暂未支持）：专注与数字人之间的直接交互  
 > **Agent模式**
-* ReapterAgent（测试使用）：重复用户输入的语句  
-* LangChainAgent：接入本后端 LangChain 对话链路（`POST /api/v1/dialogue/chat`，流式 SSE；后端侧异常自动回落 Dify）  
-* DifyAgent：接入Dify的服务  
+* ReapterAgent（测试使用）：重复用户输入的语句
+* LangChainAgent：接入本后端 LangChain 对话链路（`POST /api/v1/dialogue/chat`，流式 SSE；后端侧异常自动回落 Dify）；**工具调用步骤可视化**（后端 step 事件 → 步骤帧 → 前端消息区渲染「🔍 正在检索知识库…」等步骤气泡，文本流/TTS 不受影响）
+* DifyAgent：接入Dify的服务
 * FastgptAgent：接入fastgpt的服务  
 * OpenaiAgent：接入适配openai接口的服务  
 

@@ -12,7 +12,7 @@ import json
 from typing import Union
 from digitalHuman.utils import httpxAsyncClient
 from digitalHuman.utils import logger
-from digitalHuman.utils import AudioMessage, TextMessage
+from digitalHuman.utils import AudioMessage, TextMessage, StepMessage
 
 __all__ = ["LangChainAgent"]
 
@@ -28,7 +28,7 @@ DATA_PATTERN = re.compile(r'data:\s*({.*})')
 #   {"type": "error", "message", "fallback"}  链路错误（fallback=true 已切换 Dify）
 # 兼容旧契约（Dify 风格）：{"event": "message", "answer": ...}
 EVENT_TOKEN = "token"         # 回答增量（text 字段）
-EVENT_STEP = "step"           # agent 步骤事件（忽略）
+EVENT_STEP = "step"           # agent 步骤事件（透出为 StepMessage）
 EVENT_DONE = "done"           # 流式完成（携带 conversation_id）
 EVENT_ERROR = "error"         # 携带 message 的错误事件
 DONE_MARK = "[DONE]"          # 流结束标记（兼容）
@@ -46,6 +46,10 @@ class LangChainAgent(BaseAgent):
         data: {"type": "token", "text": "回答增量"}          # 逐字回答
         data: {"type": "done", "conversation_id": "xxx", ...}  # 流式完成（会话 ID）
         data: {"type": "error", "message": "...", "fallback": true}  # 错误（已回落 Dify）
+    - 步骤可视化（阶段3，2026-08-07）：step 事件不再忽略，透出为
+      StepMessage（tool/label）混入 run() 产出流，由 agentApi 编码为步骤帧
+      供前端渲染；回答文本仍按原始字符串产出（ThinkFilter 过滤后），
+      TTS/逐字渲染行为不变
     - 兼容旧形态 {"event": "message", "answer": "..."}（Dify 风格）
     - 非流式响应为标准 ChatResponse JSON（answer/conversation_id）
     """
@@ -118,7 +122,11 @@ class LangChainAgent(BaseAgent):
                             # 流式完成：会话 ID 随 done 事件透出，供多轮对话续接
                             break
                         if event_type == EVENT_STEP:
-                            logger.debug(f"[AGENT] Engine step: {event.get('tool', '')}")
+                            # 工具调用步骤：透出 StepMessage 给调用方
+                            # （agentApi 编码为步骤帧 → 前端渲染；回答
+                            # 文本流不受影响，TTS 输入依赖不变）。
+                            tool = event.get("tool", event.get("name", ""))
+                            yield StepMessage(tool=tool, label=event.get("label", "") or tool)
                             continue
                         # 新契约 token/text 或旧契约 message/answer 均可
                         answer = event.get("text", event.get("answer", ""))
