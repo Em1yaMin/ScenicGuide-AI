@@ -8,7 +8,7 @@
 | View | Route | Pattern | Data Source |
 |------|-------|---------|-------------|
 | `HomeView.vue` | `/visitor` | 静态内容壳 | 无 |
-| `ChatView.vue` | `/visitor/chat` | iframe 嵌入+容错 + SSE 聊天面板（useDialogueStream：步骤可视化 + 逐字回答） | import.meta.env + Pinia store |
+| `ChatView.vue` | `/visitor/chat` | iframe 嵌入+容错（数字人占满整页）+ 推荐问句底部浮层（postMessage SET_INPUT 注入数字人输入框，不自动发送） | import.meta.env + Pinia store |
 | `DashboardView.vue` | `/admin` | API 数据+ECharts | fetch(API_ADMIN_DASHBOARD) |
 | `ReportView.vue` | `/admin/report` | API 数据+ECharts | fetch(API_ADMIN_REPORT) |
 | `admin/KnowledgeView.vue` | `/admin/knowledge` | API 数据+CRUD 弹窗 | fetch(API_ADMIN_KNOWLEDGE) |

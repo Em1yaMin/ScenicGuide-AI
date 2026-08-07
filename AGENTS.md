@@ -63,6 +63,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - 前端：`digitalHumanVue/src/stores/auth.ts`（Pinia）+ `src/api/auth.ts` + `src/views/LoginView.vue` / `RegisterView.vue`（顶层路由 `/login` `/register`，访客端与管理后台布局均可直达）
 - token 持久化：`localStorage` 的 `auth_token`（用户/游客 JWT）+ `auth_user`（用户信息 JSON）；键名沿用 snake_case 风格（`visitor_id`、`admin_api_token`）
 - 游客兜底：未登录可用全部公开能力；对话页（ChatView）自动签发短期游客 token 并随 iframe `auth_token` 参数透传给 ADH（ADH 侧消费待后续任务）
+- 对话页布局（2026-08-07 改造）：数字人 iframe 占满整页，无独立聊天面板；推荐问句为底部浮层（半透明毛玻璃、可折叠），点击经 postMessage `SET_INPUT` 注入 ADH 输入框（不自动发送，注入后自动收起）；对话/SSE 逻辑已随 `useDialogueStream.ts` 删除（ADH 内置完整对话功能）
 - 刷新恢复：`App.vue` 启动时调 `restoreSession()` 用 `/auth/me` 校验 localStorage token，401 则清除登录态；网络失败保留本地缓存
 - 错误提示：`fetchWithCodeEnvelope` 解析 FastAPI `detail`（401 "用户名或密码错误"、409 "用户名已存在"、422 校验字段）
 - 无需新增前端环境变量（后端 JWT 配置见 `digitalHumanApi/.env.example`）
