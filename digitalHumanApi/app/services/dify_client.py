@@ -60,20 +60,16 @@ async def _retry_silent(
 class DifyClient:
     """Dify API client.
 
-    Uses two API keys:
+    阶段4（2026-08-06 船长决策方案A）：Dify Workflow 量化评估已本地化
+    （app/services/evaluation_service.py），trigger_workflow 与
+    DIFY_WORKFLOW_API_KEY 已移除。本客户端仅保留历史数据接口：
       - DIFY_API_KEY (Chat Agent): for /conversations and /messages
-      - DIFY_WORKFLOW_API_KEY (Workflow app): for /workflows/run
-    Both share the same base_url but are separate Dify applications.
     """
 
     def __init__(self) -> None:
         self.base_url: str = settings.DIFY_API_URL.rstrip("/")
         self.headers: Dict[str, str] = {
             "Authorization": f"Bearer {settings.DIFY_API_KEY}",
-            "Content-Type": "application/json",
-        }
-        self.workflow_headers: Dict[str, str] = {
-            "Authorization": f"Bearer {settings.DIFY_WORKFLOW_API_KEY}",
             "Content-Type": "application/json",
         }
 
@@ -132,44 +128,6 @@ class DifyClient:
         return await _retry_silent(
             f"Dify get_messages for conv={conversation_id}", _fetch, []
         )
-
-    async def trigger_workflow(
-        self, inputs: Dict[str, Any], user: str = "system"
-    ) -> Optional[Dict[str, Any]]:
-        """Trigger a Dify Workflow application.
-
-        Uses DIFY_WORKFLOW_API_KEY (separate from Chat Agent key).
-        Dify API: POST /workflows/run
-        Returns None on failure.
-        """
-        if not settings.DIFY_WORKFLOW_API_KEY:
-            logger.warning(
-                "DIFY_WORKFLOW_API_KEY not configured, skipping workflow trigger"
-            )
-            return None
-
-        try:
-            async with httpx.AsyncClient(
-                base_url=self.base_url,
-                headers=self.workflow_headers,
-                timeout=httpx.Timeout(60.0),
-            ) as client:
-                response = await client.post(
-                    "/workflows/run",
-                    json={"inputs": inputs, "response_mode": "blocking", "user": user},
-                )
-                response.raise_for_status()
-                return response.json()
-        except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.ConnectError) as e:
-            logger.warning("Dify trigger_workflow failed: %s", e)
-            return None
-        except Exception as e:
-            logger.warning("Dify trigger_workflow unexpected error: %s", e)
-            return None
-    # NOTE: No method-level retry — the analysis_loop interval provides
-    # natural retry cadence. If call-site requirements change (e.g. on-demand
-    # sync without a background loop), add _retry_silent similar to
-    # DifyClient._retry_silent pattern.
 
 
 dify_client = DifyClient()

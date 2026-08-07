@@ -1,8 +1,10 @@
 import asyncio
+import contextlib
 import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy import select
 
 import app.tasks.analysis as analysis_mod
 from app.core.config import settings
@@ -10,7 +12,7 @@ from app.models.dialogue import Dialogue, DialogueRole
 from app.models.evaluation import Evaluation
 from app.models.visitor import Visitor
 from app.services import analytics_service
-from app.tasks.analysis import _normalize_string_list, analysis_loop
+from app.tasks.analysis import _normalize_string_list, analysis_loop, batch_evaluate
 
 
 def test_normalize_string_list_strips_and_dedupes():
@@ -322,7 +324,7 @@ async def test_analysis_loop_survives_batch_failure(monkeypatch):
     async def flaky_batch() -> int:
         calls["n"] += 1
         if calls["n"] == 1:
-            raise RuntimeError("simulated Dify workflow outage")
+            raise RuntimeError("simulated local LLM evaluation outage")
         return 0
 
     original_sleep = asyncio.sleep
@@ -343,3 +345,129 @@ async def test_analysis_loop_survives_batch_failure(monkeypatch):
 
     # 第一轮失败后循环仍继续执行了后续轮次
     assert calls["n"] >= 2
+
+
+# ── 本地 LLM 量化评估（阶段4：Dify Workflow 评估本地化） ──
+
+
+def _make_session_factory(db_session):
+    """构造 yield 指定 db_session 的零参 asynccontextmanager 工厂（供 monkeypatch）。"""
+
+    @contextlib.asynccontextmanager
+    async def _factory():
+        yield db_session
+
+    return _factory
+
+
+async def _add_dialogue(db_session, visitor_id, content, timestamp):
+    from app.models.dialogue import Dialogue, DialogueRole
+
+    d = Dialogue(
+        visitor_id=visitor_id,
+        content=content,
+        role=DialogueRole.user,
+        timestamp=timestamp,
+    )
+    db_session.add(d)
+    await db_session.flush()
+    return d
+
+
+@pytest.mark.anyio
+async def test_batch_evaluate_local_llm_writes_evaluations(
+    db_session, monkeypatch
+):
+    """批量评估：本地 LLM 评估结果写入 Evaluation 表（管理后台消费不变）。"""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    visitor_id = "v-eval-local"
+    db_session.add(Visitor(id=visitor_id))
+    await db_session.flush()
+    d1 = await _add_dialogue(db_session, visitor_id, "怎么去日光岩", now - timedelta(hours=2))
+    d2 = await _add_dialogue(db_session, visitor_id, "门票多少钱？", now - timedelta(hours=1))
+    await db_session.flush()
+
+    parsed = {
+        "sentiment_label": "neutral",
+        "satisfaction_score": 4,
+        "concern_tags": ["路线规划"],
+        "mentioned_spots": ["日光岩"],
+    }
+
+    async def _fake_evaluate(content, llm=None):
+        return dict(parsed)
+
+    monkeypatch.setattr(
+        "app.tasks.analysis.evaluation_service.evaluate_content",
+        _fake_evaluate,
+    )
+    monkeypatch.setattr(
+        "app.tasks.analysis.async_session_factory",
+        _make_session_factory(db_session),
+    )
+
+    count = await batch_evaluate()
+    assert count == 2
+
+    rows = (
+        await db_session.execute(
+            select(Evaluation).order_by(Evaluation.dialogue_id)
+        )
+    ).scalars().all()
+    assert len(rows) == 2
+    assert rows[0].dialogue_id == d1.id
+    assert rows[0].sentiment_label == "neutral"
+    assert rows[0].concern_tags == ["路线规划"]
+    assert rows[1].dialogue_id == d2.id
+
+    # 幂等：二次运行不再重复评估
+    count2 = await batch_evaluate()
+    assert count2 == 0
+
+
+@pytest.mark.anyio
+async def test_batch_evaluate_partial_failure_silent(
+    db_session, monkeypatch
+):
+    """部分对话评估失败（None/异常）静默跳过，其余正常写入，批次不中断。"""
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    visitor_id = "v-eval-partial"
+    db_session.add(Visitor(id=visitor_id))
+    await db_session.flush()
+    d_ok = await _add_dialogue(db_session, visitor_id, "介绍一下菽庄花园", now - timedelta(hours=2))
+    d_fail = await _add_dialogue(db_session, visitor_id, "你们服务太差了！", now - timedelta(hours=1))
+    d_bomb = await _add_dialogue(db_session, visitor_id, "投诉！", now - timedelta(minutes=30))
+    await db_session.flush()
+
+    async def _flaky_evaluate(content, llm=None):
+        if content == "你们服务太差了！":
+            return None  # 静默降级（LLM 未配置/解析失败等）
+        if content == "投诉！":
+            raise RuntimeError("LLM down")  # 异常也不应打断批次
+        return {
+            "sentiment_label": "positive",
+            "satisfaction_score": 5,
+            "concern_tags": ["景点介绍"],
+            "mentioned_spots": ["菽庄花园"],
+        }
+
+    monkeypatch.setattr(
+        "app.tasks.analysis.evaluation_service.evaluate_content",
+        _flaky_evaluate,
+    )
+    monkeypatch.setattr(
+        "app.tasks.analysis.async_session_factory",
+        _make_session_factory(db_session),
+    )
+
+    count = await batch_evaluate()
+    assert count == 1  # 仅成功的那条写入
+
+    rows = (await db_session.execute(select(Evaluation))).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].dialogue_id == d_ok.id
+    assert rows[0].sentiment_label == "positive"

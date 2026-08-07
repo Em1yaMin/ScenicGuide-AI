@@ -1,6 +1,6 @@
 # 景区导览 AI 数字人系统
 
-景区导览 AI 数字人系统 — Python FastAPI 后端 + Vue 3 前端单体应用，通过 Docker Compose 部署。后端集成 Dify AI 平台提供对话双轨回落与对话/评估数据抓取（**阶段3 收官后 Dify 依赖面已收敛**：推荐问句与分析链路已本地化，仅对话回落与历史数据接口保留，见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md)），前端提供访客端（数字人对话）和管理后台（数据大屏 + 报告）。
+景区导览 AI 数字人系统 — Python FastAPI 后端 + Vue 3 前端单体应用，通过 Docker Compose 部署。后端集成 Dify AI 平台提供对话双轨回落与对话/评估数据抓取（**阶段4 收官后 Dify 依赖面已收敛**：推荐问句、分析链路与量化评估均已本地化，仅对话回落与历史数据接口保留，见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md)），前端提供访客端（数字人对话）和管理后台（数据大屏 + 报告）。
 
 ## 技术栈
 
@@ -9,7 +9,7 @@
 | 后端 | Python 3.9+ · FastAPI · SQLAlchemy 2.0 (async) · SQLite (aiosqlite) · httpx · LangChain |
 | 前端 | Vue 3 · TypeScript · Vite 8 · Pinia · Vue Router · ECharts |
 | 部署 | Docker Compose · Nginx |
-| 外部服务 | Dify AI 平台（Chat Agent 对话双轨回落 + Workflow 量化分析）、LangChain agent（对话主链路）+ OpenAI（AI 运营分析）、对话 LLM（opencode-go DeepSeek，见 `doc/llm-adapter-smoke-test.md`）、本地 Live2D 数字人（live2d-frontend） |
+| 外部服务 | Dify AI 平台（Chat Agent 对话双轨回落 + 历史数据接口；量化评估已本地 LLM 化）、LangChain agent（对话主链路）+ OpenAI（AI 运营分析）、对话 LLM（opencode-go DeepSeek，见 `doc/llm-adapter-smoke-test.md`）、本地 Live2D 数字人（live2d-frontend） |
 
 ## 本地数字人依赖
 
@@ -112,7 +112,6 @@ cp .env.example .env
 | `CORS_ORIGINS` | 开发环境填前端地址 `http://localhost:5173`（多个用英文逗号分隔） |
 | `DIFY_API_URL` | Dify API 基础地址，如 `https://your-dify.example.com/v1` |
 | `DIFY_API_KEY` | Chat Agent 应用 Key（拉取对话） |
-| `DIFY_WORKFLOW_API_KEY` | Workflow 应用 Key（触发量化评估） |
 | `DIFY_LIGHT4AI_USER` | light4ai 调 Dify 时固定的 user 字段 |
 | `OPENAI_API_KEY` | OpenAI API Key（用于 LangChain AI 运营分析，不配置时回退到纯 DB 统计；**当前部署单用 opencode-go 端点**，与 `LLM_*` 同一 key，见 `digitalHumanApi/.env`；LLM 分析失败/不可用时响应 `llm_analysis=false` 降级标记，见 `doc/phase3-analytics-verification.md`） |
 | `OPENAI_API_BASE` | OpenAI API 基础地址（可选；当前部署 `https://opencode.ai/zen/go/v1`） |
@@ -262,7 +261,7 @@ pnpm run dev    # 或 node node_modules\next\dist\bin\next dev -p 3000
 |------|------|
 | `NEXT_PUBLIC_ADH_SERVER_PORT` | **必须配置为 `8001`**。不配置则前端请求打到 8000 主后端，报 CORS/400，数字人显示 "Soul is death!" |
 
-**主后端** — `digitalHumanApi/.env`：按上方「1. 配置环境变量」填写 `DIFY_API_URL`、`DIFY_API_KEY`、`DIFY_WORKFLOW_API_KEY` 等（启动时校验非空，缺失会启动失败）。
+**主后端** — `digitalHumanApi/.env`：按上方「1. 配置环境变量」填写 `DIFY_API_URL`、`DIFY_API_KEY`、`LLM_API_KEY` 等（`DIFY_*` 启动时校验非空，缺失会启动失败；阶段4 起量化评估已本地化，不再需要 `DIFY_WORKFLOW_API_KEY`，见 `doc/dify-dependency-audit.md`）。
 
 ### 3. 启动步骤（开发模式）
 
@@ -490,6 +489,7 @@ pytest -v
 | 阶段2 T4 登录生效联调（收官） | ✅ 通过（真实环境：登录用户注册/登录→多轮对话→长期记忆写入 user_memory（5 条）→新会话检索注入（回答引用用户画像）；游客无 token / guest token 降级正确（短期正常、无长期记忆、无注入）；同事实覆盖去重；无联调缺陷，详见 [`doc/phase2-memory-verification.md`](doc/phase2-memory-verification.md)） |
 | 阶段3 收官全链路联调 | ✅ 通过（真实环境：简单问答快速路径 / 复杂任务规划路径（SSE 步骤可视化）/ 推荐问句本地生成（脱离 Dify）/ 分析链路 LLM + DB 兜底降级标记 / 记忆系统（长期写入+注入+游客隔离）/ 双轨回落；联调发现并修复规划路径偶发空响应（opencode-go 长 prompt 思考耗尽）→ 增加重试；全量 320 测试全绿，详见 [`doc/phase3-e2e-verification.md`](doc/phase3-e2e-verification.md)） |
 | 阶段3 Dify 依赖盘点 | ✅ 完成（推荐/分析已脱离 Dify；剩余为对话双轨回落 + 历史数据接口 + Workflow 量化评估，清理建议见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md)） |
+| 阶段4 量化评估本地化 | ✅ 完成（真实调用：本地 LLM 评估产出情感/满意度/关注点/景点/改进建议，Evaluation 表与管理后台消费不变；`trigger_workflow`/`dify_helpers`/`DIFY_WORKFLOW_API_KEY` 已移除；全量测试全绿，详见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md) §2） |
 | Docker Compose | 已配置，未在本次验收中实际构建 |
 
 ## 常见问题
@@ -500,14 +500,13 @@ A: 这是 ADH 前端 WebSocket 心跳连不上后端的提示。检查：
 2. 数字人前端 `web/.env` 中是否设置了 `NEXT_PUBLIC_ADH_SERVER_PORT=8001`（默认 8000 会连到主后端）
 3. 改完 `.env` 后需重启数字人前端才能生效
 
-**Q: 后端启动后日志出现 `Dify trigger_workflow failed`？**
-A: Workflow 量化分析触发失败的可能原因：
-1. `DIFY_WORKFLOW_API_KEY` 未配置或指向错误的 Workflow 应用——需在 Dify 平台确认该 Workflow 的入参变量名为 `input`、输出变量名为 `text`，且输出为结构化 JSON（详见 doc/dify配置/workflow-spec.md）。
-2. Dify 服务器（`DIFY_API_URL`）网络不通或临时不可达——连接失败会自动重试，恢复后自动续上。
-3. 对话内容过短（如 "你好"）——Workflow 仍会正常返回 `neutral/3/空标签`，属预期行为。
+**Q: 后端日志出现量化评估失败（本地 LLM）？**
+A: 阶段4 起量化评估由本地 LLM 产出（`LLM_API_*` 配置 opencode-go，见 `app/services/evaluation_service.py`），不再调用 Dify Workflow。评估失败会静默降级（该对话本轮跳过、下轮重试），不阻断 `analysis_loop`。若大量评估持续失败，检查：
+1. `LLM_API_KEY` 是否已配置且指向 opencode-go 端点（与对话 LLM 同 key）；
+2. opencode-go 端点网络是否可达（`doc/phase3-analytics-verification.md` 的超时经验：延迟高，单条预算 120s）。
 
 **Q: 大屏数据为空？**
-A: 大屏数据依赖 Workflow 量化分析结果。若 `evaluations` 表为空，说明尚未有对话被评估。可手动触发一次：`curl -X POST http://localhost:8000/api/v1/analysis/run-now`。后台分析任务每 5 分钟自动运行一次。
+A: 大屏数据依赖量化评估结果（`evaluations` 表，由本地 LLM 评估产出）。若表为空，说明尚未有对话被评估。可手动触发一次：`curl -X POST http://localhost:8000/api/v1/analysis/run-now`。后台分析任务每 5 分钟自动运行一次。
 
 **Q: 前端 `/api` 请求 404 或跨域报错？**
 A: 确认后端已启动在 8000 端口，且 `digitalHumanVue/.env` 的 `VITE_API_BASE=http://localhost:8000` 配置正确。开发环境由 Vite 代理处理，无需后端 CORS 放行（生产由 Nginx 同源处理）。
@@ -537,7 +536,6 @@ A: 语音功能需要**安全上下文**（HTTPS 或 localhost）。ADH 数字�
 **Q: ADH 数字人凭据在哪里配置？**
 A: 凭据不写入代码库，配置在 ADH 引擎配置文件中：`live2d-frontend/configs/engines/tts/minimaxTTS.yaml`（MiniMax TTS）、`live2d-frontend/configs/engines/asr/tencentAPI.yaml`（腾讯云 ASR）、`live2d-frontend/configs/agents/langchainAgent.yaml`（默认引擎，`LLM_API_URL` 指向本后端，可选 Bearer token）、`live2d-frontend/configs/agents/difyAgent.yaml`（Dify Agent，保留可切换直连）。修改后需重启 ADH 后端生效。
 
-## Dify Workflow 量化分析规格
+## Dify Workflow 量化分析规格（历史存档）
 
-Workflow 的入参、输出格式、节点编排、后端解析容错等完整规格请查阅：
-[`doc/dify配置/workflow-spec.md`](doc/dify配置/workflow-spec.md)。
+阶段4 首项（2026-08-07）起量化评估已本地 LLM 化（`app/services/evaluation_service.py`，`LLM_API_*` 配置 opencode-go），**不再调用 Dify Workflow**。原 Workflow 的入参、输出格式、节点编排、后端解析容错等历史规格存档于 [`doc/dify配置/workflow-spec.md`](doc/dify配置/workflow-spec.md)。

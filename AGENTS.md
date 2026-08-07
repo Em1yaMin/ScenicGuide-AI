@@ -94,15 +94,24 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - `app/services/chat_agent.py` — LangChain tool-calling agent（**langchain 1.x 新 API `create_agent`**，返回 langgraph 状态图，`ainvoke({"messages": [...]})`；旧的 `create_tool_calling_agent`/`AgentExecutor` 在 1.x 已移除）：结构化工具直查景点/路线（复用 `recommend_agent` 的 `search_spots`/`search_routes`/`get_spot_detail`/`get_route_detail`/`filter_by_tags`，零幻觉）、`search_knowledge`（复用统一检索入口）、`recommend_routes`（包装 `recommend_agent.recommend`，工具内 `asyncio.run` 安全——langgraph 经线程池执行同步工具）；多轮上下文：**阶段2 T1 起短期记忆持久化**（见下方「短期记忆持久化」专节，进程内 TTL 缓存 + SQLite 双写，重启可恢复）；RAG 来源从返回消息中最后一条 `search_knowledge` 的 ToolMessage 提取透出
 - 双轨开关：`DIALOGUE_ENGINE=langchain`（**默认**，异常自动回落 Dify，演示不翻车）`|dify`（强制原链路）；`app/routers/dialogue.py` 的 `/api/v1/dialogue/chat` 先走 `chat_agent.chat`，任何异常（含 `LLMConfigError`）回落 `_call_dify_chat`（保留原 RAG 预检索逻辑）；回落时经 `has_conversation` 判定，不把 LangChain 生成的进程内会话 ID 透传给 Dify（未知 id 会 400 conversation_not_exist），改传空串让 Dify 新建会话；响应契约不变（answer/conversation_id/rag_context/rag_sources）
 
-## Dify 依赖面（阶段3 收官盘点，阶段4 退场依据见 doc/dify-dependency-audit.md）
+## Dify 依赖面（阶段4 收官：退场依据见 doc/dify-dependency-audit.md）
 
-船长决策 2026-08-06 方案B：阶段4 Dify 退场工作并入阶段3 顺手推进——盘点并清理 Dify 依赖面，**除对话双轨回落保留外其余尽量清理**。当前 Dify 依赖仅剩三类（推荐问句与分析接口已脱离 Dify）：
+船长决策 2026-08-06 方案B：阶段4 Dify 退场工作并入阶段3 顺手推进——盘点并清理 Dify 依赖面，**除对话双轨回落保留外其余尽量清理**。阶段4 首项（2026-08-07 方案A）已落地：**量化评估已本地化**。当前 Dify 依赖仅剩两类（推荐问句、分析接口、量化评估均已脱离 Dify）：
 
 1. **对话双轨回落（保留，演示兜底）**：`dialogue.py` 的 `_call_dify_chat`/`_call_dify_chat_stream` + `app/services/dify_stream.py`（SSE 消费 + ThinkFilter）；`DIFY_API_URL`/`DIFY_API_KEY`
 2. **历史数据接口（保留）**：`tasks/polling.py`（30s 轮询拉对话入库）、`tasks/backfill.py`（一次性补拉 CLI）、`services/dify_client.py` 的 `get_conversations`/`get_conversation_messages`；`DIFY_LIGHT4AI_USER`（空则轮询空转）
-3. **Dify Workflow 量化评估（保留，阶段4 最大可清理面）**：`tasks/analysis.py::analysis_loop`（300s）→ `batch_evaluate` → `dify_client.trigger_workflow`（`DIFY_WORKFLOW_API_KEY`）+ `dify_helpers.parse_workflow_output`；产出 Evaluation 表 = 管理后台 Dashboard/Report 情感/满意度/热点/景点热度**唯一数据源**，故不可直接移除；阶段4 清理建议（详见审计报告 §3.2）：方案A 本地 LLM 评估替代（prompt 语义对齐原 Workflow）或方案B 移除 analysis_loop 接受管理后台评估类图表空态（前端已有 hasData 空态兜底）
 
-已清理面：推荐问句（#30，`DIFY_RECOMMEND_WORKFLOW_API_KEY` 已移除）、运营分析接口（#31，`analytics_service.py` 纯本地 LLM + DB 兜底，`llm_analysis` 降级标记）、推荐 Agent 的 dify_helpers 依赖（#30）。联调全链路验证与规划路径偶发空响应修复记录见 `doc/phase3-e2e-verification.md`。
+已清理面：推荐问句（#30，`DIFY_RECOMMEND_WORKFLOW_API_KEY` 已移除）、运营分析接口（#31，`analytics_service.py` 纯本地 LLM + DB 兜底，`llm_analysis` 降级标记）、推荐 Agent 的 dify_helpers 依赖（#30）、**Dify Workflow 量化评估（阶段4 首项：`evaluate_dialogue` 改本地 LLM——`app/services/evaluation_service.py`，移除 `trigger_workflow`/`dify_helpers.py`/`DIFY_WORKFLOW_API_KEY`（config 校验器/docker-compose/CI/.env.example 同步））**。联调全链路验证与规划路径偶发空响应修复记录见 `doc/phase3-e2e-verification.md`。
+
+## 本地 LLM 量化评估（阶段4 首项：Dify Workflow 评估本地化，方案A）
+
+船长决策 2026-08-06：量化评估脱离 Dify，Evaluation 表继续产出（管理后台 Dashboard/Report 情感/满意度/热点/景点热度数据源**不变**），对话双轨回落与历史数据接口保留不动。
+
+- `app/services/evaluation_service.py` — 本地 LLM 评估（复用 `app/core/llm.py` 工厂 `get_chat_llm`，`LLM_*` 配置 opencode-go；prompt 语义移植自原 Dify 量化工作流，见 `doc/dify配置/quantitative-workflow-量化工作流.md`——现为历史存档）：输出情感（positive/neutral/negative，happy/confused 归一）/满意度（1-5，越界钳制）/关注点/涉及景点/改进建议（suggestions，1-3 条，无建议为空数组）
+  - `_parse_evaluation_output` 容错解析：剥 `<think>` 标签/```json``` 围栏/JSON 解码/字段别名兜底（sentiment/concerns/spots）/类型归一/**全空判定**（字段全缺视为解析失败返回 None，不写全 NULL 垃圾行）
+  - `evaluate_content(content, llm=None)`（可注入 llm 测试）：LLM 未配置（LLMConfigError）/调用异常/解析失败均返回 None 不抛错，调用方本轮跳过、下轮重试；`asyncio.to_thread` 派发 invoke（事件循环不阻塞）；单条超时预算 120s（opencode-go 延迟高，参考 `doc/phase3-analytics-verification.md` 经验；实测单条 3-7s）
+- `app/tasks/analysis.py` — `analysis_loop`（300s）→ `batch_evaluate` **三阶段化**：①查未评估对话（LEFT JOIN）②**并发**本地 LLM 评估（`asyncio.gather` + `EVAL_CONCURRENCY=4` 信号量限流；`evaluate_dialogue` 只读 content 构造脱库 ORM 对象，共享会话安全）③串行去重校验 + 写 Evaluation 并提交；单条失败（None/异常）静默跳过不阻断批次；`evaluate_dialogue`/`batch_evaluate` 符号保留（`/api/v1/analysis/run-now` 与测试兼容）；`MAX_BATCH_SIZE=50`
+- 测试：`tests/test_evaluation_service.py`（解析/评估/降级/Evaluation 映射）+ `tests/test_analysis.py`（批量写入幂等/部分失败静默降级/loop 韧性）
 
 ## 双模式对话（阶段3 T1：简单问答快速路径 / 复杂任务 LangGraph 规划图，方案B）
 
@@ -146,7 +155,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - **降级标记**：`AIOverviewResponse.llm_analysis`（true=LLM 产出；false=DB 统计兜底），`ai_summary` 尾部附「（数据库统计模式，LLM 分析不可用）」供前端/管理后台识别
 - **超时参数（实测 2026-08-06，opencode-go + deepseek-v4-flash）**：分析 prompt 单次调用约 55-90s（端点延迟高且波动大），`LLM_REQUEST_TIMEOUT=180`（httpx）/ `LLM_ANALYSIS_TIMEOUT=240`（asyncio.wait_for 总上限）——原 60s/90s 会稳定超时误降级；详见 `doc/phase3-analytics-verification.md`；**部署拓扑约束**：docker 部署下 nginx `/api/` 的 `proxy_read_timeout` 必须 ≥ 分析超时预算（`nginx.conf` 已配 300s），否则管理后台 overview 在代理层被 504 掐断（直连 8000 不受影响）
 - 配置：`OPENAI_API_KEY`/`OPENAI_API_BASE`/`OPENAI_MODEL`（**当前部署单用 opencode-go 端点**，与 `LLM_*` 同一 key，见 `digitalHumanApi/.env`）；未配置 key 时跳过 LLM 直接 DB 统计
-- 定时任务 `app/tasks/analysis.py::analysis_loop`（每 300s）仅做 Dify Workflow 量化评估（`batch_evaluate`），任务级 try/except 保证故障持续运行；LLM 分析由接口按需触发（无独立调度）
+- 定时任务 `app/tasks/analysis.py::analysis_loop`（每 300s）做**本地 LLM 量化评估**（`batch_evaluate` → `evaluation_service`，Evaluation 表写入，管理后台数据源；Dify Workflow 评估已阶段4 移除），任务级 try/except 保证故障持续运行；LLM 分析由接口按需触发（无独立调度）
 - 测试：`tests/test_analysis.py`（LLM 成功/失败/无 key 三种降级路径 + 任务韧性）；conftest 固定 `OPENAI_API_KEY=""`（同 CI，防本地 worktree .env 真实 key 污染测试触发慢速网络调用）
 
 # Commands
@@ -162,7 +171,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 # Business Context
 
 - **Visitor 端**: 访客通过数字人 iframe 对话（Dify Chat Agent），系统后台轮询抓取对话内容；用户体系（注册/登录/游客）见上方「用户认证」专节，登录用户享**长期记忆**（阶段2 T2 已实现：对话后提取用户事实/偏好写入 user_memory 向量库，按 user 隔离；游客不写，见「长期记忆」专节与 doc/long-term-memory.md）
-- **Admin 端**: 管理后台展示情感趋势、满意度、热点关注和景点热度（数据来自 Dify Workflow 量化分析），以及知识库管理（讲解词/FAQ/资料 CRUD + 批量导入）
+- **Admin 端**: 管理后台展示情感趋势、满意度、热点关注和景点热度（数据来自本地 LLM 量化评估——Evaluation 表，阶段4 起不再依赖 Dify Workflow），以及知识库管理（讲解词/FAQ/资料 CRUD + 批量导入）
 - **数据隔离**: 轮询/量化仍仅跟踪单一虚拟访客（`DIFY_LIGHT4AI_USER`），无多租户、无按用户的数据隔离（JWT 认证仅标记对话 user，不隔离数据，见上方「用户体系」）
 
 # 开发指南
@@ -254,7 +263,7 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 ## Testing (pytest)
 
 - Tests use in-memory SQLite (`tests/conftest.py` fixtures), no DATABASE_URL / .env needed.
-- Gotcha: `app/core/config.py` instantiates `Settings()` at import with a validator that rejects empty Dify env vars — running pytest without `.env` or placeholder `DIFY_API_URL`/`DIFY_API_KEY`/`DIFY_WORKFLOW_API_KEY` raises ImportError. CI injects dummy values (tests never call real APIs). 推荐问句（阶段3 T3）已脱离 Dify，不再需要 `DIFY_RECOMMEND_WORKFLOW_API_KEY`。
+- Gotcha: `app/core/config.py` instantiates `Settings()` at import with a validator that rejects empty Dify env vars — running pytest without `.env` or placeholder `DIFY_API_URL`/`DIFY_API_KEY` raises ImportError. CI injects dummy values (tests never call real APIs). 推荐问句（阶段3 T3）与量化评估（阶段4 首项）已脱离 Dify，不再需要 `DIFY_RECOMMEND_WORKFLOW_API_KEY`/`DIFY_WORKFLOW_API_KEY`。
 
 ## Maintaining this file
 
