@@ -3,7 +3,7 @@
 @File    :   test_langchain_agent.py
 @Author  :   一力辉
 LangChainAgent 引擎单测：mock 掉 httpxAsyncClient，验证
-- SSE 流式解析（message 增量 / step 忽略 / conversation 事件）
+- SSE 流式解析（message 增量 / step 透出为 StepMessage / conversation 事件）
 - 非流式 JSON 响应
 - 请求体构造（streaming/use_rag/rag_top_k/conversation_id/token）
 - 异常路径（HTTP 错误 / error 事件 / 参数缺失）
@@ -16,7 +16,7 @@ from httpx import AsyncClient
 
 from digitalHuman.agent.core import langchainAgent as langchainAgent_mod
 from digitalHuman.agent.core.langchainAgent import LangChainAgent
-from digitalHuman.utils import TextMessage
+from digitalHuman.utils import TextMessage, StepMessage
 from digitalHuman.utils.configParser import CONFIG_ROOT_PATH, parseConfig
 
 ENGINE = "LangChainAgent"
@@ -121,7 +121,7 @@ class Test_LangChainAgent_API:
 
     @pytest.mark.asyncio(scope="session")
     async def test_stream_infer(self, version: str, client: AsyncClient, fake_client):
-        """SSE 流式：message 事件增量拼接，step 事件忽略。"""
+        """SSE 流式：message 事件增量拼接，step 事件编码为步骤帧透出。"""
         fake_client.response = FakeResponse(lines=sse_lines(
             {"event": "conversation", "conversation_id": "abc123"},
             {"event": "step", "name": "search_spots"},
@@ -134,6 +134,8 @@ class Test_LangChainAgent_API:
         resp = await client.post(url, json=item)
         assert resp.status_code == 200
         assert "你好，欢迎来到景区" in resp.text
+        # 旧契约 step 事件（name 字段）同样编码为步骤帧（label 回退到 tool）
+        assert "\x02{\"tool\": \"search_spots\", \"label\": \"search_spots\"}\x03" in resp.text
         # 请求体校验
         req = fake_client.requests[0]
         assert req["method"] == "POST"
@@ -142,6 +144,22 @@ class Test_LangChainAgent_API:
         assert req["json"]["query"] == "你好"
         assert req["json"]["use_rag"] is True
         assert req["json"]["rag_top_k"] == 3
+
+    @pytest.mark.asyncio(scope="session")
+    async def test_stream_infer_step_frame(self, version: str, client: AsyncClient, fake_client):
+        """新契约（type 字段）：step 事件编码为步骤帧（\x02{json}\x03），文本流不变。"""
+        fake_client.response = FakeResponse(lines=sse_lines(
+            {"type": "step", "tool": "search_knowledge", "label": "正在检索知识库…"},
+            {"type": "token", "text": "你好，"},
+            {"type": "token", "text": "欢迎来到景区"},
+            {"type": "done", "conversation_id": "cid-frame", "rag_context": "", "rag_sources": []},
+        ))
+        url = f"/adh/agent/{version}/infer"
+        item = {"engine": ENGINE, "settings": settings(), "streaming": True, "data": "你好"}
+        resp = await client.post(url, json=item)
+        assert resp.status_code == 200
+        assert "\x02{\"tool\": \"search_knowledge\", \"label\": \"正在检索知识库…\"}\x03" in resp.text
+        assert "你好，欢迎来到景区" in resp.text
 
     @pytest.mark.asyncio(scope="session")
     async def test_blocking_infer(self, version: str, client: AsyncClient, fake_client):
@@ -237,15 +255,41 @@ class Test_LangChainAgent_Engine:
 
     @pytest.mark.asyncio(scope="session")
     async def test_new_contract_tokens_assembled(self, fake_client, agent):
-        """type=token 增量拼接、step 忽略、done 结束（本后端实际 SSE 契约）。"""
+        """type=token 增量拼接、step 透出 StepMessage、done 结束（本后端实际 SSE 契约）。"""
         fake_client.response = FakeResponse(lines=sse_lines(
             {"type": "step", "tool": "search_spots", "label": "正在查询景点…"},
             {"type": "token", "text": "你好，"},
             {"type": "token", "text": "欢迎来到景区"},
             {"type": "done", "conversation_id": "conv-new", "rag_context": "", "rag_sources": []},
         ))
-        outputs = [text async for text in agent.run(TextMessage(data="你好"), True, **settings())]
-        assert "".join(outputs) == "你好，欢迎来到景区"
+        outputs = [o async for o in agent.run(TextMessage(data="你好"), True, **settings())]
+        steps = [o for o in outputs if isinstance(o, StepMessage)]
+        texts = [o for o in outputs if isinstance(o, str)]
+        assert "".join(texts) == "你好，欢迎来到景区"
+        assert len(steps) == 1
+        assert steps[0].tool == "search_spots"
+        assert steps[0].label == "正在查询景点…"
+
+    @pytest.mark.asyncio(scope="session")
+    async def test_step_message_surfaced(self, fake_client, agent):
+        """步骤透出：step→step→token→done，步骤按序收集且文本流不受影响。
+
+        阶段3 步骤可视化需求（2026-08-07）：run() 产出流中混入 StepMessage，
+        回答文本（ThinkFilter 过滤后）仍按原样产出，TTS 输入依赖不变。
+        """
+        fake_client.response = FakeResponse(lines=sse_lines(
+            {"type": "step", "tool": "search_knowledge", "label": "正在检索知识库…"},
+            {"type": "step", "tool": "recommend_routes", "label": "正在为您规划路线…"},
+            {"type": "token", "text": "为您找到"},
+            {"type": "token", "text": "以下景点"},
+            {"type": "done", "conversation_id": "cid-step", "rag_context": "", "rag_sources": []},
+        ))
+        outputs = [o async for o in agent.run(TextMessage(data="帮我规划行程"), True, **settings())]
+        steps = [o for o in outputs if isinstance(o, StepMessage)]
+        texts = [o for o in outputs if isinstance(o, str)]
+        assert [s.tool for s in steps] == ["search_knowledge", "recommend_routes"]
+        assert [s.label for s in steps] == ["正在检索知识库…", "正在为您规划路线…"]
+        assert "".join(texts) == "为您找到以下景点"
 
     @pytest.mark.asyncio(scope="session")
     async def test_new_contract_conversation_id_from_done(self, fake_client, agent):

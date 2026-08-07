@@ -212,7 +212,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 | 引擎 | 类型 | 配置 | 状态 |
 |------|------|------|------|
 | **TencentAPI** | ASR | `configs/engines/asr/tencentAPI.yaml` | 引擎可用，麦克风录音链路调试中 |
-| **LangChainAgent** | Agent | `configs/agents/langchainAgent.yaml` | **默认引擎**，走本后端 `/api/v1/dialogue/chat`（LangChain 主链路，后端侧异常自动回落 Dify）；SSE 流式正常 |
+| **LangChainAgent** | Agent | `configs/agents/langchainAgent.yaml` | **默认引擎**，走本后端 `/api/v1/dialogue/chat`（LangChain 主链路，后端侧异常自动回落 Dify）；SSE 流式正常；工具调用步骤可视化（见下） |
 | **DifyAgent** | Agent | `configs/agents/difyAgent.yaml` | 保留可切换（fallback 不丢），直连 Dify Chat Agent |
 | **QwenAPI** | TTS | `configs/engines/tts/qwenTTS.yaml` | **默认引擎（2026-08-07 从 MiniMax 迁移，DashScope WebSocket）**：dashscope SDK `SpeechSynthesizer`，模型 `qwen-audio-3.0-tts-flash`、音色 `qwen-audio-3.0-tts-flash-longtongxuxian`（龙彤旭弦，活泼灵动女声），mp3→wav 输出；key 优先读环境变量 `QWEN_API_KEY`（yaml 留空占位不入库）；SDK 初始化要求先设全局 `dashscope.api_key`（实测）；真实调用与 mock 单测均通过（`test/test_qwen_tts.py` 8 用例） |
 | **MiniMaxAPI** | TTS | `configs/engines/tts/minimaxTTS.yaml` | 保留可切换（`Chinese_sweet_girl_nv1` 音色，替代 difyTTSWorkflow） |
@@ -240,10 +240,13 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 - `configs/engines/asr/tencentAPI.yaml`、`configs/engines/tts/qwenTTS.yaml`（新建，默认 TTS）、`configs/engines/tts/minimaxTTS.yaml`、`configs/agents/difyAgent.yaml`、`configs/agents/langchainAgent.yaml`（新建）— 引擎凭证/参数
 - `digitalHuman/engine/tts/qwenTTS.py`（新建，2026-08-07 Qwen/DashScope TTS 引擎，注册名 QwenAPI）+ `digitalHuman/engine/tts/minimaxTTS.py`（新建）+ `digitalHuman/engine/tts/__init__.py` — TTS 引擎及注册
 - `digitalHuman/engine/asr/tencentASR.py` — 已移除 `req.AppId` 行
-- `digitalHuman/agent/core/langchainAgent.py`（新建，2026-08-06 联调修正 SSE 契约）— LangChain 引擎：调本后端 `/api/v1/dialogue/chat`，SSE 解析 **`type` 字段**（`token`（text 增量，经 `ThinkFilter` 过滤后产出）/`step`（忽略，透出日志）/`done`（携带 conversation_id，作流结束）/`error`（`fallback=true` 时仅告警不中断、继续消费 Dify 兜底输出；`fallback=false` 抛错）），兼容旧 `event: message/answer` 形态；非流式解析 ChatResponse JSON（answer/conversation_id），见代码头注释
+- `digitalHuman/agent/core/langchainAgent.py`（新建，2026-08-06 联调修正 SSE 契约；2026-08-07 步骤透出）— LangChain 引擎：调本后端 `/api/v1/dialogue/chat`，SSE 解析 **`type` 字段**（`token`（text 增量，经 `ThinkFilter` 过滤后产出）/`step`（**透出为 `StepMessage`（tool/label）混入 run() 产出流**，供 agentApi 编码步骤帧、前端渲染，文本流不变）/`done`（携带 conversation_id，作流结束）/`error`（`fallback=true` 时仅告警不中断、继续消费 Dify 兜底输出；`fallback=false` 抛错）），兼容旧 `event: message/answer` 形态；非流式解析 ChatResponse JSON（answer/conversation_id），见代码头注释
+- `digitalHuman/utils/protocol.py` — 新增 `StepMessage`（tool/label 字段，与 TextMessage/AudioMessage 同体系）
+- `digitalHuman/server/agentApi.py` — `/v0/infer` 将产出流中的 `StepMessage` 编码为步骤帧（`\x02{json}\x03`，json 含 tool/label）透出给前端；回答文本原样透出
 - `digitalHuman/agent/core/difyAgent.py` — 新增 `ThinkFilter`，流式过滤 `<think>` 标签
 - `digitalHuman/server/asrApi.py` — DEBUG 音频保存到 `debug_audio/`
-- `web/app/ui/home/chatbot.tsx` — 录音改用原生 `MediaRecorder` + 客户端 webm→WAV（16kHz 重采样）
+- `web/app/lib/comm.ts` — `streamingChat` 新增步骤帧解析（缓冲拼接 `\x02{json}\x03` 帧，兼容 fetch 分块切碎）与 `callbackStep` 回调；文本流/索引语义不变（TTS 断句与音频队列依赖）
+- `web/app/ui/home/chatbot.tsx` — 录音改用原生 `MediaRecorder` + 客户端 webm→WAV（16kHz 重采样）；**工具调用步骤可视化（2026-08-07）**：`agentSteps` state 接收 `callbackStep`（连续重复步骤去重、按序追加），消息区底部 AI 侧渲染小字步骤气泡（🔍 标签 + 脉冲圆点），新一轮对话清空；不进入 responseText，不影响逐字渲染/TTS
 - `scripts/smoke_langchain_agent.py`（新建）— LangChainAgent 链路冒烟（需本后端已启动，`PYTHONPATH=. ./venv/bin/python scripts/smoke_langchain_agent.py`）
 
 ### ASR 已知问题
@@ -259,6 +262,7 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 - **Live2D 默认模型**: 已改为 Hiyori，首次访问需清 localStorage `character-storage`
 - **Agent think 过滤**: `difyAgent.py`/`langchainAgent.py` 的 `ThinkFilter` 实时过滤 `<think>...</think>`，TTS 不会读思考内容
 - **LangChainAgent 依赖本后端**: 默认引擎 `langchainAgent.yaml` 的 `LLM_API_URL` 指向主后端 8000，主后端未启动时对话不可用（可临时切回 DifyAgent 直连 Dify）；引擎切换在数字人前端设置页
+- **工具调用步骤可视化（2026-08-07）**: 主后端 SSE step 事件 → ADH `langchainAgent.py` 透出 `StepMessage` → `agentApi.py` 编码 `\x02{json}\x03` 步骤帧 → `comm.ts` 解析 → `chatbot.tsx` 消息区渲染（🔍 步骤小气泡按序追加）；真实环境实测（真实主后端 + 真实 LLM）触发规划类对话产出 6 个步骤帧（plan→search_knowledge→search_spots→filter_by_tags→recommend_routes→summarize），文本流不受影响；步骤帧协议见 `agentApi.py` 与 `comm.ts` 注释
 - **重启后端**: 改 yaml 或 Python 代码后必须重启后端；前端代码由 Next HMR 自动热更
 </important>
 

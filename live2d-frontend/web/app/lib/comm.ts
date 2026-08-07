@@ -101,21 +101,62 @@ export class Comm {
     conversationId: string = "",
     settings: { [key: string]: string } = {},
     callbackProcessing: (index: number, data: string) => void,
-    callbackEnd: (index: number) => void
+    callbackEnd: (index: number) => void,
+    callbackStep?: (step: { tool: string; label: string }) => void
   ): Promise<void> {
     try {
       const reader = await API.agent_infer_streaming_api(data, engine, conversationId, settings);
       const decoder = new TextDecoder("utf-8");
+      // 步骤帧协议（agentApi 编码）：\x02{json}\x03，json = {tool, label}。
+      // 回答文本仍按原始文本流透出；帧可能被 fetch 分块切碎，需缓冲拼接。
+      const STEP_START = "\u0002";
+      const STEP_END = "\u0003";
+      let buffer = "";
       let index = 0;
+      const emitText = (text: string) => {
+        if (!text) return;
+        callbackProcessing(index, text);
+        index++;
+      };
       while (true) {
-        const { value, done } = await reader.read(); 
+        const { value, done } = await reader.read();
         if (done) {
           callbackEnd(index);
           break;
         }
-        const chunk = decoder.decode(value, { stream: true });
-        callbackProcessing(index, chunk);
-        index++;
+        buffer += decoder.decode(value, { stream: true });
+        // 解析缓冲：完整步骤帧提取给 callbackStep，其余文本按序透出
+        while (true) {
+          const start = buffer.indexOf(STEP_START);
+          if (start === -1) {
+            // 无帧起始：整段按文本处理
+            emitText(buffer);
+            buffer = "";
+            break;
+          }
+          if (start > 0) {
+            emitText(buffer.slice(0, start));
+            buffer = buffer.slice(start);
+          }
+          const end = buffer.indexOf(STEP_END, 1);
+          if (end === -1) {
+            // 帧未完整（被切碎），保留等待后续数据
+            break;
+          }
+          const raw = buffer.slice(1, end);
+          buffer = buffer.slice(end + 1);
+          try {
+            const stepData = JSON.parse(raw);
+            if (callbackStep && stepData && typeof stepData === "object") {
+              callbackStep({
+                tool: stepData.tool || "",
+                label: stepData.label || stepData.tool || "",
+              });
+            }
+          } catch (error) {
+            console.error("[Comm] step frame parse error:", error);
+          }
+        }
       }
       reader.releaseLock();
     } catch (error) {

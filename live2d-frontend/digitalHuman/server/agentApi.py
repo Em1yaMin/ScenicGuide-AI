@@ -6,15 +6,22 @@
 
 from .reponse import BaseResponse, Response
 from typing import Optional, List
+import json
 from pydantic import BaseModel
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
 from digitalHuman.utils import config
-from digitalHuman.utils import TextMessage
+from digitalHuman.utils import TextMessage, StepMessage
 from digitalHuman.agent import AgentPool
 
 router = APIRouter()
 agentPool = AgentPool()
+
+# 步骤帧协议（前端解析见 web/app/lib/comm.ts）：
+#   帧格式：\x02{json}\x03，其中 json = {"tool": "...", "label": "..."}
+#   回答文本仍按原始文本流透出，不参与帧编码（TTS/逐字渲染依赖不变）
+STEP_FRAME_START = "\x02"
+STEP_FRAME_END = "\x03"
 
 class AgentInferIn(BaseModel):
     engine: str = "default"
@@ -35,10 +42,28 @@ async def apiAgentInfer(item: AgentInferIn):
     response = Response()
     try:
         input = TextMessage(data=item.data)
-        return StreamingResponse(agentPool.get(item.engine).run(input, item.streaming, **item.settings), media_type="text/event-stream")
+        agent = agentPool.get(item.engine)
+        if agent is None:
+            raise ValueError(f"No such agent: {item.engine}")
+        run_stream = agent.run(input, item.streaming, **item.settings)
+
+        async def stream_with_steps():
+            # 透出 agent 产出流：StepMessage 编码为步骤帧（前端渲染），
+            # 回答文本原样透出（行为不变）
+            async for chunk in run_stream:
+                if isinstance(chunk, StepMessage):
+                    frame = json.dumps(
+                        {"tool": chunk.tool or "", "label": chunk.label or ""},
+                        ensure_ascii=False,
+                    )
+                    yield STEP_FRAME_START + frame + STEP_FRAME_END
+                else:
+                    yield chunk
+
+        return StreamingResponse(stream_with_steps(), media_type="text/event-stream")
     except Exception as e:
         response.error(str(e))
-        return StreamingResponse(interalError)
+        return StreamingResponse(interalError())
 
 
 class ConversatonIdIn(BaseModel):

@@ -37,3 +37,14 @@ class AudioMessage(BaseMessage):
 class TextMessage(BaseMessage):
     data: Optional[str] = None
     desc: Optional[str] = None
+
+
+class StepMessage(BaseMessage):
+    """
+    Agent 步骤事件（工具调用步骤，如"正在检索知识库…"）。
+
+    由 LangChainAgent 在流式对话中透出给调用方（agentApi 编码为步骤帧
+    供前端渲染），不参与回答文本流，不影响 TTS/逐字渲染。
+    """
+    tool: Optional[str] = None
+    label: Optional[str] = None
