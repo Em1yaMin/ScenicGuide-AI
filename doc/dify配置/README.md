@@ -1,5 +1,17 @@
 # Dify 配置总览
 
+> ## ⚠️ Dify 已退场（阶段4 收官，2026-08-07）
+>
+> **Dify 已退场**（除对话回落/历史接口），本目录配置存档**仅供参考**：
+> - 系统核心链路（对话 LangChain 双模式、推荐问句、分析、量化评估、记忆系统）**已全部本地化**，不依赖 Dify；
+> - 仅保留项：**对话双轨回落**（LangChain 主链路异常时 Dify Chat Agent 兜底）与**历史数据接口**（polling/backfill 拉取对话入库）仍引用聊天助手应用；
+> - 已清理项（推荐问句、量化评估）相关章节已标记 superseded，不再需要对应 Dify 应用/Key；
+> - 模拟 Dify 不可达的全链路自检记录见 [`doc/phase4-e2e-verification.md`](../phase4-e2e-verification.md)；依赖面定稿见 [`doc/dify-dependency-audit.md`](../dify-dependency-audit.md)。
+>
+> 以下为 Dify 平台侧配置指南历史存档（仅创建/维护保留项应用时参考）。
+
+---
+
 > 景区导览 AI 数字人系统 — Dify 平台完整配置指南。
 
 ---

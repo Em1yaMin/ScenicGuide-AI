@@ -2,6 +2,7 @@
 
 > 日期：2026-08-06 ｜ 阶段3 收官 + 阶段4 退场前置（船长决策 2026-08-06 方案B）
 > 更新：2026-08-07 ｜ 阶段4 首项落地（船长决策 2026-08-06 方案A）：**Dify Workflow 量化评估已本地化**（见 §2 已完成清理面），剩余 Dify 依赖仅对话双轨回落 + 历史数据接口。
+> 收官（2026-08-07）：**全链路自检通过**——模拟 Dify 不可达（`DIFY_API_URL` 指向无效地址）后系统核心链路（对话双模式/流式/记忆、推荐问句、分析、量化评估、管理后台报告）全部正常，仅保留项（对话回落/历史接口）明确降级不崩溃，详见 [`doc/phase4-e2e-verification.md`](doc/phase4-e2e-verification.md)。**Dify 依赖面至此收敛定稿**：除对话双轨回落 + 历史数据接口（船长决策保留）外无任何 Dify 依赖。
 > 原则：**对话双轨回落保留**（演示兜底）；**历史数据接口保留**（管理后台数据大屏数据源）；其余尽量清理。
 > 本报告为阶段4 最终退场提供依据：剩余依赖清单 + 用途 + 清理建议。
 
@@ -57,11 +58,12 @@
 ### 3.4 非 digitalHumanApi 的 Dify 引用（不在本任务清理范围）
 
 - `live2d-frontend/`（独立 git 仓库）：`DifyAgent`（`configs/agents/difyAgent.yaml`）保留可切换直连 Dify Chat Agent；`config_all_in_dify.yaml` 为历史配置模板。不影响主仓库 Dify 依赖面。
-- `doc/dify配置/`：Dify 侧配置存档（chat-agent 提示词、量化工作流、知识库、workflow-spec），阶段4 退场后建议归档删除或标注「Dify 已下线」。
+- `doc/dify配置/`：Dify 侧配置存档（chat-agent 提示词、量化工作流、知识库、workflow-spec），**已标注「Dify 已退场（除对话回落/历史接口），配置存档仅供参考」**（README.md 顶部横幅 + 相关文档 superseded 标记，方案：保留标注而非删除——对话回落仍引用聊天助手配置，且存档对复盘/未来彻底下线有价值，见 `doc/dify配置/README.md`）。
 
 ## 4. 联调验证与清理交叉结论
 
 - 阶段3 全链路真实环境联调（见 `doc/phase3-e2e-verification.md`）：双模式、推荐问句本地生成、分析链路（LLM + DB 兜底降级标记）、记忆系统（长期/短期/游客隔离）、双轨回落均验证通过。
 - 联调暴露并修复：**规划路径偶发空响应**（opencode-go 思考型模型长 prompt 偶发返回空 content）→ `planner_agent.plan_node` 增加 `_PLAN_RETRIES=1` 重试，新增 2 个单测（`test_chat_plan_retries_empty_plan_output` / `test_chat_plan_retries_exhausted_raises`）。
 - 阶段4 首项（2026-08-07）：Dify Workflow 量化评估本地化完成（§2 表格），真实调用 + 端到端验证通过。
-- Dify 依赖面现状：除对话回落与历史数据接口外，**推荐/分析/量化评估均已无 Dify 依赖**；剩余依赖（对话双轨回落、历史数据接口）按船长决策保留。
+- 阶段4 收官（2026-08-07）：**脱离 Dify 独立运行全链路自检通过**（`doc/phase4-e2e-verification.md`）——Dify 不可达时：对话（快速/规划/流式/多轮）✅、推荐问句 ✅、分析链路 ✅、量化评估 → Evaluation 表 → 管理后台报告（含 suggestions）✅、记忆系统（长期/短期/游客隔离）✅；仅保留项明确降级：历史数据接口重试后 `synced=0` 不崩溃、对话回落礼貌报错不崩溃。自检未发现代码缺陷，无代码改动。
+- Dify 依赖面现状（定稿）：除对话回落与历史数据接口外，**推荐/分析/量化评估均已无 Dify 依赖**；剩余依赖（对话双轨回落、历史数据接口）按船长决策保留（Dify 服务下线后再评估）。
