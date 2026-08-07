@@ -1,12 +1,15 @@
-"""Embedding 升级（Minimax）与命名空间隔离测试。
+"""Embedding 升级（Minimax→Qwen/DashScope 迁移）与命名空间隔离测试。
 
 覆盖：
 1. MinimaxEmbeddings 客户端：Minimax 原生请求格式 texts+type（httpx.MockTransport）、
    批量分批、未配置 key 时报错。
-2. get_embedding_model 工厂：配置 key → Minimax；未配置 → TF-IDF 降级。
-3. 自定义 embedding（确定性向量）接入 SimpleVectorStore：向量化、检索、持久化重载。
-4. 命名空间隔离：knowledge 检索不命中 documents（独立索引与持久化文件）。
-5. Embedding API 不可用时的降级：索引/检索自动回退 TF-IDF，degraded 标记可观测。
+2. 请求体格式开关（EMBEDDING_API_STYLE）：openai 兼容格式 input（DashScope
+   compatible-mode，实测 qwen3.7-text-embedding）、响应 data 数组解析/乱序恢复、
+   未知 style 回退 minimax、工厂透传 settings。
+3. get_embedding_model 工厂：配置 key → Minimax；未配置 → TF-IDF 降级。
+4. 自定义 embedding（确定性向量）接入 SimpleVectorStore：向量化、检索、持久化重载。
+5. 命名空间隔离：knowledge 检索不命中 documents（独立索引与持久化文件）。
+6. Embedding API 不可用时的降级：索引/检索自动回退 TF-IDF，degraded 标记可观测。
 """
 import json
 import math
@@ -196,6 +199,107 @@ def test_minimax_embeddings_batches_large_inputs():
     vecs = emb.embed_documents(["a", "b", "c", "d", "e"])
     assert len(vecs) == 5
     assert captured["count"] == 3  # 2 + 2 + 1
+
+
+def test_openai_style_request_body():
+    """api_style=openai 时请求体走 OpenAI 兼容格式 {"model", "input"}（DashScope compatible-mode）。
+
+    实测（2026-08-07）：qwen3.7-text-embedding 端点请求体为
+    {"model", "input": [...]}（无 type 字段），响应 {"data": [{"embedding": [...]}]}。
+    """
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["authorization"] = request.headers.get("Authorization")
+        captured["body"] = json.loads(request.content)
+        texts = captured["body"]["input"]
+        return httpx.Response(200, json={
+            "data": [
+                {"embedding": [float(i + 1) / 10, 0.2, 0.3], "index": i}
+                for i in range(len(texts))
+            ],
+            "model": captured["body"]["model"],
+            "usage": {"total_tokens": len(texts) * 10},
+        })
+
+    emb = MinimaxEmbeddings(
+        api_key="test-key",
+        api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        model="qwen3.7-text-embedding",
+        api_style="openai",
+        _transport=httpx.MockTransport(handler),
+    )
+    vecs = emb.embed_documents(["你好", "世界"])
+    assert vecs == [[0.1, 0.2, 0.3], [0.2, 0.2, 0.3]]
+    assert captured["url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1/embeddings"
+    assert captured["authorization"] == "Bearer test-key"
+    # OpenAI 兼容请求体：无 type 字段（该端点无 query/db 区分）
+    assert captured["body"] == {
+        "model": "qwen3.7-text-embedding",
+        "input": ["你好", "世界"],
+    }
+
+    # embed_query 走同一端点，请求体同为 input 格式
+    q_vec = emb.embed_query("查询")
+    assert q_vec == [0.1, 0.2, 0.3]
+    assert "type" not in captured["body"]
+    assert captured["body"]["input"] == ["查询"]
+
+
+def test_openai_style_parses_openai_response_shuffled():
+    """openai 风格响应 data 数组乱序时按 index 恢复输入顺序（向量不错位）。"""
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        texts = captured["body"]["input"]
+        # 乱序返回（index 2, 0, 1）
+        items = [
+            {"embedding": [float(i + 1) / 10, 0.2, 0.3], "index": i}
+            for i in range(len(texts))
+        ]
+        return httpx.Response(200, json={
+            "data": [items[2], items[0], items[1]],
+            "model": captured["body"]["model"],
+        })
+
+    emb = MinimaxEmbeddings(
+        api_key="k",
+        api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        model="qwen3.7-text-embedding",
+        api_style="openai",
+        _transport=httpx.MockTransport(handler),
+    )
+    vecs = emb.embed_documents(["a", "b", "c"])
+    assert vecs == [[0.1, 0.2, 0.3], [0.2, 0.2, 0.3], [0.3, 0.2, 0.3]]
+
+
+def test_openai_style_defaults_to_minimax_for_unknown_style():
+    """未知 api_style 回退 minimax（向后兼容，不抛错）。"""
+    captured = {}
+    emb = MinimaxEmbeddings(
+        api_key="k",
+        api_base="https://api.minimaxi.com/v1",
+        model="embo-01",
+        api_style="bogus",
+        _transport=_mock_minimax_transport(captured),
+    )
+    assert emb.api_style == "minimax"
+    emb.embed_documents(["a"])
+    assert "texts" in captured["body"]
+    assert "input" not in captured["body"]
+
+
+def test_factory_passes_style_from_settings(monkeypatch):
+    """工厂按 settings.EMBEDDING_API_STYLE 透传请求体格式。"""
+    monkeypatch.setattr(settings, "EMBEDDING_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "EMBEDDING_API_BASE", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    monkeypatch.setattr(settings, "EMBEDDING_MODEL", "qwen3.7-text-embedding")
+    monkeypatch.setattr(settings, "EMBEDDING_API_STYLE", "openai")
+    model = get_embedding_model()
+    assert isinstance(model, MinimaxEmbeddings)
+    assert model.api_style == "openai"
 
 
 def test_minimax_embeddings_raises_without_key():

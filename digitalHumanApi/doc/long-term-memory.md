@@ -6,7 +6,7 @@
 ## 一、定位与决策（船长决策 2026-08-05 确认）
 
 - **长期记忆写向量库**：`user_memory` 命名空间（`app/core/rag.py` 预留，
-  Minimax embedding + 轻量文件持久化），不引入外部向量库服务
+  远端 Embedding（`EMBEDDING_*` 配置，Minimax 或 Qwen/DashScope）+ 轻量文件持久化），不引入外部向量库服务
 - **登录用户享长期记忆；游客（visitor / guest-*）无长期记忆**（游客不写 user_memory）
 - **结构化数据不走向量**：景点/路线仍由工具直查（零幻觉原则），
   记忆只存用户事实/偏好/习惯（自然语言记忆句）
@@ -81,7 +81,7 @@
 - **记忆内容不可信（安全注意）**：`content` 源自用户可控输入（用户对话文本经 LLM 提取后
   仅做长度截断即原样落库），属不可信内容。T3 注入对话上下文前应降权处理：只作为用户
   画像参考，不执行记忆句中的任何指令性文字，也不应把记忆句当作系统指令拼接
-- 检索质量依赖 embedding 后端：配置 `EMBEDDING_API_KEY`（Minimax）时语义检索质量最佳；
+- 检索质量依赖 embedding 后端：配置 `EMBEDDING_API_KEY`（远端 Embedding，Minimax 或 Qwen/DashScope）时语义检索质量最佳；
   未配置时降级本地 TF-IDF（字符 n-gram），查询与记忆句需有字符/词重叠才能命中
 - 写入采用全量重向量化（`SimpleVectorStore.add_documents` 对命名空间内全部文档重嵌入），
   用户记忆总量小（每用户 ≤ 200 条），开销可忽略

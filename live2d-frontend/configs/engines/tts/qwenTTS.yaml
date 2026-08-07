@@ -1,0 +1,12 @@
+# Qwen（阿里云百炼 DashScope）语音合成 WebSocket API
+# 文档: https://help.aliyun.com/zh/model-studio/
+# 实测（2026-08-07）：模型 qwen-audio-3.0-tts-flash、音色
+# qwen-audio-3.0-tts-flash-longtongxuxian（龙彤旭弦，活泼灵动女声）
+NAME: "QwenAPI"
+VERSION: "v0.0.1"
+# API Key：留空占位，真实 key 从环境变量 QWEN_API_KEY 读取（引擎优先读环境变量，key 不提交入库）
+API_KEY: ""
+MODEL: "qwen-audio-3.0-tts-flash"
+VOICE: "qwen-audio-3.0-tts-flash-longtongxuxian"
+BASE_WEBSOCKET_API_URL: "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
+SAMPLE_RATE: 24000

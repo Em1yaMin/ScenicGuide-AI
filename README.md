@@ -23,7 +23,7 @@
 
 **引擎配置**:
 - **ASR**: 腾讯云实时语音识别 (TencentAPI)
-- **TTS**: MiniMax API (`speech-2.8-hd` + `Chinese_sweet_girl_nv1` 音色)
+- **TTS**: QwenAPI（阿里云百炼 DashScope，`qwen-audio-3.0-tts-flash` + `qwen-audio-3.0-tts-flash-longtongxuxian`（龙彤旭弦）音色，2026-08-07 从 MiniMax 迁移）；MiniMaxAPI 保留可切换
 - **Agent**: LangChainAgent（默认，走本后端 `POST /api/v1/dialogue/chat` LangChain 主链路，后端侧异常自动回落 Dify）；DifyAgent（直连 Dify Chat Agent）保留可切换
 
 启动步骤见上方「**4. 启动本地数字人服务**」。详细部署步骤与故障排查见 `AGENTS.md`（ADH 专节）或 `doc/local-digital-human-deploy-plan.md`。
@@ -82,7 +82,7 @@ digitalHuman/
 
 **详细说明**（基于 2026-08-01 实际部署验证）：
 
-- **ffmpeg / ffprobe**：ADH 数字人 TTS 链路必需——MiniMax 返回 MP3，`pydub` 转 WAV 依赖它。缺失时 TTS 静默失败，后端日志报 `No such file or directory: 'ffprobe'`。安装：`sudo apt install ffmpeg`。
+- **ffmpeg / ffprobe**：ADH 数字人 TTS 链路必需——QwenAPI（默认）/MiniMax 返回 MP3，`pydub` 转 WAV 依赖它。缺失时 TTS 静默失败，后端日志报 `No such file or directory: 'ffprobe'`。安装：`sudo apt install ffmpeg`。
 - **Python 版本**：主后端 FastAPI 用 Python 3.10+（最低要求 3.9，因 `numpy>=1.26.0` 不再支持 Python 3.8）；**ADH（live2d-frontend）要求 Python 3.11 或更低**——其 `numpy==1.24.4` 的预编译包最高支持到 3.11，在 Python 3.12 下 pip 源码编译失败。若系统默认 Python 3.12，需用 `virtualenv` 创建 3.10 虚拟环境（Ubuntu 的 `python3.10-venv` 包可能缺失，`virtualenv` 是可靠替代）：
 
   ```bash
@@ -123,9 +123,10 @@ cp .env.example .env
 | `LLM_TEMPERATURE` | 对话 LLM 默认采样温度（默认 `0.7`） |
 | `DIALOGUE_ENGINE` | 对话引擎开关（默认 `langchain`：LangChain agent 主链路，异常自动回落 Dify；`dify`：强制走 Dify Chat Agent），见 `app/services/chat_agent.py` |
 | `AGENT_DUAL_MODE` | 双模式对话开关（默认 `true`：简单问答走快速路径、复杂任务走 LangGraph 规划路径；`false` 全部走快速路径，回退到阶段2 行为），见「双模式对话」节 |
-| `EMBEDDING_API_KEY` | Minimax Embedding API Key（RAG 向量化，与 OPENAI_*/LLM_* 独立；不配置时自动降级本地 TF-IDF，详见 AGENTS.md「本地 RAG 知识库」） |
-| `EMBEDDING_API_BASE` | Minimax Embedding 端点（默认 `https://api.minimaxi.com/v1`，**原生 API 格式**：请求 `texts`+`type`（query/db）、响应 `vectors`，实测模型 `embo-01`，见 `doc/phase1-e2e-verification.md`） |
-| `EMBEDDING_MODEL` | Embedding 模型名（默认 `embo-01`） |
+| `EMBEDDING_API_KEY` | Embedding API Key（RAG 向量化，与 OPENAI_*/LLM_* 独立；不配置时自动降级本地 TF-IDF，详见 AGENTS.md「本地 RAG 知识库」） |
+| `EMBEDDING_API_BASE` | Embedding 端点（默认 `https://api.minimaxi.com/v1`） |
+| `EMBEDDING_MODEL` | Embedding 模型名（默认 `embo-01`；**2026-08-07 迁移 Qwen/DashScope：`qwen3.7-text-embedding`（1024 维）**） |
+| `EMBEDDING_API_STYLE` | Embedding 请求体格式（默认 `minimax`：原生格式 `texts`+`type`（query/db）、响应 `vectors`，实测模型 `embo-01`；`openai`：OpenAI 兼容格式 `input`、响应 `data[].embedding`，DashScope compatible-mode 用，见 `app/core/embedding.py` 与 `.env.example`） |
 | `MEMORY_DB_PATH` | 短期记忆 SQLite 存储路径（默认 `memory_store.db`，独立于主库 digital_human.db，标准库 sqlite3，无额外依赖，见 AGENTS.md「短期记忆持久化」） |
 | `MEMORY_TTL_DAYS` | 会话 TTL（天，默认 7）：滑动窗口，每次对话刷新过期时间，到期会话由后台任务清理 |
 | `MEMORY_CLEANUP_INTERVAL_SECONDS` | 过期会话清理周期（秒，默认 3600）：启动时立即清理一次 + 定期清理 |
@@ -169,7 +170,7 @@ Start-Process -WindowStyle Hidden -WorkingDirectory "$PWD/live2d-frontend/web" -
 > - 命令中的 `$PWD` 需替换为项目根目录绝对路径（如 `E:/project_file/digitalHuman`），或将终端 cd 到项目根目录后执行。
 > - 数字人后端端口已在 `config_template.yaml` 中改为 **8001**（原 8000 被主后端占用）。
 > - 数字人前端需在 `web/.env` 中设置 `NEXT_PUBLIC_ADH_SERVER_PORT=8001`，否则心跳连错端口导致 "Soul is death!"。
-> - 存在两个配置文件：`config_template.yaml`（端口 8001，使用腾讯云 ASR + LangChainAgent（默认，走本后端对话链路）+ MiniMax TTS）和 `config_all_in_dify.yaml`（端口 8000，引擎全部走 Dify API）。默认使用 `config_template.yaml`，切换配置时注意端口变化。
+> - 存在两个配置文件：`config_template.yaml`（端口 8001，使用腾讯云 ASR + LangChainAgent（默认，走本后端对话链路）+ QwenAPI TTS（2026-08-07 从 MiniMax 迁移））和 `config_all_in_dify.yaml`（端口 8000，引擎全部走 Dify API）。默认使用 `config_template.yaml`，切换配置时注意端口变化。
 
 ### 3. 启动后端（手动）
 
@@ -215,7 +216,7 @@ pnpm run dev    # 或 node node_modules\next\dist\bin\next dev -p 3000
 
 > **两个命令需分别在各自的终端窗口中运行**（不要关掉）。首次启动前端可能需要清 localStorage `character-storage` 键以加载默认 Hiyori 模型。
 >
-> 引擎配置详见 `AGENTS.md`（ADH 专节）或 `doc/local-digital-human-deploy-plan.md`。当前已配置：腾讯云 ASR + LangChainAgent（默认，走本后端 LangChain 主链路，异常自动回落 Dify）+ MiniMax TTS（`Chinese_sweet_girl_nv1` 音色）。
+> 引擎配置详见 `AGENTS.md`（ADH 专节）或 `doc/local-digital-human-deploy-plan.md`。当前已配置：腾讯云 ASR + LangChainAgent（默认，走本后端 LangChain 主链路，异常自动回落 Dify）+ QwenAPI TTS（`qwen-audio-3.0-tts-flash` + `longtongxuxian`（龙彤旭弦）音色，2026-08-07 从 MiniMax 迁移；key 经环境变量 `QWEN_API_KEY` 提供）。
 
 ### 6. 访问应用
 
@@ -451,7 +452,7 @@ Dify 兜底链路同样流式（`response_mode=streaming`），`<think>...</thin
 
 ## 长期记忆（阶段2 T2 对话记忆写入 + T3 检索注入）
 
-对话完成后后台异步提取用户事实/偏好/习惯，写入 `user_memory` 向量库（Minimax embedding + 轻量文件持久化，按 user 隔离）：
+对话完成后后台异步提取用户事实/偏好/习惯，写入 `user_memory` 向量库（`EMBEDDING_*` 远端 Embedding（Minimax 或 Qwen/DashScope）+ 轻量文件持久化，按 user 隔离）：
 
 - **记忆条目 schema（T3 契约，详见 [`doc/long-term-memory.md`](digitalHumanApi/doc/long-term-memory.md)）**：`{user, fact_type, content, source_conversation_id, timestamp}`；`fact_type` 为 `preference`（偏好）/ `fact`（事实）/ `habit`（习惯），`content` 为自然语言记忆句（如「喜欢拍照」「带老人小孩」）
 - **写入**：`app/services/memory_service.py` 的 `save_user_memory(user, facts)`——同 user 同事实**覆盖更新**（记忆不膨胀），每用户条数上限 `MEMORY_MAX_PER_USER`（默认 200，超限淘汰最旧）
@@ -480,7 +481,7 @@ pytest -v
 | Dify Workflow 量化分析（早期验收记录；阶段4 起已本地 LLM 化，见下方「阶段4 量化评估本地化」行） | ✅ 正常（16 条对话全部评估完成，大屏/报告有真实数据） |
 | 数据大屏 | ✅ 正常（sentiment_trend 全量连续查询，从最早对话日到今天、缺失日零值回填 / satisfaction / hot_issues 均有数据） |
 | 手动触发端点 | ✅ 正常（`POST /sync-now` + `/run-now` 手动触发后台逻辑） |
-| 本地数字人部署 | ✅ 已部署（TencentAPI ASR + LangChainAgent + MiniMax TTS） |
+| 本地数字人部署 | ✅ 已部署（TencentAPI ASR + LangChainAgent + QwenAPI TTS（2026-08-07 从 MiniMax 迁移，DashScope `qwen-audio-3.0-tts-flash`）） |
 | 动态推荐问句 | ✅ 正常（每 5 分钟由本地 LLM 生成刷新（阶段3 T3 脱离 Dify，`LLM_API_*` 配置 opencode-go，聚合 Dashboard 数据生成，失败降级保留旧缓存），缓存 stale-while-revalidate） |
 | 阶段1 双轨联调 | ✅ 通过（LangChain 新链路全流程 + 故障回落 Dify + ADH 接入 + 前端流式渲染；联调发现并修复 3 个缺陷：Minimax Embedding 原生 API 格式、ADH SSE 事件契约、回落错误处理，详见 [`doc/phase1-e2e-verification.md`](doc/phase1-e2e-verification.md)） |
 | 阶段2 T1 短期记忆 | ✅ 实现完成（会话历史 SQLite 落盘 + TTL 滑动窗口过期清理 + 重启恢复，存储层/清理任务/集成单测覆盖，测试全绿） |
@@ -535,7 +536,7 @@ A: 语音功能需要**安全上下文**（HTTPS 或 localhost）。ADH 数字�
 管理后台等非语音功能不受此限制。本项目已内置 `crypto.randomUUID` 的 fallback（见 `digitalHumanVue/src/utils/uuid.ts`），因此访客端非语音页面可在明文 HTTP 下正常运行，仅语音输入受限。
 
 **Q: ADH 数字人凭据在哪里配置？**
-A: 凭据不写入代码库，配置在 ADH 引擎配置文件中：`live2d-frontend/configs/engines/tts/minimaxTTS.yaml`（MiniMax TTS）、`live2d-frontend/configs/engines/asr/tencentAPI.yaml`（腾讯云 ASR）、`live2d-frontend/configs/agents/langchainAgent.yaml`（默认引擎，`LLM_API_URL` 指向本后端，可选 Bearer token）、`live2d-frontend/configs/agents/difyAgent.yaml`（Dify Agent，保留可切换直连）。修改后需重启 ADH 后端生效。
+A: 凭据不写入代码库，配置在 ADH 引擎配置文件中：`live2d-frontend/configs/engines/tts/qwenTTS.yaml`（QwenAPI TTS，key 优先读环境变量 `QWEN_API_KEY`，yaml 留空占位）、`live2d-frontend/configs/engines/tts/minimaxTTS.yaml`（MiniMax TTS，保留可切换）、`live2d-frontend/configs/engines/asr/tencentAPI.yaml`（腾讯云 ASR）、`live2d-frontend/configs/agents/langchainAgent.yaml`（默认引擎，`LLM_API_URL` 指向本后端，可选 Bearer token）、`live2d-frontend/configs/agents/difyAgent.yaml`（Dify Agent，保留可切换直连）。修改后需重启 ADH 后端生效。
 
 ## Dify Workflow 量化分析规格（历史存档）
 

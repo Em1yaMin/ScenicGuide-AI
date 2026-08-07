@@ -70,13 +70,18 @@ class Settings(BaseModel):
     # AGENT_DUAL_MODE=false：全部走快速路径，行为与阶段2 完全一致（回退开关）
     AGENT_DUAL_MODE: bool = os.environ.get("AGENT_DUAL_MODE", "true").lower() == "true"
 
-    # RAG 向量化 Embedding（Minimax 原生 Embedding API，与对话 LLM 的 LLM_* 及运营分析的 OPENAI_* 完全独立）
+    # RAG 向量化 Embedding（与对话 LLM 的 LLM_* 及运营分析的 OPENAI_* 完全独立）
     # 不配置 EMBEDDING_API_KEY 时自动降级为本地 TF-IDF 向量化（见 app/core/embedding.py）
+    # EMBEDDING_API_STYLE 控制请求体格式（2026-08-07 从 Minimax 迁移到 Qwen/DashScope 实测）：
+    #   minimax（默认，兼容旧配置）: 原生格式 {"model", "texts", "type"}（type=query|db）
+    #   openai: OpenAI 兼容格式 {"model", "input": [...]}（DashScope compatible-mode，
+    #     实测 qwen3.7-text-embedding 1024 维，端点 https://dashscope.aliyuncs.com/compatible-mode/v1）
     EMBEDDING_API_BASE: str = os.environ.get(
         "EMBEDDING_API_BASE", "https://api.minimaxi.com/v1"
     )
     EMBEDDING_API_KEY: str = os.environ.get("EMBEDDING_API_KEY", "")
     EMBEDDING_MODEL: str = os.environ.get("EMBEDDING_MODEL", "embo-01")
+    EMBEDDING_API_STYLE: str = os.environ.get("EMBEDDING_API_STYLE", "minimax")
 
     SSH_HOST: str = os.environ.get("SSH_HOST", "")
     SSH_PORT: int = int(os.environ.get("SSH_PORT", "22"))

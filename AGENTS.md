@@ -12,7 +12,7 @@
 digitalHumanApi/          # Python FastAPI 后端
   app/
     main.py               # 应用入口（lifespan、CORS、全局异常处理、router 注册）
-    core/                 # config.py (Settings) + database.py + embedding.py (Embedding 工厂/Minimax) + rag.py (命名空间向量存储)
+    core/                 # config.py (Settings) + database.py + embedding.py (Embedding 工厂/Minimax→Qwen) + rag.py (命名空间向量存储)
     data/                 # 本地 JSON 数据源（景点、路线）
     models/               # SQLAlchemy 2.0 ORM 实体 → models/CLAUDE.md
     schemas/              # Pydantic v2 请求/响应模型 → schemas/CLAUDE.md
@@ -49,7 +49,10 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 ## 本地 RAG 知识库（无外部向量库依赖）
 
-- `app/core/embedding.py` — Embedding 选择工厂 + `MinimaxEmbeddings`（**原生** `/embeddings` 端点，httpx 实现，配置 `EMBEDDING_API_KEY` 启用，与对话 LLM（`LLM_*`）及运营分析（`OPENAI_*`）完全独立）；**原生 API 格式（实测 embo-01，2026-08-06 联调修正）**：请求体 `{"model", "texts", "type"}`（`embed_documents` 传 `type=db`、`embed_query` 传 `type=query`，两者向量空间不同混用会降低检索质量），响应 `{"vectors": [...]}`；响应解析兼容 OpenAI 兼容格式（`data` 数组）便于未来切换；**先检查 `base_resp.status_code` 业务错误**（如 1008 insufficient balance，HTTP 200 但 vectors 为 null，真实环境实测 2026-08-06）——先行明确诊断，不误报"响应条数不符"；未配置 key 或 API 失败时自动降级本地 TF-IDF（日志告警，`degraded` 标记透出到检索响应）
+- `app/core/embedding.py` — Embedding 选择工厂 + `MinimaxEmbeddings`（**请求体格式开关 `EMBEDDING_API_STYLE`，2026-08-07 从 Minimax 迁移 Qwen/DashScope**；httpx 实现，配置 `EMBEDDING_API_KEY` 启用，与对话 LLM（`LLM_*`）及运营分析（`OPENAI_*`）完全独立）：
+  - `minimax`（默认，兼容旧配置）：**原生 API 格式（实测 embo-01，2026-08-06 联调修正）**——请求体 `{"model", "texts", "type"}`（`embed_documents` 传 `type=db`、`embed_query` 传 `type=query`，两者向量空间不同混用会降低检索质量），响应 `{"vectors": [...]}`；**先检查 `base_resp.status_code` 业务错误**（如 1008 insufficient balance，HTTP 200 但 vectors 为 null，真实环境实测 2026-08-06）——先行明确诊断，不误报"响应条数不符"
+  - `openai`：OpenAI 兼容请求体 `{"model", "input": [...]}`（无 type 字段），响应 `{"data": [{"embedding": [...]}]}`（含 index 乱序恢复）；DashScope compatible-mode 实测（2026-08-07）模型 `qwen3.7-text-embedding`（1024 维），端点 `https://dashscope.aliyuncs.com/compatible-mode/v1`，key 为 `sk-ws-` 前缀；base_resp 检查仅 minimax 风格执行（openai 风格错误走 HTTP 状态码）
+  - 响应解析两种格式共用（vectors 数组优先，兼容 data 数组）；未配置 key 或 API 失败时自动降级本地 TF-IDF（日志告警，`degraded` 标记透出到检索响应）；单测 `tests/test_embedding.py` 覆盖 minimax/openai 两种请求体 + openai 响应解析（MockTransport）
 - `app/core/rag.py` — 命名空间隔离向量存储（knowledge / documents / user_memory，各自独立索引与 `rag_data/` 持久化文件；documents 复用旧集合名 `scenic_knowledge` 兼容升级前数据）；检索阶段 numpy 矩阵乘法加速余弦相似度；兼容 langchain_core `Document`/`Embeddings` 接口；**默认文档目录 `DEFAULT_DOC_DIR` 限定到 `doc/景区知识库/`**（三份景区知识 md，git 已纳入），不索引 doc/ 下架构/设计/部署文档；**已知现象：`SimpleVectorStore._load` 每次启动会全量重向量化（向量不落盘），3769 片段约 2 分钟，属已知优化项**
 - `app/services/rag_service.py` — 文档加载、分块、向量化、检索；`RAG_MAX_CONTEXT_LEN`（默认 2000）控制注入上下文长度；`search_documents`/`index_documents` 均接受 `namespace` 参数（默认检索 knowledge+documents 公共命名空间）；`search_documents` 为**统一检索入口**（对话/后台/推荐 Agent 共用），同步实现 `_search_documents_sync` 供推荐 Agent 工具调用；另有 `index_knowledge_entries` 将知识库条目（DB 行）重建到 knowledge 命名空间，供 CRUD 变更后同步
 - `app/routers/rag.py` — `POST /api/rag/search`（`namespace` 参数，响应含 `namespaces`/`embedding_backend`/`degraded` 标记）、`POST /api/rag/index`（默认写入 documents 命名空间，文档源 `doc/景区知识库/`）、`GET /api/rag/status`（各命名空间状态）
@@ -188,7 +191,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - 后端: `digitalHumanApi/.env`，通过 `app/core/config.py` 的 `Settings` Pydantic 模型加载；`digitalHumanApi/.env.example` 含全部变量与用途注释
 - 前端: `digitalHumanVue/.env`，仅 `VITE_` 前缀变量在客户端可用，类型声明在 `env.d.ts`
 - Docker: 通过 `docker-compose.yml` 的 `environment` 字段传入
-- 凭证（Dify Key、OpenAI Key、`ADMIN_API_TOKEN`、腾讯云/MiniMax 凭证）只从 `.env` / 云平台控制台获取，绝不写入代码库；仓库内 `.env.example` 仅含占位符
+- 凭证（Dify Key、OpenAI Key、`ADMIN_API_TOKEN`、腾讯云/MiniMax/Qwen（DashScope）凭证）只从 `.env` / 云平台控制台获取，绝不写入代码库；仓库内 `.env.example` 仅含占位符
 </important>
 
 <important if="you are writing or modifying tests">
@@ -210,12 +213,14 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 | **TencentAPI** | ASR | `configs/engines/asr/tencentAPI.yaml` | 引擎可用，麦克风录音链路调试中 |
 | **LangChainAgent** | Agent | `configs/agents/langchainAgent.yaml` | **默认引擎**，走本后端 `/api/v1/dialogue/chat`（LangChain 主链路，后端侧异常自动回落 Dify）；SSE 流式正常 |
 | **DifyAgent** | Agent | `configs/agents/difyAgent.yaml` | 保留可切换（fallback 不丢），直连 Dify Chat Agent |
-| **MiniMaxAPI** | TTS | `configs/engines/tts/minimaxTTS.yaml` | `Chinese_sweet_girl_nv1` 音色，替代 difyTTSWorkflow |
+| **QwenAPI** | TTS | `configs/engines/tts/qwenTTS.yaml` | **默认引擎（2026-08-07 从 MiniMax 迁移，DashScope WebSocket）**：dashscope SDK `SpeechSynthesizer`，模型 `qwen-audio-3.0-tts-flash`、音色 `qwen-audio-3.0-tts-flash-longtongxuxian`（龙彤旭弦，活泼灵动女声），mp3→wav 输出；key 优先读环境变量 `QWEN_API_KEY`（yaml 留空占位不入库）；SDK 初始化要求先设全局 `dashscope.api_key`（实测）；真实调用与 mock 单测均通过（`test/test_qwen_tts.py` 8 用例） |
+| **MiniMaxAPI** | TTS | `configs/engines/tts/minimaxTTS.yaml` | 保留可切换（`Chinese_sweet_girl_nv1` 音色，替代 difyTTSWorkflow） |
 
 ### 凭证位置（不存真实值）
 - **腾讯云 ASR**: AK/SK 来自腾讯云控制台下载的 SecretKey.csv；APPID、REGION `ap-guangzhou` 配置在 tencentAPI.yaml
 - **LangChainAgent**: `LLM_API_URL` 指向本后端（默认 `http://127.0.0.1:8000`），无鉴权场景可不填 token；`LLM_API_USER` 默认 `visitor`（可选 JWT token 走 Bearer 透传，见下方 SSE 契约）
 - **Dify Agent**: URL `http://<dify-server-ip>/v1` + `app-` 开头的 Key + User，由 Dify 部署方提供（切换回 DifyAgent 时填写）
+- **QwenAPI TTS**: API Key 从环境变量 `QWEN_API_KEY` 读取（部署时 export；yaml 的 API_KEY 留空占位）；如改用配置文件则填 DashScope API Key（`sk-` 开头）
 - **MiniMax TTS**: API Key 与 Group ID 来自 MiniMax 开放平台，Model `speech-2.8-hd`
 
 ### 启动命令
@@ -231,8 +236,8 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 
 ### 关键修改文件（相对于 ADH 根目录）
 - `configs/config_template.yaml` — SUPPORT_LIST 精简为仅目标引擎；AGENTS 默认 LangChainAgent（DifyAgent 保留可切换）
-- `configs/engines/asr/tencentAPI.yaml`、`configs/engines/tts/minimaxTTS.yaml`（新建）、`configs/agents/difyAgent.yaml`、`configs/agents/langchainAgent.yaml`（新建）— 引擎凭证/参数
-- `digitalHuman/engine/tts/minimaxTTS.py`（新建）+ `digitalHuman/engine/tts/__init__.py` — MiniMax TTS 引擎及注册
+- `configs/engines/asr/tencentAPI.yaml`、`configs/engines/tts/qwenTTS.yaml`（新建，默认 TTS）、`configs/engines/tts/minimaxTTS.yaml`、`configs/agents/difyAgent.yaml`、`configs/agents/langchainAgent.yaml`（新建）— 引擎凭证/参数
+- `digitalHuman/engine/tts/qwenTTS.py`（新建，2026-08-07 Qwen/DashScope TTS 引擎，注册名 QwenAPI）+ `digitalHuman/engine/tts/minimaxTTS.py`（新建）+ `digitalHuman/engine/tts/__init__.py` — TTS 引擎及注册
 - `digitalHuman/engine/asr/tencentASR.py` — 已移除 `req.AppId` 行
 - `digitalHuman/agent/core/langchainAgent.py`（新建，2026-08-06 联调修正 SSE 契约）— LangChain 引擎：调本后端 `/api/v1/dialogue/chat`，SSE 解析 **`type` 字段**（`token`（text 增量，经 `ThinkFilter` 过滤后产出）/`step`（忽略，透出日志）/`done`（携带 conversation_id，作流结束）/`error`（`fallback=true` 时仅告警不中断、继续消费 Dify 兜底输出；`fallback=false` 抛错）），兼容旧 `event: message/answer` 形态；非流式解析 ChatResponse JSON（answer/conversation_id），见代码头注释
 - `digitalHuman/agent/core/difyAgent.py` — 新增 `ThinkFilter`，流式过滤 `<think>` 标签
