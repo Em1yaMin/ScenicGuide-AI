@@ -419,7 +419,7 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
                                         </div>
                                     ))}
                                 </div>
-                                <img src="/icons/ai_icon.svg" className="w-6 h-6 rounded-full order-1 self-start" />
+                                <img src="/icons/ai_icon.svg" alt="" className="w-6 h-6 rounded-full order-1 self-start" />
                             </div>
                         </div>
                         :

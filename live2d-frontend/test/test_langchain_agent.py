@@ -3,7 +3,7 @@
 @File    :   test_langchain_agent.py
 @Author  :   一力辉
 LangChainAgent 引擎单测：mock 掉 httpxAsyncClient，验证
-- SSE 流式解析（message 增量 / step 忽略 / conversation 事件）
+- SSE 流式解析（message 增量 / step 透出为 StepMessage / conversation 事件）
 - 非流式 JSON 响应
 - 请求体构造（streaming/use_rag/rag_top_k/conversation_id/token）
 - 异常路径（HTTP 错误 / error 事件 / 参数缺失）

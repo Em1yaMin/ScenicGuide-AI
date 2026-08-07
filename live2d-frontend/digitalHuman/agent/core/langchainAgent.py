@@ -22,7 +22,7 @@ CHAT_ROUTE = "/api/v1/dialogue/chat"
 DATA_PATTERN = re.compile(r'data:\s*({.*})')
 
 # 后端流式事件类型（契约见服务端 app/routers/dialogue.py 的 _sse，阶段1 T3）：
-#   {"type": "step", "tool", "label"}   工具调用步骤（忽略/透出日志）
+#   {"type": "step", "tool", "label"}   工具调用步骤（透出为 StepMessage）
 #   {"type": "token", "text"}           回答增量
 #   {"type": "done", "conversation_id", ...}  流式完成（会话 ID 在此事件）
 #   {"type": "error", "message", "fallback"}  链路错误（fallback=true 已切换 Dify）
