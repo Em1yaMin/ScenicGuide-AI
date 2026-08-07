@@ -390,7 +390,7 @@ Dify 兜底链路同样流式（`response_mode=streaming`），`<think>...</thin
 
 ### 前端消费
 
-`digitalHumanVue/src/composables/useDialogueStream.ts` 以 fetch + ReadableStream 逐帧解析 SSE（无额外依赖），`ChatView.vue` 右侧面板提供文本对话：步骤 chips 可视化思考过程、回答逐字渲染（含光标）、推荐问句一键发送、主链路回落提示。
+SSE 由 ADH 数字人消费（`live2d-frontend/digitalHuman/agent/core/langchainAgent.py`，事件契约见其代码头注释）。主前端对话页（`ChatView.vue`，2026-08-07 起）不再自带聊天面板——数字人 iframe 内置完整对话功能（输入框/语音/聊天记录），推荐问句点击后经 postMessage `SET_INPUT` 注入数字人输入框。
 
 ## 双模式对话（阶段3 T1：简单问答 / 复杂规划）
 
