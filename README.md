@@ -82,7 +82,7 @@ digitalHuman/
 
 **详细说明**（基于 2026-08-01 实际部署验证）：
 
-- **ffmpeg / ffprobe**：ADH 数字人 TTS 链路必需——MiniMax 返回 MP3，`pydub` 转 WAV 依赖它。缺失时 TTS 静默失败，后端日志报 `No such file or directory: 'ffprobe'`。安装：`sudo apt install ffmpeg`。
+- **ffmpeg / ffprobe**：ADH 数字人 TTS 链路必需——QwenAPI（默认）/MiniMax 返回 MP3，`pydub` 转 WAV 依赖它。缺失时 TTS 静默失败，后端日志报 `No such file or directory: 'ffprobe'`。安装：`sudo apt install ffmpeg`。
 - **Python 版本**：主后端 FastAPI 用 Python 3.10+（最低要求 3.9，因 `numpy>=1.26.0` 不再支持 Python 3.8）；**ADH（live2d-frontend）要求 Python 3.11 或更低**——其 `numpy==1.24.4` 的预编译包最高支持到 3.11，在 Python 3.12 下 pip 源码编译失败。若系统默认 Python 3.12，需用 `virtualenv` 创建 3.10 虚拟环境（Ubuntu 的 `python3.10-venv` 包可能缺失，`virtualenv` 是可靠替代）：
 
   ```bash
@@ -452,7 +452,7 @@ Dify 兜底链路同样流式（`response_mode=streaming`），`<think>...</thin
 
 ## 长期记忆（阶段2 T2 对话记忆写入 + T3 检索注入）
 
-对话完成后后台异步提取用户事实/偏好/习惯，写入 `user_memory` 向量库（Minimax embedding + 轻量文件持久化，按 user 隔离）：
+对话完成后后台异步提取用户事实/偏好/习惯，写入 `user_memory` 向量库（`EMBEDDING_*` 远端 Embedding（Minimax 或 Qwen/DashScope）+ 轻量文件持久化，按 user 隔离）：
 
 - **记忆条目 schema（T3 契约，详见 [`doc/long-term-memory.md`](digitalHumanApi/doc/long-term-memory.md)）**：`{user, fact_type, content, source_conversation_id, timestamp}`；`fact_type` 为 `preference`（偏好）/ `fact`（事实）/ `habit`（习惯），`content` 为自然语言记忆句（如「喜欢拍照」「带老人小孩」）
 - **写入**：`app/services/memory_service.py` 的 `save_user_memory(user, facts)`——同 user 同事实**覆盖更新**（记忆不膨胀），每用户条数上限 `MEMORY_MAX_PER_USER`（默认 200，超限淘汰最旧）
