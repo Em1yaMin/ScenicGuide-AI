@@ -477,7 +477,7 @@ pytest -v
 | 后端启动 | ✅ 正常（健康检查 200，后台轮询已连接 Dify 并拉取到对话） |
 | 前端启动 | ✅ 正常（Vite 8 ready，页面 HTTP 200） |
 | Dify 对话抓取 | ✅ 正常（`/messages` 拉取返回 200） |
-| Dify Workflow 量化分析 | ✅ 正常（16 条对话全部评估完成，大屏/报告有真实数据） |
+| Dify Workflow 量化分析（早期验收记录；阶段4 起已本地 LLM 化，见下方「阶段4 量化评估本地化」行） | ✅ 正常（16 条对话全部评估完成，大屏/报告有真实数据） |
 | 数据大屏 | ✅ 正常（sentiment_trend 全量连续查询，从最早对话日到今天、缺失日零值回填 / satisfaction / hot_issues 均有数据） |
 | 手动触发端点 | ✅ 正常（`POST /sync-now` + `/run-now` 手动触发后台逻辑） |
 | 本地数字人部署 | ✅ 已部署（TencentAPI ASR + LangChainAgent + MiniMax TTS） |

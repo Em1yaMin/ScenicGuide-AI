@@ -4,7 +4,7 @@
 
 # Project Overview
 
-景区导览 AI 数字人系统 — Python FastAPI 后端 + Vue 3 前端单体应用，通过 Docker Compose 部署。后端集成 Dify AI 平台提供对话抓取与情感分析，另含纯本地推荐引擎、本地 RAG 知识库和 AI 运营分析。前端提供访客端（数字人对话）和管理后台（数据大屏 + 报告 + 知识库管理）。
+景区导览 AI 数字人系统 — Python FastAPI 后端 + Vue 3 前端单体应用，通过 Docker Compose 部署。后端集成 Dify AI 平台仅提供对话双轨回落与历史数据抓取（阶段4 起量化评估等分析链路已本地 LLM 化，见「Dify 依赖面」专节），另含纯本地推荐引擎、本地 RAG 知识库和 AI 运营分析。前端提供访客端（数字人对话）和管理后台（数据大屏 + 报告 + 知识库管理）。
 
 # Architecture
 
@@ -31,7 +31,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 ```
 
 请求流: Vue → fetch(/api/*) → Vite proxy → FastAPI → SQLite
-数据流: Dify API ← polling task → SQLite → analysis task → Dify Workflow → SQLite
+数据流: Dify API ← polling task → SQLite → analysis task → 本地 LLM 量化评估 → SQLite（Evaluation 表，阶段4 起不再经 Dify Workflow）
 
 ## 个性化推荐（纯本地，无外部 API）
 
