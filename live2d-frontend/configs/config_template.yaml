@@ -13,8 +13,8 @@ SERVER:
       SUPPORT_LIST: [ "openaiAPI.yaml", "baiduAPI.yaml" ]
       DEFAULT: "openaiAPI.yaml"
     TTS: 
-      SUPPORT_LIST: [ "minimaxTTS.yaml" ]
-      DEFAULT: "minimaxTTS.yaml"
+      SUPPORT_LIST: [ "qwenTTS.yaml", "minimaxTTS.yaml" ]
+      DEFAULT: "qwenTTS.yaml"
   AGENTS: 
     SUPPORT_LIST: [ "langchainAgent.yaml", "difyAgent.yaml" ]
     DEFAULT: "langchainAgent.yaml"

@@ -16,3 +16,5 @@ tencentcloud-sdk-python-asr
 requests==2.31.0
 uvicorn==0.26.0
 yacs==0.1.8
+# QwenAPI（qwenTTS.py）依赖，可选：仅 TTS 走 Qwen/DashScope 时需要（pip install dashscope）
+# dashscope==1.26.5

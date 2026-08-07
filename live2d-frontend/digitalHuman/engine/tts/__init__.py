@@ -9,6 +9,7 @@ from .edgeTTS import EdgeAPI
 from .difyTTS import DifyAPI
 from .difyTTSWorkflow import DifyTTSW
 from .minimaxTTS import MiniMaxAPI
+from .qwenTTS import QwenAPI
 from .ttsFactory import TTSFactory
 
 __all__ = ['TTSFactory']
