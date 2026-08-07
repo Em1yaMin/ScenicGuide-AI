@@ -42,11 +42,15 @@ async def apiAgentInfer(item: AgentInferIn):
     response = Response()
     try:
         input = TextMessage(data=item.data)
+        agent = agentPool.get(item.engine)
+        if agent is None:
+            raise ValueError(f"No such agent: {item.engine}")
+        run_stream = agent.run(input, item.streaming, **item.settings)
 
         async def stream_with_steps():
             # 透出 agent 产出流：StepMessage 编码为步骤帧（前端渲染），
             # 回答文本原样透出（行为不变）
-            async for chunk in agentPool.get(item.engine).run(input, item.streaming, **item.settings):
+            async for chunk in run_stream:
                 if isinstance(chunk, StepMessage):
                     frame = json.dumps(
                         {"tool": chunk.tool or "", "label": chunk.label or ""},
@@ -59,7 +63,7 @@ async def apiAgentInfer(item: AgentInferIn):
         return StreamingResponse(stream_with_steps(), media_type="text/event-stream")
     except Exception as e:
         response.error(str(e))
-        return StreamingResponse(interalError)
+        return StreamingResponse(interalError())
 
 
 class ConversatonIdIn(BaseModel):

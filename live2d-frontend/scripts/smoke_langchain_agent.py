@@ -108,9 +108,10 @@ async def smoke_agent_engine(url: str, token: str, user: str, query: str) -> boo
         ok &= _report("createConversation 返回会话 ID", bool(conversation_id), conversation_id)
         print("  run(streaming=True)...")
         outputs = []
-        async for text in agent.run(TextMessage(data=query), streaming=True,
-                                    conversation_id=conversation_id, **settings):
-            outputs.append(text)
+        async for chunk in agent.run(TextMessage(data=query), streaming=True,
+                                     conversation_id=conversation_id, **settings):
+            if isinstance(chunk, str):
+                outputs.append(chunk)
         answer = "".join(outputs)
         print(f"  answer: {answer[:200]!r}")
         ok &= _report("引擎流式输出非空", bool(answer), f"{len(outputs)} chunks")
