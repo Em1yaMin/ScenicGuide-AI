@@ -14,6 +14,8 @@ const iframeSrc = computed(() => {
   const params = new URLSearchParams()
   params.set('visitor_id', store.visitorId)
   params.set('live2d_model', import.meta.env.VITE_LIVE2D_MODEL || 'hiyori')
+  // 嵌入模式：隐藏 ADH 顶部菜单/设置/画廊（配置由本后端定死）
+  params.set('hide_menu', '1')
   // 登录用户 / 游客 token：供数字人端透传对话接口（Bearer），实现「对话携带 token」
   if (auth.token) {
     params.set('auth_token', auth.token)
