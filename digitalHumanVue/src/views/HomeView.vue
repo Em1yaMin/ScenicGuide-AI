@@ -24,16 +24,43 @@ interface RouteCard {
 
 /** 静态兜底数据：首页活数据接口不可用时的热门景点（原写死卡片内容） */
 const FALLBACK_SPOTS: SpotCard[] = [
-  { name: '黄鹤楼', tag: '历史古迹', description: '天下绝景，千年诗楼，登高望远尽览江城风貌', icon: '🏯' },
-  { name: '东湖绿道', tag: '自然风光', description: '城中湖泊，四季皆景，骑行漫步的绝佳去处', icon: '🏞' },
-  { name: '省博物馆', tag: '文化博览', description: '曾侯乙编钟，千年楚文化的璀璨见证', icon: '🏛' },
+  {
+    name: '黄鹤楼',
+    tag: '历史古迹',
+    description: '天下绝景，千年诗楼，登高望远尽览江城风貌',
+    icon: '🏯',
+  },
+  {
+    name: '东湖绿道',
+    tag: '自然风光',
+    description: '城中湖泊，四季皆景，骑行漫步的绝佳去处',
+    icon: '🏞',
+  },
+  {
+    name: '省博物馆',
+    tag: '文化博览',
+    description: '曾侯乙编钟，千年楚文化的璀璨见证',
+    icon: '🏛',
+  },
 ]
 
 /** 静态兜底数据：首页活数据接口不可用时的推荐路线 */
 const FALLBACK_ROUTES: RouteCard[] = [
-  { name: '经典一日游', description: '黄鹤楼 → 户部巷 → 东湖绿道', meta: '约 6 小时 · 适合初次到访' },
-  { name: '文化深度游', description: '省博物馆 → 归元寺 → 古琴台', meta: '约 8 小时 · 适合文化爱好者' },
-  { name: '亲子欢乐行', description: '东湖海洋世界 → 植物园 → 磨山', meta: '约 5 小时 · 适合家庭出游' },
+  {
+    name: '经典一日游',
+    description: '黄鹤楼 → 户部巷 → 东湖绿道',
+    meta: '约 6 小时 · 适合初次到访',
+  },
+  {
+    name: '文化深度游',
+    description: '省博物馆 → 归元寺 → 古琴台',
+    meta: '约 8 小时 · 适合文化爱好者',
+  },
+  {
+    name: '亲子欢乐行',
+    description: '东湖海洋世界 → 植物园 → 磨山',
+    meta: '约 5 小时 · 适合家庭出游',
+  },
 ]
 
 // ── State ──
@@ -132,19 +159,13 @@ function scrollToRecommendedRoutes() {
     <section class="hero" :class="{ 'hero--visible': heroVisible }">
       <div class="hero-noise" />
       <div class="hero-content">
-        <p class="hero-label">
-          <span class="hero-label-line" />AI 智慧景区服务
-        </p>
+        <p class="hero-label"><span class="hero-label-line" />AI 智慧景区服务</p>
         <h1 class="hero-title">
           探索景区故事<br />
           <span class="hero-accent">AI 数字人</span>为您导览
         </h1>
-        <p class="hero-subtitle">
-          与数字人对话，发现每个景点背后的历史与文化
-        </p>
-        <blockquote class="hero-quote">
-          「登山则情满于山，观海则意溢于海」
-        </blockquote>
+        <p class="hero-subtitle">与数字人对话，发现每个景点背后的历史与文化</p>
+        <blockquote class="hero-quote">「登山则情满于山，观海则意溢于海」</blockquote>
         <div class="hero-actions">
           <RouterLink to="/visitor/chat" class="btn-primary">
             开始对话

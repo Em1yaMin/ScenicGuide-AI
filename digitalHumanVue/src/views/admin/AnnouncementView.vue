@@ -178,14 +178,11 @@ async function toggleStatus(item: AnnouncementItem) {
   actionBusyId.value = item.id
   error.value = null
   try {
-    await fetchWithCodeEnvelope<AnnouncementItem>(
-      `${API_ADMIN_ANNOUNCEMENTS}/${item.id}/status`,
-      {
-        method: 'PATCH',
-        headers: getHeaders(),
-        body: JSON.stringify({ status: next }),
-      },
-    )
+    await fetchWithCodeEnvelope<AnnouncementItem>(`${API_ADMIN_ANNOUNCEMENTS}/${item.id}/status`, {
+      method: 'PATCH',
+      headers: getHeaders(),
+      body: JSON.stringify({ status: next }),
+    })
     await fetchList()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '状态切换失败'
@@ -199,14 +196,11 @@ async function togglePinned(item: AnnouncementItem) {
   actionBusyId.value = item.id
   error.value = null
   try {
-    await fetchWithCodeEnvelope<AnnouncementItem>(
-      `${API_ADMIN_ANNOUNCEMENTS}/${item.id}`,
-      {
-        method: 'PUT',
-        headers: getHeaders(),
-        body: JSON.stringify({ pinned: !item.pinned }),
-      },
-    )
+    await fetchWithCodeEnvelope<AnnouncementItem>(`${API_ADMIN_ANNOUNCEMENTS}/${item.id}`, {
+      method: 'PUT',
+      headers: getHeaders(),
+      body: JSON.stringify({ pinned: !item.pinned }),
+    })
     await fetchList()
   } catch (e) {
     error.value = e instanceof Error ? e.message : '置顶切换失败'
@@ -274,12 +268,8 @@ onMounted(() => {
         <p class="header-desc">发布景区通知、活动资讯，置顶公告优先展示在首页</p>
       </div>
       <div class="header-actions">
-        <button class="secondary-btn" @click="openToken">
-          Token 设置
-        </button>
-        <button class="primary-btn" @click="openCreate">
-          + 新建公告
-        </button>
+        <button class="secondary-btn" @click="openToken">Token 设置</button>
+        <button class="primary-btn" @click="openCreate">+ 新建公告</button>
       </div>
     </div>
 
@@ -290,12 +280,7 @@ onMounted(() => {
         <option value="published">已发布</option>
         <option value="draft">草稿</option>
       </select>
-      <input
-        v-model="keyword"
-        class="filter-input"
-        type="text"
-        placeholder="搜索标题或内容…"
-      />
+      <input v-model="keyword" class="filter-input" type="text" placeholder="搜索标题或内容…" />
     </div>
 
     <!-- Error -->
@@ -364,19 +349,9 @@ onMounted(() => {
 
       <!-- Pagination -->
       <div v-if="totalPages > 1" class="pagination">
-        <button
-          class="page-btn"
-          :disabled="page === 1"
-          @click="goPage(page - 1)"
-        >
-          上一页
-        </button>
+        <button class="page-btn" :disabled="page === 1" @click="goPage(page - 1)">上一页</button>
         <span class="page-info">第 {{ page }} / {{ totalPages }} 页，共 {{ total }} 条</span>
-        <button
-          class="page-btn"
-          :disabled="page === totalPages"
-          @click="goPage(page + 1)"
-        >
+        <button class="page-btn" :disabled="page === totalPages" @click="goPage(page + 1)">
           下一页
         </button>
       </div>
@@ -397,11 +372,7 @@ onMounted(() => {
             </div>
             <div class="form-row">
               <label>内容</label>
-              <textarea
-                v-model="form.content"
-                rows="6"
-                placeholder="请输入公告内容"
-              />
+              <textarea v-model="form.content" rows="6" placeholder="请输入公告内容" />
             </div>
             <div class="form-row form-row-inline">
               <div class="form-field">
@@ -439,7 +410,11 @@ onMounted(() => {
           <div class="modal-body">
             <div class="form-row">
               <label>X-Admin-Token</label>
-              <input v-model="tokenInput" type="password" :placeholder="adminToken ? '已设置' : '请输入 Token'" />
+              <input
+                v-model="tokenInput"
+                type="password"
+                :placeholder="adminToken ? '已设置' : '请输入 Token'"
+              />
               <p class="form-hint">Token 保存在浏览器本地，用于调用管理接口。</p>
             </div>
           </div>
@@ -460,7 +435,9 @@ onMounted(() => {
             <button class="icon-btn" @click="showDelete = false">✕</button>
           </div>
           <div class="modal-body">
-            <p>确定要删除 <strong>{{ deletingItem?.title }}</strong> 吗？删除后无法恢复。</p>
+            <p>
+              确定要删除 <strong>{{ deletingItem?.title }}</strong> 吗？删除后无法恢复。
+            </p>
           </div>
           <div class="modal-footer">
             <button class="secondary-btn" @click="showDelete = false">取消</button>
