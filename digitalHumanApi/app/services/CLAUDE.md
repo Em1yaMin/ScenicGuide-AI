@@ -26,7 +26,8 @@ services/
   chat_agent.py       # chat()/chat_stream() — LangChain 对话 agent 主链路（结构化工具 + 知识检索 + 多轮会话短期记忆持久化：进程内缓存 + SQLite 双写，重启可恢复；stream 模式产 SSE 事件：step/token/done；对话后挂长期记忆提取钩子；阶段3 T1 双模式：复杂意图分流到 planner_agent，异常降级快速路径）
   intent_classifier.py # classify_intent() — 双模式意图分类（简单/复杂，轻量规则词表，失败默认简单安全降级）
   planner_agent.py    # chat_plan()/chat_plan_stream() — 复杂任务 LangGraph 规划图（规划→多步执行→总结，SSE step/token/done 契约，异常抛 PlannerError 由 chat_agent 降级快速路径）
-  memory_service.py   # 长期记忆（阶段2 T2）— save_user_memory/search_user_memory/count_user_memory/extract_facts/extract_and_store，user_memory 命名空间按 user 隔离（T3 契约见 doc/long-term-memory.md）
+  memory_service.py   # 长期记忆（阶段2 T2）— save_user_memory/search_user_memory/count_user_memory/extract_facts/extract_and_store，user_memory 命名空间按 user 隔离（T3 契约见 doc/long-term-memory.md）；A2 新增 list_user_memories/delete_user_memory（记忆工具化按 id 删除，Document metadata 增 memory_id 内部扩展）
+  deepagents/         # deepagents 0.7.5 装配层（A2 试点，批次3）— 与主链路并存不替换（A3 才切换）：harness.py（HarnessProfile 排除内置 9 工具 + 禁用通用子代理 + 装配常量）、memory_tools.py（记忆四工具 recall/save/list/delete_user_memory，InjectedState('user') 注入实现 user 隔离）、agent.py（get_agent 缓存/chat/chat_stream，意图分流注入 _PLAN_INSTRUCTION + 轻量摘要注入，SSE step/token/done 契约与主链路一致）
   dify_stream.py      # stream_dify_chat() — Dify Chat Agent 流式客户端（response_mode=streaming，SSE 解析 + ThinkFilter 过滤 think 块，双轨流式的兜底链路）
 ```
 
