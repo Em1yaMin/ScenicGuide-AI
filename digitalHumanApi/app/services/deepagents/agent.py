@@ -401,8 +401,8 @@ async def chat_stream(
 
     **A3 会话管理**：与 chat() 一致——conversation_id 空串新建（生成 uuid
     并落盘），非空则恢复历史；done 事件携带 conversation_id（客户端续聊
-    回传）；历史追加在 done 事件**之前**（客户端收到 done 即关闭连接也不
-    丢失本轮上下文），记忆提取钩子在 done 之后调度（尽力而为）。
+    回传）；历史追加与记忆钩子调度均在 done 事件**之前**（客户端收到 done
+    即关闭连接也不丢上下文/不丢记忆提取，review F1 2026-08-08 加固）。
 
     A1 报告 §5 契约映射（与 ADH 前端契约一致，前端零改动）：
 
@@ -487,9 +487,12 @@ async def chat_stream(
             if getattr(chunk, "name", "") == _KNOWLEDGE_TOOL_NAME:
                 rag_tool_messages.append(chunk)
 
-    # 3. 会话持久化（done 前落盘，防客户端中断丢上下文）+ RAG 来源透出
+    # 3. 会话持久化 + 长期记忆钩子（done 前调度：客户端收到 done 即关闭
+    #    连接也不丢上下文/不丢记忆提取；review F1 2026-08-08——yield done
+    #    后调度存在 GeneratorExit 跳过窗口，改为 done 前更稳妥）
     answer = "".join(answer_parts)
     main_chain._append_history(conversation_id, query, answer, user)
+    main_chain._schedule_memory_extraction(user, conversation_id, query, answer)
     rag_context, rag_sources = main_chain._extract_rag_info(
         rag_tool_messages, rag_top_k
     )
@@ -508,7 +511,3 @@ async def chat_stream(
         "rag_sources": rag_sources,
         "intent": "complex" if complex_intent else "simple",
     }
-
-    # 4. 长期记忆钩子（A3：与 chat_agent 主链路一致——done 事件后后台
-    #    异步提取，尽力而为；失败由 extract_and_store 静默降级）
-    main_chain._schedule_memory_extraction(user, conversation_id, query, answer)

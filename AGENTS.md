@@ -90,7 +90,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 - `app/core/llm.py` — ChatOpenAI（langchain-openai）工厂：`get_chat_llm()`（按 `LLM_*` 配置构造，主端点缺 key 自动降级备用端点，都缺抛 `LLMConfigError`）、`create_chat_llm()`（显式参数底层构造）、`resolve_endpoint()`；主/备用双端点：`LLM_API_*`（默认 opencode-go `https://opencode.ai/zen/go/v1` + `deepseek-v4-flash`）与 `LLM_FALLBACK_*`（**代码兜底默认仍为官方 DeepSeek API `https://api.deepseek.com/v1`；部署配置按船长决策 2026-08-06 备用同主端点 opencode-go**——opencode 服务本质转发 DeepSeek 官方 key，无需另配官方备用），与 Embedding（`EMBEDDING_*`）、运营分析（`OPENAI_*`）配置完全独立
 - **DeepSeek 思考格式兼容性**（实测结论，详见 `doc/llm-adapter-smoke-test.md`）：`reasoning_content` 被 langchain-openai 自动剥离（流式思考 chunk 为空串、content 为最终回答、不报错）→ 无需自定义处理；**max_tokens 必须经工厂 `extra_body` 注入原生 `max_tokens` 字段**（langchain-openai 1.4.1 硬编码改名为 `max_completion_tokens`，DeepSeek 系端点静默忽略致长度限制失效）；**不要在 `invoke()` 显式传 max_tokens**
-- 备用通道官方 DeepSeek API 多轮对话要求历史 assistant 消息回传 `reasoning_content`（opencode-go 网关不强制）；对话链路（chat_agent）尚未实现该自定义转换，备用端点多轮对话受限（**仅当部署改配官方 DeepSeek 备用时适用，见 doc/llm-adapter-smoke-test.md §3；部署默认备用同主端点 opencode-go，不受影响**）
+- 备用通道官方 DeepSeek API 多轮对话要求历史 assistant 消息回传 `reasoning_content`（opencode-go 网关不强制）；对话链路（chat_agent 弃用链路与 deepagents 主链路均未实现）尚未实现该自定义转换，备用端点多轮对话受限（**仅当部署改配官方 DeepSeek 备用时适用，见 doc/llm-adapter-smoke-test.md §3；部署默认备用同主端点 opencode-go，不受影响**）
 - 冒烟脚本：`digitalHumanApi/scripts/smoke_llm.py`（`LLM_API_KEY=... python -m scripts.smoke_llm`；`--fallback` 测备用端点）；单测 `tests/test_llm.py`（MockTransport 模拟，不发真实请求）
 
 ## 对话 agent（阶段1 T2+T3：LangChain 主链路 + Dify 双轨 + SSE 流式）——**已弃用（A3）**
@@ -237,7 +237,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 | 引擎 | 类型 | 配置 | 状态 |
 |------|------|------|------|
 | **TencentAPI** | ASR | `configs/engines/asr/tencentAPI.yaml` | 引擎可用，麦克风录音链路调试中 |
-| **LangChainAgent** | Agent | `configs/agents/langchainAgent.yaml` | **默认引擎**，走本后端 `/api/v1/dialogue/chat`（LangChain 主链路，后端侧异常自动回落 Dify）；SSE 流式正常；工具调用步骤可视化（见下） |
+| **LangChainAgent** | Agent | `configs/agents/langchainAgent.yaml` | **默认引擎**，走本后端 `/api/v1/dialogue/chat`（deepagents 装配层主链路，A3 起；后端侧异常自动回落 Dify）；SSE 流式正常；工具调用步骤可视化（见下） |
 | **DifyAgent** | Agent | `configs/agents/difyAgent.yaml` | 保留可切换（fallback 不丢），直连 Dify Chat Agent |
 | **QwenAPI** | TTS | `configs/engines/tts/qwenTTS.yaml` | **默认引擎（2026-08-07 从 MiniMax 迁移，DashScope WebSocket）**：dashscope SDK `SpeechSynthesizer`，模型 `qwen-audio-3.0-tts-flash`、音色 `qwen-audio-3.0-tts-flash-longtongxuxian`（龙彤旭弦，活泼灵动女声），mp3→wav 输出；key 优先读环境变量 `QWEN_API_KEY`（yaml 留空占位不入库）；SDK 初始化要求先设全局 `dashscope.api_key`（实测）；真实调用与 mock 单测均通过（`test/test_qwen_tts.py` 8 用例） |
 | **MiniMaxAPI** | TTS | `configs/engines/tts/minimaxTTS.yaml` | 保留可切换（`Chinese_sweet_girl_nv1` 音色，替代 difyTTSWorkflow） |

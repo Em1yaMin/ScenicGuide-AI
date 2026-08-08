@@ -231,7 +231,7 @@ async def test_chat_stream_multi_turn_history(monkeypatch):
 
 
 async def test_chat_stream_schedules_memory_hook(monkeypatch):
-    """流式 done 事件后调度记忆提取（与 chat_agent 主链路一致）。"""
+    """流式记忆提取钩子在 done 事件前调度（与 chat_agent 主链路一致）。"""
     calls = []
 
     async def recorder(user, conversation_id, query, answer):

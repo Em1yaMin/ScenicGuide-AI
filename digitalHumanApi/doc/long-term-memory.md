@@ -56,8 +56,14 @@
 
 ## 四、提取链路（写入端）
 
+> **A3 接线变更（批次3）**：对话主链路已切换到 deepagents 装配层
+> （`app/services/deepagents/agent.py`），提取钩子由主链路与弃用链路
+> （chat_agent）**共用** `chat_agent._schedule_memory_extraction`（会话存储
+> 单一数据源，见 AGENTS.md「deepagents 装配层」专节）；流式路径钩子调度在
+> done 事件**之前**（review F1 2026-08-08 加固，客户端收 done 即断开也不丢）。
+
 ```
-对话完成（chat / chat_stream done 后）
+对话完成（chat / chat_stream done 前）
   └→ chat_agent._schedule_memory_extraction(user, cid, query, answer)   # 后台 asyncio task，不 await、不阻塞响应
        └→ memory_service.extract_and_store()
             ├─ 游客 / MEMORY_ENABLED=false → 跳过
@@ -69,9 +75,9 @@
 
 - 提取失败（LLM 异常/解析失败/写入失败）**静默降级为不写记忆**，只留告警日志，
   绝不阻塞或影响对话响应
-- 钩子挂在 `chat_agent.py` 主流程之外（`chat()` 末尾、`chat_stream()` done 事件后），
-  对话链路本身（agent 构建/工具集/SSE 事件契约）未改动；
-  Dify 兜底路径（LangChain 异常回落）不挂记忆钩子（异常降级路径，避免链路复杂度）
+- 钩子挂在主链路 `deepagents/agent.py`（chat() 末尾、chat_stream() done 事件前）与
+  弃用链路 `chat_agent.py` 主流程之外，对话链路本身（agent 构建/工具集/SSE 事件契约）未改动；
+  Dify 兜底路径（主链路异常回落）不挂记忆钩子（异常降级路径，避免链路复杂度）
 - 后台任务句柄登记在 `chat_agent._memory_tasks`（防 GC），done 回调消费异常
 
 ## 五、配置
@@ -96,6 +102,12 @@
   无独立 DB 表；多实例部署时各实例各自持久化（与 knowledge/documents 同限制）
 
 ## 七、检索注入（阶段2 T3：对话前注入）
+
+> **A3 变更（批次3）**：本节描述的「按问题语义检索注入」仅保留在**弃用链路**
+> （chat_agent）中；**主链路（deepagents 装配层）已改为「轻量摘要注入 + 记忆工具
+> 按需检索」**——每轮注入昵称/记忆条数概览（`_build_light_summary`，成本极低），
+> 提示模型存在记忆并调用记忆四工具（recall_user_memory 等）获取详情，不再做
+> 对话前语义检索（见 AGENTS.md「deepagents 装配层」专节与 `tests/test_deepagents_*`）。
 
 **位置**：`app/services/chat_agent.py` 的 `_build_memory_context`，在 `chat()` 与
 `chat_stream()` 的 agent 调用前（首轮）执行；检索到的记忆格式化为额外的一条

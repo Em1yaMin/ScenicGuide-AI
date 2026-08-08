@@ -63,11 +63,15 @@ class Settings(BaseModel):
 
     # 阶段3 T1 双模式（方案B：简单问答走快速路径，复杂任务走规划路径，
     # 见 app/services/intent_classifier.py 与 app/services/planner_agent.py）
-    # AGENT_DUAL_MODE=true（默认）：对话入口按意图分类分流——简单（单工具可答）
+    # **A3 起仅对已弃用的 chat_agent 双模式链路生效**：对话主链路已切换到
+    # deepagents 装配层（app/services/deepagents/），无条件执行意图分流——
+    # 简单问答不注入规划指令，复杂任务注入 prompt 级 _PLAN_INSTRUCTION
+    # （该开关对主链路无效，勿依赖其作为生产回退开关）
+    # AGENT_DUAL_MODE=true（默认）：弃用链路按意图分类分流——简单（单工具可答）
     # 走现有 create_agent 快速路径（零延迟增加）；复杂（多步骤意图，如规划行程）
     # 走 LangGraph 规划图（规划→多步执行→总结，SSE 步骤可视化）；分类失败/
     # 规划路径异常自动降级快速路径，再由路由层兜底 Dify（双轨回落不变）
-    # AGENT_DUAL_MODE=false：全部走快速路径，行为与阶段2 完全一致（回退开关）
+    # AGENT_DUAL_MODE=false：弃用链路全部走快速路径，行为与阶段2 完全一致
     AGENT_DUAL_MODE: bool = os.environ.get("AGENT_DUAL_MODE", "true").lower() == "true"
 
     # RAG 向量化 Embedding（与对话 LLM 的 LLM_* 及运营分析的 OPENAI_* 完全独立）

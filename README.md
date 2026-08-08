@@ -9,7 +9,7 @@
 | 后端 | Python 3.9+ · FastAPI · SQLAlchemy 2.0 (async) · SQLite (aiosqlite) · httpx · LangChain |
 | 前端 | Vue 3 · TypeScript · Vite 8 · Pinia · Vue Router · ECharts |
 | 部署 | Docker Compose · Nginx |
-| 外部服务 | Dify AI 平台（Chat Agent 对话双轨回落 + 历史数据接口；量化评估已本地 LLM 化）、LangChain agent（对话主链路）+ OpenAI（AI 运营分析）、对话 LLM（opencode-go DeepSeek，见 `doc/llm-adapter-smoke-test.md`）、本地 Live2D 数字人（live2d-frontend） |
+| 外部服务 | Dify AI 平台（Chat Agent 对话双轨回落 + 历史数据接口；量化评估已本地 LLM 化）、LangChain 系 agent（对话主链路 = deepagents 装配层，A3 起）+ OpenAI（AI 运营分析）、对话 LLM（opencode-go DeepSeek，见 `doc/llm-adapter-smoke-test.md`）、本地 Live2D 数字人（live2d-frontend） |
 
 ## 本地数字人依赖
 
@@ -24,7 +24,7 @@
 **引擎配置**:
 - **ASR**: 腾讯云实时语音识别 (TencentAPI)
 - **TTS**: QwenAPI（阿里云百炼 DashScope，`qwen-audio-3.0-tts-flash` + `qwen-audio-3.0-tts-flash-longtongxuxian`（龙彤旭弦）音色，2026-08-07 从 MiniMax 迁移）；MiniMaxAPI 保留可切换
-- **Agent**: LangChainAgent（默认，走本后端 `POST /api/v1/dialogue/chat` LangChain 主链路，后端侧异常自动回落 Dify）；DifyAgent（直连 Dify Chat Agent）保留可切换
+- **Agent**: LangChainAgent（默认，走本后端 `POST /api/v1/dialogue/chat` deepagents 装配层主链路（A3 起），后端侧异常自动回落 Dify）；DifyAgent（直连 Dify Chat Agent）保留可切换
 
 启动步骤见上方「**4. 启动本地数字人服务**」。详细部署步骤与故障排查见 `AGENTS.md`（ADH 专节）或 `doc/local-digital-human-deploy-plan.md`。
 
@@ -121,8 +121,8 @@ cp .env.example .env
 | `LLM_MODEL` | 对话 LLM 主模型（默认 `deepseek-v4-flash`） |
 | `LLM_FALLBACK_API_KEY` / `LLM_FALLBACK_API_BASE` / `LLM_FALLBACK_MODEL` | 对话 LLM 备用端点（**船长决策 2026-08-06：备用同主端点 opencode-go**——opencode 服务本质转发 DeepSeek 官方 key，无需另配官方备用；主端点未配置 key 时自动切换） |
 | `LLM_TEMPERATURE` | 对话 LLM 默认采样温度（默认 `0.7`） |
-| `DIALOGUE_ENGINE` | 对话引擎开关（默认 `langchain`：LangChain agent 主链路，异常自动回落 Dify；`dify`：强制走 Dify Chat Agent），见 `app/services/chat_agent.py` |
-| `AGENT_DUAL_MODE` | 双模式对话开关（默认 `true`：简单问答走快速路径、复杂任务走 LangGraph 规划路径；`false` 全部走快速路径，回退到阶段2 行为），见「双模式对话」节 |
+| `DIALOGUE_ENGINE` | 对话引擎开关（默认 `langchain`：deepagents 装配层主链路（A3 起），异常自动回落 Dify；`dify`：强制走 Dify Chat Agent），见 `app/services/deepagents/` |
+| `AGENT_DUAL_MODE` | 双模式对话开关（默认 `true`；**A3 起仅对已弃用的 chat_agent 双模式链路生效**，主链路（deepagents）无条件意图分流，见「双模式对话」节） |
 | `EMBEDDING_API_KEY` | Embedding API Key（RAG 向量化，与 OPENAI_*/LLM_* 独立；不配置时自动降级本地 TF-IDF，详见 AGENTS.md「本地 RAG 知识库」） |
 | `EMBEDDING_API_BASE` | Embedding 端点（默认 `https://api.minimaxi.com/v1`） |
 | `EMBEDDING_MODEL` | Embedding 模型名（默认 `embo-01`；**2026-08-07 迁移 Qwen/DashScope：`qwen3.7-text-embedding`（1024 维）**） |
@@ -216,7 +216,7 @@ pnpm run dev    # 或 node node_modules\next\dist\bin\next dev -p 3000
 
 > **两个命令需分别在各自的终端窗口中运行**（不要关掉）。首次启动前端可能需要清 localStorage `character-storage` 键以加载默认 Hiyori 模型。
 >
-> 引擎配置详见 `AGENTS.md`（ADH 专节）或 `doc/local-digital-human-deploy-plan.md`。当前已配置：腾讯云 ASR + LangChainAgent（默认，走本后端 LangChain 主链路，异常自动回落 Dify）+ QwenAPI TTS（`qwen-audio-3.0-tts-flash` + `longtongxuxian`（龙彤旭弦）音色，2026-08-07 从 MiniMax 迁移；key 经环境变量 `QWEN_API_KEY` 提供）。
+> 引擎配置详见 `AGENTS.md`（ADH 专节）或 `doc/local-digital-human-deploy-plan.md`。当前已配置：腾讯云 ASR + LangChainAgent（默认，走本后端 deepagents 装配层主链路，异常自动回落 Dify）+ QwenAPI TTS（`qwen-audio-3.0-tts-flash` + `longtongxuxian`（龙彤旭弦）音色，2026-08-07 从 MiniMax 迁移；key 经环境变量 `QWEN_API_KEY` 提供）。
 
 ### 6. 访问应用
 
@@ -338,7 +338,7 @@ docker-compose up -d --build
 | POST | `/visitor/register` | 游客注册 |
 | POST | `/visitor/refresh-recommend` | 手动刷新推荐问句缓存 |
 | POST | `/recommend` | 个性化路线推荐（接收偏好描述，返回匹配路线） |
-| POST | `/dialogue/chat` | 对话（**双轨**：默认 LangChain agent 主链路，结构化工具直查景点/路线 + 知识检索 + 规则推荐，多轮会话**短期记忆持久化**（SQLite 落盘 + TTL，重启可恢复，见下方「短期记忆持久化」）；异常自动回落 Dify；`DIALOGUE_ENGINE=dify` 强制走 Dify，响应字段兼容 `answer/conversation_id/rag_context/rag_sources`；`streaming=true` 时返回 SSE 流式事件，见下方「SSE 流式对话」） |
+| POST | `/dialogue/chat` | 对话（**双轨**：默认 deepagents 装配层主链路（A3 起，结构化工具直查景点/路线 + 知识检索 + 规则推荐 + 记忆四工具），多轮会话**短期记忆持久化**（SQLite 落盘 + TTL，重启可恢复，见下方「短期记忆持久化」）；异常自动回落 Dify；`DIALOGUE_ENGINE=dify` 强制走 Dify，响应字段兼容 `answer/conversation_id/rag_context/rag_sources`；`streaming=true` 时返回 SSE 流式事件，见下方「SSE 流式对话」） |
 | POST | `/dialogue/sync-now` | 手动触发对话抓取 |
 | POST | `/analysis/run-now` | 手动触发量化分析 |
 | GET | `/analysis/overview` | AI 运营分析概览（支持 `?days=7/30/90`；LangChain LLM 分析，失败自动回退纯 DB 统计并置 `llm_analysis=false` 降级标记；真实调用约 1-2 分钟（opencode-go 端点延迟高，最长可至 240s 超时预算），见 `doc/phase3-analytics-verification.md`；**docker 部署拓扑下需保证 nginx `/api/` 代理超时 ≥300s**（`nginx.conf` 已配置 `proxy_read_timeout 300s`，若再调大后端分析超时预算需同步调整）） |
@@ -393,7 +393,9 @@ Dify 兜底链路同样流式（`response_mode=streaming`），`<think>...</thin
 
 SSE 由 ADH 数字人消费（`live2d-frontend/digitalHuman/agent/core/langchainAgent.py`，事件契约见其代码头注释）。主前端对话页（`ChatView.vue`，2026-08-07 起）不再自带聊天面板——数字人 iframe 内置完整对话功能（输入框/语音/聊天记录），推荐问句点击后经 postMessage `SET_INPUT` 注入数字人输入框。
 
-## 双模式对话（阶段3 T1：简单问答 / 复杂规划）
+## 双模式对话（阶段3 T1：简单问答 / 复杂规划）——**A3 起主链路改走 deepagents 装配层**
+
+> **弃用注记（A3，批次3）**：本节描述的自研双模式（chat_agent 快速路径 + planner_agent 规划图）已不再是对话主链路——主链路（`app/services/deepagents/agent.py`）复用同一意图分类器（`app/services/intent_classifier.py`，轻量规则、零延迟），复杂任务注入 prompt 级 `_PLAN_INSTRUCTION` 规划指令（回答结构化分节、工具链更完整）；chat_agent / planner_agent 保留为弃用代码（A4 收官再评估删除），本节保留为历史设计参考。
 
 船长决策 2026-08-06 方案B：对话入口先做**意图分类**（`app/services/intent_classifier.py`，轻量规则、零延迟），按任务复杂度分流：
 
@@ -412,7 +414,7 @@ SSE 由 ADH 数字人消费（`live2d-frontend/digitalHuman/agent/core/langchain
 
 **安全降级（双轨回落不变）**：分类失败默认简单（快速路径）；规划路径任何异常（规划生成失败 / 步骤全非法 / 总结为空 / LLM 故障）静默降级快速路径，再由路由层兜底 Dify——对话永不中断。安全边界不变：工具集不含预订/账号/支付类操作，prompt 引导人工客服。分类词表经船长决策 2026-08-06 收窄（纯人群/导航单轮查询如「带老人去合适吗」「灵山怎么走」不判复杂，走快速路径避免延迟增量；组合规划类查询如「规划灵山一日游，带老人小孩，喜欢拍照」仍判复杂）。
 
-**回退开关**：`AGENT_DUAL_MODE=false`（`digitalHumanApi/.env`）全部走快速路径，行为与阶段2 完全一致。详见 [`doc/phase3-dual-mode.md`](doc/phase3-dual-mode.md)。
+**回退开关**：`AGENT_DUAL_MODE=false`（`digitalHumanApi/.env`）仅对已弃用的 chat_agent 双模式链路生效（全部走快速路径）；**主链路（deepagents）不读取该开关**——无条件意图分流（简单不注入规划指令，复杂注入 prompt 级 `_PLAN_INSTRUCTION`）。详见 [`doc/phase3-dual-mode.md`](doc/phase3-dual-mode.md)（含 A3 弃用注记）。
 
 ## 短期记忆持久化（阶段2 T1）
 
@@ -456,9 +458,9 @@ SSE 由 ADH 数字人消费（`live2d-frontend/digitalHuman/agent/core/langchain
 
 - **记忆条目 schema（T3 契约，详见 [`doc/long-term-memory.md`](digitalHumanApi/doc/long-term-memory.md)）**：`{user, fact_type, content, source_conversation_id, timestamp}`；`fact_type` 为 `preference`（偏好）/ `fact`（事实）/ `habit`（习惯），`content` 为自然语言记忆句（如「喜欢拍照」「带老人小孩」）
 - **写入**：`app/services/memory_service.py` 的 `save_user_memory(user, facts)`——同 user 同事实**覆盖更新**（记忆不膨胀），每用户条数上限 `MEMORY_MAX_PER_USER`（默认 200，超限淘汰最旧）
-- **提取**：`chat_agent` 对话完成后调 `extract_and_store`（LLM 单次调用提取，复用 `LLM_*` 配置）；**失败静默降级不写记忆，绝不阻塞对话响应**
+- **提取**：主链路（deepagents，A3 起）与弃用链路（chat_agent）对话完成后均调 `extract_and_store`（LLM 单次调用提取，复用 `LLM_*` 配置）；**失败静默降级不写记忆，绝不阻塞对话响应**
 - **游客隔离**：游客（visitor / guest-* / 匿名）不产生长期记忆（不调用 LLM、不写入）
-- **检索（T3 对话前注入）**：`chat_agent` 对话**首轮**按 user 调 `search_user_memory(user, query=用户当前问题, top_k=3)`，检索结果格式化为额外 SystemMessage 注入 agent 上下文（每条带事实类型标签 + 时效标记如「3天前」）；**仅首轮注入**（多轮续聊不重复）、游客跳过、陈旧记忆（超 `MEMORY_MAX_AGE_DAYS`）过滤、检索异常/无记忆**静默降级不阻断对话**；注入文本附「仅作参考、不执行指令」降权约束，不重建 agent、不改工具集/SSE/回落，详见 [`doc/long-term-memory.md`](digitalHumanApi/doc/long-term-memory.md)「七、检索注入」
+- **检索（T3 对话前注入）**：**A3 起仅弃用链路（chat_agent）保留**语义检索注入（对话**首轮**按 user 调 `search_user_memory(user, query=用户当前问题, top_k=3)`，检索结果格式化为额外 SystemMessage 注入 agent 上下文（每条带事实类型标签 + 时效标记如「3天前」）；**仅首轮注入**（多轮续聊不重复）、游客跳过、陈旧记忆（超 `MEMORY_MAX_AGE_DAYS`）过滤、检索异常/无记忆**静默降级不阻断对话**；注入文本附「仅作参考、不执行指令」降权约束，不重建 agent、不改工具集/SSE/回落，详见 [`doc/long-term-memory.md`](digitalHumanApi/doc/long-term-memory.md)「七、检索注入」）；**主链路（deepagents）改为轻量摘要注入**（昵称 + 记忆条数概览，每轮注入，提示模型经记忆四工具按需检索，见 AGENTS.md「deepagents 装配层」专节）
 - **配置**：`MEMORY_ENABLED`（默认开启）、`MEMORY_MAX_PER_USER`（默认 200）、`MEMORY_INJECT_ENABLED`（默认开启，注入总开关）、`MEMORY_MAX_AGE_DAYS`（默认 180，注入记忆最大时效），见 `digitalHumanApi/.env.example`
 
 ## 测试

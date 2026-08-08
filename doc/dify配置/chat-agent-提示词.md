@@ -177,10 +177,10 @@ Dify 聊天助手中使用 `{{}}` 定义变量，在提示词中通过变量动�
 
 ### 6.1 主后端（FastAPI）
 
-主后端通过 `/api/v1/dialogue/chat` **直接提供对话**（默认 LangChain agent 主链路，异常自动回落本 Chat Agent）。数字人前端（ADH）默认经 LangChainAgent 调用该端点，不再直连 Dify；DifyAgent 直连仅作保留可切换。主后端另通过**轮询 Dify API** 抓取对话记录用于统计分析。最新链路状态以 `AGENTS.md`（ADH 专节）为准。
+主后端通过 `/api/v1/dialogue/chat` **直接提供对话**（默认 deepagents 装配层主链路（A3 起），异常自动回落本 Chat Agent）。数字人前端（ADH）默认经 LangChainAgent 调用该端点，不再直连 Dify；DifyAgent 直连仅作保留可切换。主后端另通过**轮询 Dify API** 抓取对话记录用于统计分析。最新链路状态以 `AGENTS.md`（ADH 专节）为准。
 
 ```
-游客 → 数字人前端(ADH) → 本后端 /api/v1/dialogue/chat（LangChain 主链路，异常回落 Dify Chat Agent）
+游客 → 数字人前端(ADH) → 本后端 /api/v1/dialogue/chat（deepagents 装配层主链路，异常回落 Dify Chat Agent）
                               ↓ (旁路轮询)
                          FastAPI → 对话入库 → 本地 LLM 量化评估 → 数据大屏
 ```
