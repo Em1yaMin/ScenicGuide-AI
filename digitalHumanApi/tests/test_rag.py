@@ -503,3 +503,95 @@ def test_clear_removes_vector_sidecar(tmp_path):
     store.clear()
     assert not (tmp_path / "clear_sidecar_vectors.json").exists()
     assert not (tmp_path / "clear_sidecar_docs.json").exists()
+
+
+def test_degraded_api_session_keeps_sidecar_tfidf_restart_recomputes(tmp_path):
+    """API 降级会话不写/不覆盖 sidecar；无 key TFIDF 重启回退重算不复用降级向量。
+
+    复现场景（f1 回归）：
+    1. TFIDF 主会话写 vocab V1（文档集 D1）；
+    2. API 会话文档变更 D2 后 API 失败降级写盘——不得覆盖历史 API sidecar；
+    3. 无 key TFIDF 重启：不得复用降级会话的 TF-IDF 向量（与主词汇表不同源），
+       须回退重算且检索正常。
+    """
+    docs_d1 = [
+        Document(
+            page_content="黄山风景区位于安徽省，以奇松、怪石、云海闻名",
+            metadata={"title": "黄山"},
+        ),
+        Document(
+            page_content="泰山位于山东省，五岳之首，日出与石刻壮观",
+            metadata={"title": "泰山"},
+        ),
+        Document(
+            page_content="庐山位于江西省，瀑布与云雾景观著称",
+            metadata={"title": "庐山"},
+        ),
+    ]
+    extra = [
+        Document(
+            page_content="长白山天池位于吉林省，火山口湖景色壮美",
+            metadata={"title": "长白山"},
+        )
+    ]
+
+    # 1. TFIDF 主会话（无 key）：拟合 D1 并落盘 vocab V1（TF-IDF 不写 sidecar）
+    store0 = SimpleVectorStore(collection_name="degraded_ns", persist_dir=tmp_path)
+    store0.add_documents(docs_d1)
+    vocab_path = tmp_path / "degraded_ns_vocab.json"
+    assert vocab_path.exists()
+
+    # 2a. API 会话（正常）：加载 docs D1，重算并写入历史 API sidecar
+    calls: dict = {}
+    store1 = SimpleVectorStore(
+        collection_name="degraded_ns",
+        persist_dir=tmp_path,
+        embedding=_make_minimax_emb(calls=calls),
+    )
+    assert calls["count"] > 0
+    sidecar_path = tmp_path / "degraded_ns_vectors.json"
+    assert sidecar_path.exists()
+
+    # 2b. API 失败降级会话：追加文档 D2 触发 API 调用失败 → 降级 TF-IDF 写盘
+    def failing_handler(request):
+        raise httpx.ConnectError("simulated embedding API failure")
+
+    failing_emb = MinimaxEmbeddings(
+        api_key="test-key",
+        api_base="https://api.minimaxi.com/v1",
+        model="embo-01",
+        _transport=httpx.MockTransport(failing_handler),
+    )
+    store2 = SimpleVectorStore(
+        collection_name="degraded_ns",
+        persist_dir=tmp_path,
+        embedding=failing_emb,
+    )
+    assert store2.degraded is False
+    store2.add_documents(extra)
+    assert store2.degraded is True
+    # 降级会话不得覆盖历史 API sidecar（binding/docs_digest/条数保持 D1 版本）
+    with open(sidecar_path, encoding="utf-8") as f:
+        sidecar = json.load(f)
+    assert sidecar["embedding"]["backend"] == "minimax"
+    assert sidecar["docs_digest"] == SimpleVectorStore._docs_digest(docs_d1)
+    assert len(sidecar["vectors"]) == len(docs_d1)
+    # 降级备份词汇表 V2 不落盘（vocab 仅主 TF-IDF 保存，避免重启加载错配）
+    vocab = json.loads(vocab_path.read_text(encoding="utf-8"))
+    assert vocab["doc_count"] == len(docs_d1)
+
+    # 3. 无 key TFIDF 重启：不得复用降级会话的 TF-IDF 向量，须回退重算
+    store3 = SimpleVectorStore(collection_name="degraded_ns", persist_dir=tmp_path)
+    assert store3.count() == len(docs_d1) + len(extra)
+    v1_dim = len(store3.embedding._vocabulary)
+    assert v1_dim > 0
+    # 向量由主词汇表 V1 重算产出（维度 = V1 词汇表大小），非降级备份 V2
+    assert all(len(v) == v1_dim for v in store3._vectors)
+    assert len(store2._tfidf_backup._vocabulary) != v1_dim
+    # 检索正常（不抛向量维度不匹配 ValueError）
+    results = store3.similarity_search_with_score("黄山", k=2)
+    assert results
+    # 历史 API sidecar 在 TF-IDF 会话期间保留（不删除、不覆盖）
+    with open(sidecar_path, encoding="utf-8") as f:
+        sidecar_after = json.load(f)
+    assert sidecar_after["embedding"]["backend"] == "minimax"

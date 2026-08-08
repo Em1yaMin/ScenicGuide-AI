@@ -506,8 +506,9 @@ class SimpleVectorStore:
         C4 起文档文件旁同步写入 `{collection}_vectors.json` sidecar：
         向量 + embedding 绑定标识 + 文档摘要，供下次启动复用缓存跳过
         embedding API 重算（详见 _load/_try_reuse_cached_vectors）。
-        TF-IDF 后端不写 sidecar（词汇表机制，重算成本可忽略，行为不变；
-        历史 API sidecar 亦不删除——文档未变时 API 恢复后仍可复用）。
+        TF-IDF 生效时（主 TF-IDF 或 API 降级备份）不写 sidecar（词汇表机制，
+        重算成本可忽略，行为不变；历史 API sidecar 亦不删除——文档未变时
+        API 恢复后仍可复用）。
         """
         # 保存词汇表（仅本地 TF-IDF 后端需要）
         if isinstance(self.embedding, TFIDFEmbeddings) and self.embedding.is_fitted:
@@ -523,7 +524,7 @@ class SimpleVectorStore:
         ]
         _atomic_write_json(self._docs_path, data)
 
-        if isinstance(self.embedding, TFIDFEmbeddings):
+        if isinstance(self._active_embedding, TFIDFEmbeddings):
             return
         if self._documents:
             sidecar = {
