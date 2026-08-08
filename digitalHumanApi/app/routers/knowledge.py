@@ -14,7 +14,7 @@ from fastapi import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.routers.deps import verify_admin_token
+from app.routers.deps import require_role, verify_admin_token
 from app.schemas.knowledge import (
     KnowledgeCreateRequest,
     KnowledgeImportResponse,
@@ -76,7 +76,7 @@ async def update_knowledge(
 async def delete_knowledge(
     kb_id: int,
     db: AsyncSession = Depends(get_db),
-    _: str = Depends(verify_admin_token),
+    _: str = Depends(require_role("admin")),
 ) -> dict[str, bool]:
     deleted = await knowledge_service.delete_knowledge(db, kb_id)
     if not deleted:

@@ -106,7 +106,9 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
+    # 批次6 C3：白名单模式下 credentials 不能与 * 混用（Starlette 会把 * 退化
+    # 为回显任意 origin = 全放开），config validator 已启动拦截；此处按配置透传
+    allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

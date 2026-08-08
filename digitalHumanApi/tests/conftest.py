@@ -21,6 +21,18 @@ def _reset_memory_store():
 
 
 @pytest.fixture(autouse=True)
+def _reset_auth_rate_limiter():
+    """每个测试重置认证限流器，避免跨测试污染。
+
+    批次6 C3 安全加固：登录/注册限流为进程内全局单例（auth 模块 _limiter），
+    既有测试含多次错误密码/重复注册用例，若不重置会触发 429 误伤。
+    """
+    from app.routers import auth as auth_router
+
+    auth_router._limiter.reset()
+
+
+@pytest.fixture(autouse=True)
 def _pin_embedding_api_key_off(monkeypatch):
     """测试环境无真实 Embedding Key：固定为空，保证向量化走本地 TF-IDF。
 

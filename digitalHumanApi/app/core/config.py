@@ -10,10 +10,51 @@ _env_path = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(_env_path, override=True)
 
 
+# 默认 CORS 白名单（批次6 C3 安全加固）：演示环境为本机宿主机访问
+# （192.168.16.132），前端 5173 / ADH 前端 3000 / ADH 后端 8001 跨端口调用；
+# 默认同时覆盖 localhost / 127.0.0.1 / 本机 IP 各端口，生产环境应显式收紧
+# 为实际部署域名（CORS_ORIGINS 环境变量，逗号分隔）。
+_DEFAULT_CORS_ORIGINS = [
+    f"http://{host}:{port}"
+    for host in ("localhost", "127.0.0.1", "192.168.16.132")
+    for port in (5173, 8001, 3000)
+]
+
+
 def _parse_cors_origins(value: Optional[str]) -> List[str]:
     if not value:
-        return ["http://localhost:5173"]
+        return list(_DEFAULT_CORS_ORIGINS)
     return [origin.strip() for origin in value.split(",") if origin.strip()]
+
+
+def _parse_admin_tokens(value: Optional[str]) -> dict:
+    """解析 ADMIN_TOKENS（批次6 C3 RBAC）："token1=admin,token2=operator"。
+
+    逗号分隔的 token=角色 映射；不带 = 的裸 token 视为 admin（兼容简单配置）；
+    角色值非法（非 admin/operator）时忽略该项并告警（启动不阻断，防误配炸服）。
+    """
+    result: dict = {}
+    if not value:
+        return result
+    for item in value.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        if "=" in item:
+            token, role = item.split("=", 1)
+            token, role = token.strip(), role.strip()
+            if token and role in ("admin", "operator"):
+                result[token] = role
+            elif token:
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "ADMIN_TOKENS 忽略非法角色项: %r", item
+                )
+        elif item:
+            # 裸 token 兼容：视为 admin
+            result[item] = "admin"
+    return result
 
 
 class Settings(BaseModel):
@@ -24,6 +65,43 @@ class Settings(BaseModel):
         "DATABASE_URL", "sqlite+aiosqlite:///./digital_human.db"
     )
     CORS_ORIGINS: List[str] = _parse_cors_origins(os.environ.get("CORS_ORIGINS"))
+    # 是否允许携带凭证（Cookie/Authorization）的跨域请求。CORS 规范下白名单模式
+    # 不能与 allow_origins=["*"] 混用（Starlette 在 credentials=True 时会把 "*"
+    # 退化为回显任意 origin，等于全放开）；本服务需要 JWT Bearer 透传，故固定
+    # 开启并靠 CORS_ORIGINS 白名单 + 启动校验兜底（见 _validate_cors_config）。
+    CORS_ALLOW_CREDENTIALS: bool = (
+        os.environ.get("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
+    )
+
+    # 管理端 RBAC 角色映射（批次6 C3 安全加固）："token1=admin,token2=operator"
+    # 逗号分隔；裸 token（无 = 角色）视为 admin；ADMIN_API_TOKEN 始终视为 admin
+    # （向后兼容）。角色分级：admin（全部操作）/ operator（查询/公告发布等常规
+    # 操作，删除类敏感操作 403）。前端暂未改，仍传同一 token。
+    ADMIN_TOKENS: dict = _parse_admin_tokens(os.environ.get("ADMIN_TOKENS"))
+
+    # 认证端点限流（批次6 C3 安全加固，进程内实现零新依赖，见 app/core/rate_limiter.py）
+    # 仅作用于 /api/v1/auth/login|register|guest，不误伤对话等正常接口。
+    # 语义：滑动窗口内失败次数达到阈值后进入冷却期，冷却期内该维度直接 429。
+    AUTH_RATE_LIMIT_ENABLED: bool = (
+        os.environ.get("AUTH_RATE_LIMIT_ENABLED", "true").lower() == "true"
+    )
+    # 窗口内允许的最大失败次数（默认 5 次/分钟）
+    AUTH_RATE_LIMIT_MAX_FAILURES: int = int(
+        os.environ.get("AUTH_RATE_LIMIT_MAX_FAILURES", "5")
+    )
+    # 失败计数滑动窗口（秒），默认 60
+    AUTH_RATE_LIMIT_WINDOW_SECONDS: int = int(
+        os.environ.get("AUTH_RATE_LIMIT_WINDOW_SECONDS", "60")
+    )
+    # 触发限流后的冷却期（秒），默认 900（15 分钟）
+    AUTH_RATE_LIMIT_COOLDOWN_SECONDS: int = int(
+        os.environ.get("AUTH_RATE_LIMIT_COOLDOWN_SECONDS", "900")
+    )
+    # guest 端点纯 IP 维度固定窗口请求频率上限（次/分钟，默认 30；guest 无失败
+    # 场景，用频率限制防 token 刷取滥用）
+    AUTH_GUEST_MAX_PER_MINUTE: int = int(
+        os.environ.get("AUTH_GUEST_MAX_PER_MINUTE", "30")
+    )
 
     DIFY_API_URL: str = os.environ.get("DIFY_API_URL", "")
     DIFY_API_KEY: str = os.environ.get("DIFY_API_KEY", "")
@@ -178,6 +256,22 @@ class Settings(BaseModel):
     )
     # 注入的记忆最大时效（天）：超过视为陈旧事实不注入（防过时信息误导）
     MEMORY_MAX_AGE_DAYS: int = int(os.environ.get("MEMORY_MAX_AGE_DAYS", "180"))
+
+    @model_validator(mode="after")
+    def _validate_cors_config(self) -> "Settings":
+        """CORS 白名单校验（批次6 C3）：credentials 模式禁止与通配符 * 混用。
+
+        Starlette 在 allow_credentials=True 且 allow_origins=["*"] 时会退化为
+        「回显任意请求 origin」——等于全放开，白名单形同虚设。此处启动即报错，
+        要求显式收紧为具体 origin 列表（或关闭 credentials）。
+        """
+        if self.CORS_ALLOW_CREDENTIALS and "*" in self.CORS_ORIGINS:
+            raise ValueError(
+                "CORS_ORIGINS 不能包含通配符 *（CORS_ALLOW_CREDENTIALS=true 时"
+                " Starlette 会将 * 退化为回显任意 origin = 全放开）；请配置具体"
+                " origin 白名单（逗号分隔），或显式设置 CORS_ALLOW_CREDENTIALS=false"
+            )
+        return self
 
     @model_validator(mode="after")
     def _validate_dify_config(self) -> "Settings":

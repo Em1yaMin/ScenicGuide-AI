@@ -75,7 +75,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 - `app/models/knowledge.py` + `app/services/knowledge_service.py` + `app/routers/knowledge.py` — `/api/admin/knowledge*` CRUD + `/import`
 - **CRUD/导入变更后自动同步向量索引**：增/删/改/导入后 `knowledge_service._sync_knowledge_index` 以 DB 全量条目重建 knowledge 命名空间（`index_knowledge_entries`，条目量小、全量重建开销可忽略）；索引失败仅告警日志不阻断 CRUD（下次变更/手动索引自愈）；批量导入仅最后统一同步一次
-- 认证：`X-Admin-Token` 请求头，token 来自 `ADMIN_API_TOKEN` 环境变量（`app/core/config.py`；校验实现公共依赖 `app/routers/deps.py::verify_admin_token`，公告管理同源复用）
+- 认证：`X-Admin-Token` 请求头，token 来自 `ADMIN_API_TOKEN` 环境变量（`app/core/config.py`；校验实现公共依赖 `app/routers/deps.py::verify_admin_token`，公告管理同源复用）；**RBAC 角色分级（批次6 C3）**见下方「安全加固」专节——删除类敏感操作（本模块 `DELETE /{kb_id}`）要求 admin 角色
 - 前端：`digitalHumanVue/src/views/admin/KnowledgeView.vue`，token 存 `localStorage` 的 `admin_api_token`
 - 导入支持 `.json` 数组和按 `# ` 标题切分的 `.md` 文件
 
@@ -209,6 +209,16 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - **审计**：全部写操作（增/删/改/发布下架/重建索引）经 `tools._audit_log` 记 logger（`operator=admin-agent` + 工具名 + 目标 + action + 结果），与 B5 风格一致
 - **无会话持久化**：每请求独立（不落短期/长期记忆，不污染用户侧数据）；conversation_id 仅透传回显（空串生成新 uuid）
 - 测试：`tests/test_admin_agent_confirm.py`（7）+ `test_admin_agent_tools.py`（21，含两阶段全流程/越权拒绝/审计）+ `test_admin_agent.py`（8，装配/SSE 契约/缓存）+ `test_admin_agent_api.py`（7，鉴权 401/非流式/SSE）；新增 43 用例，全量 529 绿（pytest 收集 529：497 测试函数 + 34 参数化用例）
+
+## 安全加固（批次6 C3：认证限流 + CORS 白名单 + 管理端 RBAC）
+
+船长决策的企业级改造项（演示环境 192.168.16.132 本机宿主机访问，加固兼顾演示便利不锁死本机）：
+
+- **认证端点限流（防爆破）**：`app/core/rate_limiter.py` — 进程内 `AuthRateLimiter`（零新依赖，threading.Lock 保护），**仅作用于 `/api/v1/auth/login|register|guest`**（auth.py 路由内接入，不误伤对话等正常接口）；按 **IP + 账号双维度**（key=`{ip}|{account}`，guest 无账号退化为纯 IP）；滑动窗口失败计数（默认 5 次/60s）达阈值进入冷却（默认 900s），冷却期内 429（detail 含剩余秒数 + `Retry-After` 头，前端可展示）；**登录/注册成功自动清零**该维度计数（防误伤正常用户）；冷却期内重复失败不延长冷却；guest 端点无失败场景 → 纯 IP 固定窗口频率限制（默认 30 次/分钟，防 token 刷取）；时钟可注入（测试可控）；`AUTH_RATE_LIMIT_ENABLED=false` 整体关闭；测试替换 auth 模块 `_limiter` 为小参数实例控制阈值
+- **CORS 白名单**：`CORS_ORIGINS`（逗号分隔，`app/core/config.py::_parse_cors_origins`）；**默认值覆盖演示环境**——localhost/127.0.0.1/192.168.16.132 × 5173/8001/3000（Vue dev / ADH 前端 / ADH 后端跨端口），生产显式收紧；**credentials 与 `*` 互斥（实现细节坑）**：Starlette 在 `allow_credentials=True` 且 origins 含 `*` 时会把 `*` 退化为回显任意 origin = 全放开，故 Settings validator 启动即报错拒绝（`CORS_ALLOW_CREDENTIALS=false` 才允许 `*`）；credentials 头在 allow_credentials=True 时**无条件发送**（Starlette 行为），非白名单 origin 判定看的是 **Access-Control-Allow-Origin 缺失**（浏览器据此拒绝跨域读取），测试断言不要依赖 credentials 头
+- **管理端 RBAC 角色模型**：`app/routers/deps.py` — 角色常量 `ROLE_ADMIN`/`ROLE_OPERATOR`（层级 operator < admin）；`verify_admin_token` **保留兼容**（返回角色字符串替代原样回显 token，既有调用方 `_: str = Depends(...)` 忽略返回值零影响）：`ADMIN_API_TOKEN` 恒为 admin（现有部署行为不变），`ADMIN_TOKENS`（新配置，`"token1=admin,token2=operator"` 逗号分隔，裸 token 视为 admin，非法角色忽略告警）命中优先；`require_role("admin")` 依赖工厂（先校验 token 再比角色，权限不足 **403** 与未授权 401 区分，detail 提示所需角色）；**敏感度分级落地**：知识库删除（`knowledge.py DELETE /{kb_id}`）与记忆删除（`memory_admin.py DELETE /{memory_id}`）要求 admin，查询/公告发布/知识库增改维持现状（operator 可做），admin_agent 维持现状（两阶段确认 + 审计已兜底）；前端暂不改（仍传同一 token）
+- 测试：`tests/test_rate_limit.py`（13：触发/冷却/恢复/滑动窗口/成功清零/维度隔离/guest 频率/不延长/429 集成/注册计数/误伤/开关）+ `tests/test_cors.py`（9：默认白名单/解析/白名单放行/非白名单拒绝/预检/主应用冒烟/credentials 互斥）+ `tests/test_rbac.py`（12：解析/兼容/401/operator 查询放行/删除 403/公告发布/双角色）；全量 563 绿（基线 529 + 34）；conftest autouse fixture `_reset_auth_rate_limiter` 每测试重置限流器（防既有认证测试被 429 误伤）
+- 配置见 `.env.example`（CORS_ORIGINS/CORS_ALLOW_CREDENTIALS/ADMIN_TOKENS/AUTH_RATE_LIMIT_*/AUTH_GUEST_MAX_PER_MINUTE）；docker-compose 已透传
 
 ## AI 运营分析（LangChain + OpenAI，可回退）
 
