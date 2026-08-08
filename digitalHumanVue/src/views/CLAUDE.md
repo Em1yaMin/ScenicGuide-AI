@@ -68,10 +68,14 @@ onMounted(() => { fetchData() })
 
 ## Iframe Embed Pattern (ChatView)
 
-```vue
-const iframeKey = ref(0) // 递增强制重新挂载 const iframeSrc = computed(() => { const base =
-import.meta.env.VITE_SERVICE_URL return `${base}?param=${encodeURIComponent(value)}` }) // iframe 用
-v-show（非 v-if）保持 DOM 使 @load/@error 事件触发 // 10 秒超时兜底 + onUnmounted 清理
+```ts
+const iframeKey = ref(0) // 递增强制重新挂载
+const iframeSrc = computed(() => {
+  const base = import.meta.env.VITE_SERVICE_URL
+  return `${base}?param=${encodeURIComponent(value)}`
+})
+// iframe 用 v-show（非 v-if）保持 DOM 使 @load/@error 事件触发
+// 10 秒超时兜底 + onUnmounted 清理
 ```
 
 ## ECharts Integration
