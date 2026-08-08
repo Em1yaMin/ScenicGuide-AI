@@ -46,9 +46,17 @@ async def lifespan(app: FastAPI):
         force=True,
     )
 
-    # Phase 1: create_all (IF NOT EXISTS, no destructive DROP)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    # Phase 1: 数据库迁移（Alembic，见 app/core/migrations.py 与 doc/alembic-migrations.md）
+    # 平滑过渡：空库 upgrade 建齐 / 遗留库（无版本表）自动 stamp 基线 / 版本化库 upgrade
+    # 迁移失败时回退 create_all（IF NOT EXISTS 幂等建表，不丢数据、不阻断启动）
+    try:
+        from app.core.migrations import run_migrations
+
+        await run_migrations()
+    except Exception:
+        logger.exception("Alembic 迁移失败，回退 Base.metadata.create_all 幂等建表")
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
     # Phase 2: background tasks (sync retries on its own interval)
     _polling_task = asyncio.create_task(polling_loop())

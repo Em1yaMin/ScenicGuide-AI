@@ -16,6 +16,10 @@ python-multipart>=0.0.9
 pwdlib[bcrypt]>=0.2.0
 PyJWT>=2.8.0
 
+# 数据库 schema 版本管理（Alembic，见 doc/alembic-migrations.md）
+# 启动时程序化执行（app/core/migrations.py），CLI 入口：alembic upgrade head / revision --autogenerate
+alembic>=1.13.0
+
 # RAG / Local Knowledge Base (文件持久化，无外部向量库服务)
 # 向量化: Minimax Embedding API（httpx，EMBEDDING_* 配置，见 app/core/embedding.py）
 # 或本地 TF-IDF 降级路径；numpy 用于检索阶段矩阵乘法加速

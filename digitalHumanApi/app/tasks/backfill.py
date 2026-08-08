@@ -404,11 +404,11 @@ async def backfill_all(
         "Authorization": f"Bearer {settings.DIFY_API_KEY}",
         "Content-Type": "application/json",
     }
-    # 独立 CLI 运行时无 FastAPI lifespan，先幂等建表（IF NOT EXISTS）
-    from app.core.database import Base, engine
+    # 独立 CLI 运行时无 FastAPI lifespan，先执行 Alembic 迁移建表
+    # （空库 upgrade 建齐 / 遗留库自动 stamp 基线，见 app/core/migrations.py）
+    from app.core.migrations import run_migrations
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    await run_migrations()
     all_stats: List[BackfillStats] = []
     async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
         for user in targets:
