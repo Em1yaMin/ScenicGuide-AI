@@ -140,7 +140,8 @@ async def guest(req: Request) -> GuestResponse:
     ip = client_ip(req)
     # guest 无失败场景：纯 IP 维度频率限制（固定窗口，防 token 刷取）
     if settings.AUTH_RATE_LIMIT_ENABLED and _limiter.is_guest_blocked(ip):
-        raise _RateLimited(settings.AUTH_GUEST_MAX_PER_MINUTE)
+        # 剩余秒数随固定窗口位置真实变化（非固定阈值），前端可准确倒计时
+        raise _RateLimited(_limiter.guest_retry_after(ip))
     token, guest_id, expires_in = auth_service.create_guest_token()
     if settings.AUTH_RATE_LIMIT_ENABLED:
         _limiter.record_guest_request(ip)

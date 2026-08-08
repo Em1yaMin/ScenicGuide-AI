@@ -11,7 +11,7 @@ from typing import AsyncGenerator
 import pytest
 from httpx import AsyncClient, ASGITransport
 
-from app.core.rate_limiter import AuthRateLimiter
+from app.core.rate_limiter import AuthRateLimiter, client_ip
 
 
 # ── 限流器纯逻辑（可控时钟） ────────────────────────────────────────────
@@ -131,6 +131,53 @@ def test_cooldown_does_not_extend_during_block():
     assert remaining_after <= remaining_before - 59
 
 
+def test_client_ip_uses_last_forwarded():
+    """X-Forwarded-For 取最后一个值（nginx 追加真实对端）；无头用直连地址。"""
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "headers": [(b"x-forwarded-for", b"1.2.3.4, 5.6.7.8")],
+        "client": ("127.0.0.1", 12345),
+    }
+    # 客户端伪造的前缀被忽略，取最近一跳追加的真实对端
+    assert client_ip(Request(scope)) == "5.6.7.8"
+    # 无 XFF 时取直连地址（TCP 对端可信）
+    scope["headers"] = []
+    assert client_ip(Request(scope)) == "127.0.0.1"
+    # 均解析不到时兜底 unknown
+    scope["client"] = None
+    assert client_ip(Request(scope)) == "unknown"
+
+
+def test_state_bounded_under_key_flood():
+    """条目总数超上限时自动清扫/逐出最旧，字典不无界增长。"""
+    limiter, _ = _make_limiter(max_keys=10)
+    for i in range(50):
+        limiter.record_failure(f"1.1.1.{i % 10}", f"user{i}")
+        limiter.record_guest_request(f"9.9.9.{i % 10}")
+    total = (
+        len(limiter._failures) + len(limiter._cooldown_until) + len(limiter._request_windows)
+    )
+    assert total <= 10
+    # 清扫后限流功能仍正常（最旧条目被逐出，新条目可计数）
+    assert not limiter.is_blocked("9.9.9.0", "fresh")
+
+
+def test_guest_retry_after_reports_window_remaining():
+    """guest 限流后剩余秒数反映窗口真实剩余（随固定窗口位置变化）。"""
+    limiter, clock = _make_limiter(guest_max_per_window=3, guest_window_seconds=60)
+    for _ in range(3):
+        limiter.record_guest_request("1.2.3.4")
+    assert limiter.is_guest_blocked("1.2.3.4")
+    remaining = limiter.guest_retry_after("1.2.3.4")
+    assert 1 <= remaining <= 60
+    clock.advance(30)
+    assert limiter.guest_retry_after("1.2.3.4") < remaining
+    clock.advance(31)
+    assert limiter.guest_retry_after("1.2.3.4") == 0
+
+
 # ── HTTP 集成（替换 auth 模块限流器为小参数实例） ───────────────────────
 
 
@@ -216,6 +263,8 @@ async def test_guest_rate_limited(client: AsyncClient):
         assert resp.status_code == 200
     resp = await client.post("/api/v1/auth/guest")
     assert resp.status_code == 429
+    # Retry-After 为窗口真实剩余秒数（而非固定阈值），前端可倒计时
+    assert 0 < int(resp.headers["retry-after"]) <= 60
 
 
 @pytest.mark.asyncio
