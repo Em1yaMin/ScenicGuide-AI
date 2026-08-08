@@ -76,8 +76,12 @@ test.describe('管理端', () => {
 
     // KPI 卡片（mock totals: 42 次调用 / 15000 tokens / 未配置单价表）
     await expect(page.locator('.kpi-card').filter({ hasText: '调用次数' })).toContainText('42')
-    await expect(page.locator('.kpi-card').filter({ hasText: 'Token 总量' })).toContainText('15,000')
-    await expect(page.locator('.kpi-card').filter({ hasText: '估算费用' })).toContainText('未配置单价表')
+    await expect(page.locator('.kpi-card').filter({ hasText: 'Token 总量' })).toContainText(
+      '15,000',
+    )
+    await expect(page.locator('.kpi-card').filter({ hasText: '估算费用' })).toContainText(
+      '未配置单价表',
+    )
 
     // 明细表格渲染 mock 数据
     const detailRows = page.locator('.detail-table tbody tr')

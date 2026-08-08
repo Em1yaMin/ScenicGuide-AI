@@ -520,7 +520,7 @@ npx playwright install --with-deps chromium
 npm run e2e
 ```
 
-E2E 冒烟覆盖核心路径：首页（加载 + 浏览推荐滚动）、对话页（进入 + 推荐问句浮层）、管理端（登录 + 知识库/公告/用量页基础渲染）。用例通过 `page.route` 拦截 `**/api/**` 返回夹具数据，稳定可重复、不依赖后端与外部服务；CI 的 E2E job 与 Backend/Frontend 并行执行（批次7 C6）。
+E2E 冒烟覆盖核心路径：首页（加载 + 浏览推荐滚动）、对话页（进入 + 推荐问句浮层）、管理端（登录 + 知识库/公告/用量页基础渲染）。用例通过 `page.route` 拦截 `http://localhost:5199/api/**`（必须带 origin，`**/api/**` 会误伤应用自身的 `/src/api/*.ts` 模块请求）返回夹具数据，稳定可重复、不依赖后端与外部服务；CI 的 E2E job 与 Backend/Frontend 并行执行（批次7 C6）。
 
 ## 验收状态
 
