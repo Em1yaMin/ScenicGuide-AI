@@ -34,10 +34,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt -r requirements-dev.txt
 
-      - name: Run tests
+      - name: Run tests with coverage gate
         # 测试使用内存 SQLite（tests/conftest.py 的 sqlite+aiosqlite:///:memory: fixture），
         # 无需 DATABASE_URL / .env。
-        run: pytest -q
+        # 覆盖率门禁（批次7 C6）：阈值 75% 基于当前基线实测（84%）留余量设定，
+        # 避免门禁一开始就红；低于阈值 CI 直接失败。
+        run: pytest -q --cov=app --cov-report=term:skip-covered --cov-fail-under=75
 
   frontend:
     name: Frontend build (Node 22)
@@ -61,3 +63,41 @@ jobs:
 
       - name: Build (vue-tsc type-check + vite build)
         run: npm run build
+
+  e2e:
+    name: Frontend E2E smoke (Playwright)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: digitalHumanVue
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: digitalHumanVue/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright chromium
+        # 仅安装 chromium（冒烟套件唯一浏览器），--with-deps 补齐系统依赖
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E smoke tests
+        # 冒烟套件（批次7 C6）：首页/对话页/管理端核心路径，后端接口在浏览器层
+        # mock（e2e/mocks.ts），无需真实后端；webServer 自动拉起 vite dev server。
+        run: npm run e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: digitalHumanVue/test-results
+          retention-days: 7
+          if-no-files-found: ignore
