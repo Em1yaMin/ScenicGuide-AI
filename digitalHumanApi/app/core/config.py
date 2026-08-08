@@ -132,6 +132,14 @@ class Settings(BaseModel):
 
     ADMIN_API_TOKEN: str = os.environ.get("ADMIN_API_TOKEN", "")
 
+    # 管理员 agent（批次6 B4）：删除类工具两阶段二次确认的待确认项 TTL（秒）
+    # 首次删除调用仅登记待确认项（含 operation_id 与目标摘要），短 TTL 过期后
+    # confirm_operation 失效，需重新发起（防模型误删/操作滞留，见
+    # app/services/admin_agent/confirm.py）
+    ADMIN_AGENT_CONFIRM_TTL_SECONDS: int = int(
+        os.environ.get("ADMIN_AGENT_CONFIRM_TTL_SECONDS", "120")
+    )
+
     # JWT 用户认证（注册/登录/游客 token，见 app/core/security.py）
     # JWT_SECRET: 生产环境必须设置为随机长字符串；留空时启动生成随机临时密钥（重启失效）
     JWT_SECRET: str = os.environ.get("JWT_SECRET", "")

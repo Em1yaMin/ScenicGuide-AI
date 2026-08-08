@@ -198,6 +198,18 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - 测试：`tests/test_memory_admin.py`（21：鉴权 401 全端点/用户列表含 memory_count/按用户列记忆/游客空/legacy 派生 id 删除/新增校验 422/游客 400/未注册 404/空白内容 422 拒绝（含修改先删后建不丢数据）/user 空白归一化/修改部分更新/修改后旧 id 失效/跨用户删除/404/审计日志）
 - **前端（批次5 B5 前端任务）**：`digitalHumanVue/src/api/memory.ts`（API 封装：fetchMemoryUsers/fetchUserMemories/createMemory/updateMemory/deleteMemory，X-Admin-Token 读 localStorage `admin_api_token`）+ `src/types/memory.ts`（AdminUserItem/AdminMemoryItem 等）+ `src/views/admin/MemoryView.vue`（路由 `/admin/memories`，菜单「记忆管理」）：双栏布局——左栏用户列表（keyword 搜索防抖 + 分页，memory_count 徽标），右栏选中用户记忆列表（fact_type 徽标/content/时间/来源会话，编辑/删除确认）；新增/编辑共用弹窗（fact_type 下拉 + content textarea，maxlength 200 + 前端校验）；空态「该用户暂无记忆（游客/匿名用户无长期记忆）」；保存后刷新记忆列表与用户条数统计
 
+## 管理员 agent（批次6 B4：deepagents 装配模式管理端变体，X-Admin-Token 鉴权）
+
+船长决策：独立管理员 agent，可对项目数据库直接调整、发布公告等；删除类操作二次确认 + 审计日志；用户侧隔离不适用（跨用户例外）。性能前提：后台页打开才活跃、不常驻。
+
+- `app/services/admin_agent/`：`agent.py`（装配 + chat/chat_stream）、`tools.py`（管理工具集 + 两阶段二次确认执行器 + 审计）、`confirm.py`（待确认项存储）；路由 `app/routers/admin_agent.py`（`POST /api/admin/agent/chat` 非流式 + `/chat/stream` SSE，X-Admin-Token 鉴权，LLM 未配置 503/error 事件，无 Dify 兜底）
+- **装配复用 A2/A3 模式**：`ensure_harness_profile`/`_MAX_AGENT_STEPS`/`_AGENT_TIMEOUT`/`_AGENT_MAX_TOKENS` 直接从 deepagents.harness 复用（同一 provider 注册、排除内置 9 工具）；ToolCallLimitMiddleware 同配置；agent 缓存（构造 ~24s）；SSE 契约与用户侧一致（step/token/done，suppress_tokens + 按 call id 去重，管理端步骤可视化零适配）；模型同 opencode-go（llm.py 工厂）
+- **管理工具集**（全部复用既有 service，工具调用前经 `InjectedState("is_admin")` 校验 admin 上下文，非管理员直接抛错拒绝）：知识库查询/增/改/删（knowledge_service）、记忆按用户查询/删（memory_service，管理员跨用户例外）、公告列表/发布下架（announcement_service）、运营统计（admin_service 聚合 + DB 直查，只读）、RAG 重建索引（rag_service documents+knowledge 双命名空间）、首页数据（home_service，只读）
+- **两阶段删除契约（confirm.py）**：删除类工具首次调用只登记待确认项（`confirm.create_pending` 生成 operation_id + 目标摘要，进程内短 TTL 默认 120s，`ADMIN_AGENT_CONFIRM_TTL_SECONDS` 可配），不执行删除；模型需再次调用 `confirm_operation(operation_id)`（`confirm.consume` 取出即删防重放）经 `_CONFIRM_EXECUTORS` 派发实际执行（执行前重新定位目标，已被他人删除如实报告）
+- **审计**：全部写操作（增/删/改/发布下架/重建索引）经 `tools._audit_log` 记 logger（`operator=admin-agent` + 工具名 + 目标 + action + 结果），与 B5 风格一致
+- **无会话持久化**：每请求独立（不落短期/长期记忆，不污染用户侧数据）；conversation_id 仅透传回显（空串生成新 uuid）
+- 测试：`tests/test_admin_agent_confirm.py`（7）+ `test_admin_agent_tools.py`（21，含两阶段全流程/越权拒绝/审计）+ `test_admin_agent.py`（8，装配/SSE 契约/缓存）+ `test_admin_agent_api.py`（7，鉴权 401/非流式/SSE）；新增 43 用例，全量 529 绿（pytest 收集 529：497 测试函数 + 34 参数化用例）
+
 ## AI 运营分析（LangChain + OpenAI，可回退）
 
 - `app/services/analytics_service.py` + `app/routers/analysis.py` — `GET /api/v1/analysis/overview`（`?days=1-365`）、`GET /trends`、`POST /run-now`

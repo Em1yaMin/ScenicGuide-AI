@@ -13,6 +13,7 @@ from app.core.logging_config import RequestLoggingMiddleware, configure_logging
 from app.models import Base
 from app.routers import (
     admin,
+    admin_agent,
     analysis,
     announcement,
     auth,
@@ -123,6 +124,7 @@ app.include_router(knowledge.router)
 app.include_router(announcement.admin_router)
 app.include_router(announcement.public_router)
 app.include_router(memory_admin.router)
+app.include_router(admin_agent.router)
 app.include_router(home.router)
 app.include_router(rag.router)
 
