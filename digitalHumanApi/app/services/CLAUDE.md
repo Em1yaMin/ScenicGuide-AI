@@ -23,11 +23,11 @@ services/
   dify_client.py      # DifyClient 类 + dify_client 单例 — Dify API 封装
   recommend_agent.py  # LangChain Tool Calling 个性化路线推荐 Agent
   auth_service.py     # register_user/authenticate_user/签发 user+guest token — 用户体系
-  chat_agent.py       # chat()/chat_stream() — LangChain 对话 agent 主链路（结构化工具 + 知识检索 + 多轮会话短期记忆持久化：进程内缓存 + SQLite 双写，重启可恢复；stream 模式产 SSE 事件：step/token/done；对话后挂长期记忆提取钩子；阶段3 T1 双模式：复杂意图分流到 planner_agent，异常降级快速路径）
+  chat_agent.py       # **弃用（A3）** — 自研 LangChain 对话 agent（会话存储层/记忆钩子被装配层复用：_get_or_create_conversation/_append_history/has_conversation/_schedule_memory_extraction；双模式对话能力保留为参考实现，A4 再评估删除）
   intent_classifier.py # classify_intent() — 双模式意图分类（简单/复杂，轻量规则词表，失败默认简单安全降级）
-  planner_agent.py    # chat_plan()/chat_plan_stream() — 复杂任务 LangGraph 规划图（规划→多步执行→总结，SSE step/token/done 契约，异常抛 PlannerError 由 chat_agent 降级快速路径）
+  planner_agent.py    # **弃用（A3）** — 复杂任务 LangGraph 规划图（规划→多步执行→总结，SSE step/token/done 契约，异常抛 PlannerError 由 chat_agent 降级快速路径；主链路规划能力已由 deepagents 装配层 prompt 级 _PLAN_INSTRUCTION 承载）
   memory_service.py   # 长期记忆（阶段2 T2）— save_user_memory/search_user_memory/count_user_memory/extract_facts/extract_and_store，user_memory 命名空间按 user 隔离（T3 契约见 doc/long-term-memory.md）；A2 新增 list_user_memories/delete_user_memory（记忆工具化按 id 删除，Document metadata 增 memory_id 内部扩展）
-  deepagents/         # deepagents 0.7.5 装配层（A2 试点，批次3）— 与主链路并存不替换（A3 才切换）：harness.py（HarnessProfile 排除内置 9 工具 + 禁用通用子代理 + 装配常量）、memory_tools.py（记忆四工具 recall/save/list/delete_user_memory，InjectedState('user') 注入实现 user 隔离）、agent.py（get_agent 缓存/chat/chat_stream，意图分流注入 _PLAN_INSTRUCTION + 轻量摘要注入，SSE step/token/done 契约与主链路一致）
+  deepagents/         # deepagents 0.7.5 装配层（A2 试点 → **A3 对话主链路**）— 路由 /api/v1/dialogue/chat 默认引擎走本层：harness.py（HarnessProfile 排除内置 9 工具 + 禁用通用子代理 + 装配常量）、memory_tools.py（记忆四工具 recall/save/list/delete_user_memory，InjectedState('user') 注入实现 user 隔离）、agent.py（get_agent 缓存/chat/chat_stream，会话管理复用 chat_agent 存储层 + 意图分流注入 _PLAN_INSTRUCTION + 轻量摘要注入，SSE step/token/done 契约与 ADH 前端一致）
   dify_stream.py      # stream_dify_chat() — Dify Chat Agent 流式客户端（response_mode=streaming，SSE 解析 + ThinkFilter 过滤 think 块，双轨流式的兜底链路）
 ```
 

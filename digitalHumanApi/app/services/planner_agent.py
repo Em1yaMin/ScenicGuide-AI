@@ -1,8 +1,13 @@
 """复杂任务规划路径（阶段3 T1 双模式：LangGraph 显式图）。
 
+**弃用标注（A3，批次3）**：对话主链路已切换到 deepagents 装配层（规划能力
+由 prompt 级 `_PLAN_INSTRUCTION` 指令承载，见 app/services/deepagents/agent.py），
+本模块不再被主链路调用，仅保留为 chat_agent 自研双模式的参考实现（A4 收官
+再评估删除）。
+
 船长决策 2026-08-06 方案B：复杂任务走「规划 → 多步执行 → 总结」三阶段
 显式图，与快速路径（create_agent 单层工具循环）并存。入口分流见
-`app/services/chat_agent.py` 的 `chat()` / `chat_stream()`。
+`app/services/chat_agent.py` 的 `chat()` / `chat_stream()`（已弃用）。
 
 实现方案选择说明：
 

@@ -1,4 +1,4 @@
-"""deepagents 装配环境：HarnessProfile 注册与装配常量（A2 试点，批次3）。
+"""deepagents 装配环境：HarnessProfile 注册与装配常量（A2 试点 → A3 主链路，批次3）。
 
 A1 实测报告（data/sg-deepagents-probe/report.md）结论：
 

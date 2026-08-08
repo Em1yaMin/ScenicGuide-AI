@@ -1,21 +1,31 @@
-"""deepagents 装配层核心（A2 试点，批次3）：装配 + 意图分流 + 摘要注入。
+"""deepagents 装配层核心（A2 试点 → **A3 对话主链路**，批次3）。
 
-与现有主链路（chat_agent）**并存、不替换**（A3 才切换）。本模块提供：
+A3 起为对话主链路（路由 `/api/v1/dialogue/chat` 默认引擎 langchain 走本
+模块；异常由路由层回落 Dify，演示不翻车）；chat_agent / planner_agent
+自研双模式保留为弃用代码（A4 收官再评估删除）。本模块提供：
 
 - `get_agent()` — 构造/缓存 deepagents agent（HarnessProfile 排除内置工具
   + LLM 工厂 + 场景工具 + 记忆四工具；构造耗时 ~24s，必须缓存）
-- `chat()` / `chat_stream()` — 对话入口（意图分类双模式挂载 + 轻量用户
-  摘要注入 + 流式 SSE 契约映射，A1 报告 §5）
+- `chat()` / `chat_stream()` — 对话入口（**A3 接入会话管理**：短期记忆
+  持久化 + conversation_id 生成/透出 + 多轮上下文组装；意图分类双模式
+  挂载 + 轻量用户摘要注入 + 流式 SSE 契约映射，A1 报告 §5）
 
 **意图分类双模式挂载**（船长决策：planning=prompt 指令，保留意图分类
 双模式）：复用 `intent_classifier` 规则分类——简单问答不注入规划指令
 （快速直接作答）；复杂任务注入 `_PLAN_INSTRUCTION` 规划指令（prompt 级
 规划，A1 实测有效：回答结构化分节、工具链更完整）。
 
+**会话管理复用主链路存储层**（A3）：`chat()`/`chat_stream()` 复用
+chat_agent 的会话存储（`_get_or_create_conversation` / `_append_history`，
+进程内 TTL 缓存 + SQLite 双写，重启可恢复）与记忆钩子
+（`_schedule_memory_extraction`）——单一数据源保证：① 重启后同
+conversation_id 续聊可恢复多轮上下文；② 路由层回落 Dify 时
+`chat_agent.has_conversation` 归属判定无需改动（生成的 id 登记在同一集合）。
+
 **只读复用主链路**：场景工具选择（`chat_agent._select_tools`）、系统提示词
 （`chat_agent.SYSTEM_PROMPT`）、RAG 来源提取（`chat_agent._extract_rag_info`）
-均从 chat_agent 只读引用（不改主链路，与 planner_agent 复用 `_TOOLS` 同
-风格）；A3 切换时再迁移为独立实现。
+均从 chat_agent 只读引用（chat_agent 保留期间维持单一来源，A4 删除时再
+迁移为独立实现）。
 
 **user 状态传递**：自定义 `ScenicDeepAgentState`（DeepAgentState 子类）追加
 `user` 字段，对话入口经 `{"messages": ..., "user": user}` 传入，记忆工具经
@@ -87,7 +97,8 @@ def _build_system_prompt() -> str:
 4. 工具效率：一次检索到足够信息后直接作答，不要对同一主题反复重搜。"""
 
 
-# 复用主链路系统提示词作为基础（A3 切换前保持单一来源）
+# 复用主链路系统提示词作为基础（chat_agent 保留期间维持单一来源，
+# A4 删除时再迁移为独立实现）
 SYSTEM_PROMPT = _build_system_prompt()
 
 
@@ -100,7 +111,8 @@ _PLAN_INSTRUCTION = """本次请求是需要多步骤完成的复杂任务（如
 3. 最后总结：用分节的结构化回答（如「行程安排」「适合人群」「注意事项」等小节）组织输出，引用真实名称与数据，不要编造"""
 
 # 步骤展示文案（场景工具与 chat_agent._STEP_LABELS 同源；记忆工具见
-# memory_tools.MEMORY_STEP_LABELS）——装配层独立维护，A3 切换时随迁
+# memory_tools.MEMORY_STEP_LABELS）——装配层独立维护，chat_agent 保留期间
+# 维持同源同步（A4 删除时再评估合并）
 _STEP_LABELS: Dict[str, str] = {
     "search_knowledge": "正在检索知识库…",
     "search_spots": "正在查询景点…",
@@ -300,22 +312,45 @@ async def chat(
     query: str,
     *,
     user: str = "visitor",
+    conversation_id: str = "",
     use_rag: bool = True,
     rag_top_k: int = 3,
     history: Optional[List[BaseMessage]] = None,
     agent: Optional[Any] = None,
     llm: Optional[Any] = None,
 ) -> Dict[str, Any]:
-    """deepagents 装配层非流式对话（试点）。
+    """deepagents 装配层非流式对话（A3 主链路）。
 
-    返回 {"answer", "rag_context", "rag_sources", "intent"}；intent 为
-    意图分流结果（complex/simple，观测用）。会话管理（短期记忆持久化、
-    conversation_id）属主链路职责，A3 切换时接入，本试点不涉及。
+    **A3 会话管理**：conversation_id 空串则新建（生成 uuid 并 SQLite 落盘）；
+    非空则从进程内缓存 / SQLite 懒恢复历史（重启可恢复），多轮上下文
+    组装进 messages（历史 + 当前问题）；对话完成后追加历史（双写）并
+    调度长期记忆提取钩子（与 chat_agent 主链路行为一致）。
+
+    返回 {"answer", "conversation_id", "rag_context", "rag_sources",
+    "intent"}；intent 为意图分流结果（complex/simple，观测用）。
+
+    Args:
+        query: 用户消息
+        user: 用户标识（登录用户 id / 游客 id / visitor）
+        conversation_id: 会话 ID；空串则新建会话（生成新 id 并返回）
+        use_rag: 是否启用知识检索工具 search_knowledge
+        rag_top_k: RAG 检索结果数（同时用于响应中 rag_sources 透出）
+        history: 显式传入的多轮上下文（测试/调用方注入用；不传则从
+            会话存储读取，二者不可混用——传了 history 时仍会按
+            conversation_id 做会话持久化）
+        agent: 注入的 agent 实例（测试用）
+        llm: 注入的 LLM（测试用，独立构建不缓存）
 
     Raises:
-        LLMConfigError / 网络 / API 异常：由调用方捕获（与主链路相同的
-        回落策略由路由层负责，本试点不接路由）
+        LLMConfigError / 网络 / API 异常：由路由层捕获并自动回落 Dify
     """
+    # 1. 会话管理（A3：进程内缓存 → SQLite 懒恢复；新建生成 id 并落盘）
+    conversation_id = main_chain._get_or_create_conversation(conversation_id, user)
+    if history is None:
+        with main_chain._conversations_lock:
+            history = list(main_chain._conversations.get(conversation_id, []))
+
+    # 2. 意图分流 + 轻量摘要注入 + 消息组装（多轮上下文 + 当前问题）
     complex_intent = _is_complex_intent(query)
     light_summary = await _build_light_summary(user)
     messages = _build_messages(
@@ -332,15 +367,21 @@ async def chat(
     all_messages: List[BaseMessage] = result.get("messages", [])
     answer = _extract_answer(all_messages)
     rag_context, rag_sources = main_chain._extract_rag_info(all_messages, rag_top_k)
+
+    # 3. 会话持久化 + 长期记忆钩子（与 chat_agent 主链路一致：先落盘后返回）
+    main_chain._append_history(conversation_id, query, answer, user)
+    main_chain._schedule_memory_extraction(user, conversation_id, query, answer)
     logger.info(
-        "deepagents 对话完成: intent=%s user=%s tools=%d answer_len=%d",
+        "deepagents 对话完成: intent=%s user=%s conversation=%s tools=%d answer_len=%d",
         "complex" if complex_intent else "simple",
         user,
+        conversation_id,
         len([m for m in all_messages if getattr(m, "type", "") == "tool"]),
         len(answer),
     )
     return {
         "answer": answer,
+        "conversation_id": conversation_id,
         "rag_context": rag_context,
         "rag_sources": rag_sources,
         "intent": "complex" if complex_intent else "simple",
@@ -351,31 +392,54 @@ async def chat_stream(
     query: str,
     *,
     user: str = "visitor",
+    conversation_id: str = "",
     use_rag: bool = True,
     rag_top_k: int = 3,
     history: Optional[List[BaseMessage]] = None,
     agent: Optional[Any] = None,
     llm: Optional[Any] = None,
 ) -> AsyncIterator[Dict[str, Any]]:
-    """deepagents 装配层流式对话（SSE 事件源，试点）。
+    """deepagents 装配层流式对话（SSE 事件源，A3 主链路）。
 
-    A1 报告 §5 契约映射（与现有 chat_agent 契约一一对应，ADH 侧无需改动）：
+    **A3 会话管理**：与 chat() 一致——conversation_id 空串新建（生成 uuid
+    并落盘），非空则恢复历史；done 事件携带 conversation_id（客户端续聊
+    回传）；历史追加与记忆钩子调度均在 done 事件**之前**（客户端收到 done
+    即关闭连接也不丢上下文/不丢记忆提取，review F1 2026-08-08 加固）。
+
+    A1 报告 §5 契约映射（与 ADH 前端契约一致，前端零改动）：
 
     - `step`：messages 模式 AIMessageChunk 的 `tool_call_chunks`（按调用 id
       去重，与 chat_agent 现有实现机制相同）；label 取 _STEP_LABELS
     - `token`：AI chunk 内容增量；**保留 suppress_tokens 语义**——模型在
       调用工具前会先输出正文 token，工具调用消息的内联 content 必须抑制
       （A1 实测必现，否则前端渲染工具调用前的碎文本）
-    - `done`：流结束事件（conversation_id 空串——会话管理属主链路职责，
-      A3 切换时接入；rag_context/rag_sources 从 search_knowledge 的
-      ToolMessage 提取，与 chat() 契约一致）
+    - `done`：流结束事件（conversation_id 透出；rag_context/rag_sources
+      从 search_knowledge 的 ToolMessage 提取，与 chat() 契约一致）
 
     事件契约与现有 SSE 兼容：{"type": "step"|"token"|"done", ...}，
     done 额外携带 intent 字段（分流结果，观测用）。
 
+    Args:
+        query: 用户消息
+        user: 用户标识（登录用户 id / 游客 id / visitor）
+        conversation_id: 会话 ID；空串则新建会话（生成新 id，done 透出）
+        use_rag: 是否启用知识检索工具 search_knowledge
+        rag_top_k: RAG 检索结果数（同时用于响应中 rag_sources 透出）
+        history: 显式传入的多轮上下文（测试/调用方注入用；不传则从
+            会话存储读取）
+        agent: 注入的 agent 实例（测试用）
+        llm: 注入的 LLM（测试用，独立构建不缓存）
+
     Raises:
         LLMConfigError / 网络 / API 异常：由调用方捕获并回落（同上）
     """
+    # 1. 会话管理（A3：进程内缓存 → SQLite 懒恢复；新建生成 id 并落盘）
+    conversation_id = main_chain._get_or_create_conversation(conversation_id, user)
+    if history is None:
+        with main_chain._conversations_lock:
+            history = list(main_chain._conversations.get(conversation_id, []))
+
+    # 2. 意图分流 + 轻量摘要注入 + 消息组装
     complex_intent = _is_complex_intent(query)
     light_summary = await _build_light_summary(user)
     messages = _build_messages(
@@ -425,20 +489,26 @@ async def chat_stream(
             if getattr(chunk, "name", "") == _KNOWLEDGE_TOOL_NAME:
                 rag_tool_messages.append(chunk)
 
+    # 3. 会话持久化 + 长期记忆钩子（done 前调度：客户端收到 done 即关闭
+    #    连接也不丢上下文/不丢记忆提取；review F1 2026-08-08——yield done
+    #    后调度存在 GeneratorExit 跳过窗口，改为 done 前更稳妥）
     answer = "".join(answer_parts)
+    main_chain._append_history(conversation_id, query, answer, user)
+    main_chain._schedule_memory_extraction(user, conversation_id, query, answer)
     rag_context, rag_sources = main_chain._extract_rag_info(
         rag_tool_messages, rag_top_k
     )
     logger.info(
-        "deepagents 对话完成(流式): intent=%s user=%s steps=%d answer_len=%d",
+        "deepagents 对话完成(流式): intent=%s user=%s conversation=%s steps=%d answer_len=%d",
         "complex" if complex_intent else "simple",
         user,
+        conversation_id,
         len(seen_call_ids),
         len(answer),
     )
     yield {
         "type": "done",
-        "conversation_id": "",  # 试点不管理会话（A3 切换时接入主链路会话层）
+        "conversation_id": conversation_id,
         "rag_context": rag_context,
         "rag_sources": rag_sources,
         "intent": "complex" if complex_intent else "simple",

@@ -1,4 +1,4 @@
-"""deepagents 装配层（A2 试点）——意图分类双模式挂载 + 轻量摘要单测。
+"""deepagents 装配层（A2 试点 → A3 主链路）——意图分类双模式挂载 + 轻量摘要单测。
 
 覆盖：
 1. 意图分流：简单问答不注入规划指令；复杂任务注入 _PLAN_INSTRUCTION
@@ -6,15 +6,32 @@
 2. 轻量用户摘要：游客/无数据不注入；昵称 + 记忆条数概览注入（防"忘记
    调用"记忆工具）；DB/计数异常静默降级
 3. chat() 入口：分流结果透出（intent 字段）、messages 组装正确、
-   user 传入图状态
+   user 传入图状态（A3 起含会话管理：conversation_id 生成/落盘/透出）
 """
 
 import pytest
 from langchain_core.messages import AIMessage
 
-from app.services import memory_service
+from app.services import chat_agent, memory_service
 from app.services.deepagents import agent as dg_agent
 from app.services.deepagents.agent import _PLAN_INSTRUCTION
+
+
+@pytest.fixture(autouse=True)
+def _pin_session_and_memory(monkeypatch):
+    """隔离会话存储 + 记忆提取钩子 no-op（A3：chat() 接入会话管理与钩子）。
+
+    - 清理进程内会话缓存，避免跨测试污染
+    - 记忆提取钩子固定为 no-op：避免后台任务在测试环境触发真实 LLM 调用
+    """
+    async def _noop_memory(*args, **kwargs):
+        return {"written": 0, "skipped": True}
+
+    monkeypatch.setattr(chat_agent, "_memory_extract_hook", _noop_memory)
+    with chat_agent._conversations_lock:
+        chat_agent._conversations.clear()
+        chat_agent._conversation_meta.clear()
+        chat_agent._generated_conversation_ids.clear()
 
 
 # ── 意图分流（_build_messages） ───────────────────────────────────────────
@@ -140,6 +157,8 @@ async def test_chat_passes_user_and_intent(monkeypatch):
     result = await dg_agent.chat("帮我规划灵山一日游", user="user_7")
     assert result["answer"] == "这是最终回答"
     assert result["intent"] == "complex"
+    # A3 会话管理：conversation_id 生成并透出（非空）
+    assert result["conversation_id"]
     assert fake.inputs["user"] == "user_7"
     assert fake.config["recursion_limit"] == dg_agent._MAX_AGENT_STEPS
     msgs = fake.inputs["messages"]

@@ -1,4 +1,4 @@
-"""deepagents 记忆工具化（A2 试点）——四工具 user_id 隔离单测。
+"""deepagents 记忆工具化（A2 试点 → A3 主链路）——四工具 user_id 隔离单测。
 
 覆盖：
 1. 注入机制：ToolNode 执行时经 InjectedState("user") 从图状态注入当前用户

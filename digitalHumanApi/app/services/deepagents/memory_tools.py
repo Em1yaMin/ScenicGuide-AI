@@ -1,4 +1,4 @@
-"""deepagents 记忆工具化四工具（A2 试点，批次3，船长决策：user_id 隔离）。
+"""deepagents 记忆工具化四工具（A2 试点 → A3 主链路，批次3，船长决策：user_id 隔离）。
 
 与阶段2 的「对话后后台提取 + 对话前检索注入」（memory_service / chat_agent
 记忆钩子）不同，本模块把长期记忆暴露为 agent 可直接调用的四个工具，模型

@@ -12,7 +12,7 @@
 
 | 分类 | 文件/模块 | 用途 | 处置 |
 |------|-----------|------|------|
-| **对话双轨回落** | `app/routers/dialogue.py`（`_call_dify_chat`/`_call_dify_chat_stream`） | LangChain 主链路异常时的 Dify Chat Agent 兜底（演示不翻车） | **保留**（船长决策，必须） |
+| **对话双轨回落** | `app/routers/dialogue.py`（`_call_dify_chat`/`_call_dify_chat_stream`） | 对话主链路（deepagents 装配层，A3 起）异常时的 Dify Chat Agent 兜底（演示不翻车） | **保留**（船长决策，必须） |
 | **对话双轨回落** | `app/services/dify_stream.py` | 回落链路的 SSE 流式消费 + ThinkFilter 过滤 | **保留**（同上） |
 | **历史数据接口** | `app/tasks/polling.py` | 30s 轮询 Dify `/conversations`、`/messages` 拉对话入库（管理后台数据大屏数据源） | **保留**（历史数据接口，如需要） |
 | **历史数据接口** | `app/tasks/backfill.py` | 一次性补拉 CLI（历史迁移工具，自带分页节流） | **保留**（历史数据接口） |
@@ -38,7 +38,7 @@
 
 ### 3.1 对话双轨回落（阶段4 后仍保留？→ 需决策）
 
-- **现状**：`dialogue.py` 路由层在 LangChain 主链路任何异常（含 `LLMConfigError`）时回落 `_call_dify_chat`/`_call_dify_chat_stream`；`DIALOGUE_ENGINE=dify` 可强制走 Dify。
+- **现状**：`dialogue.py` 路由层在对话主链路（deepagents 装配层，A3 起）任何异常（含 `LLMConfigError`）时回落 `_call_dify_chat`/`_call_dify_chat_stream`；`DIALOGUE_ENGINE=dify` 可强制走 Dify。
 - **阶段4 清理建议**：这是**演示兜底**，船长决策明确保留，**不建议移除**。若阶段4 需彻底退场 Dify，需先确保本地链路（LangChain + 本地工具 + 本地 LLM opencode-go）稳定性达标（含流式/非流式/多轮），并将回落路径改为「本地备选模型」而非 Dify。建议保留至 Dify 服务下线后再评估。
 
 ### 3.2 ~~Dify Workflow 量化评估~~（✅ 已清理：阶段4 首项，2026-08-07 船长决策方案A）

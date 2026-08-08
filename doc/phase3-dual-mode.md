@@ -1,5 +1,12 @@
 # 阶段3 T1 Agent 深化——LangGraph 双模式（phase3-dual-mode）
 
+> **弃用注记（A3，批次3）**：本文档描述的自研双模式（chat_agent 快速路径
+> + planner_agent 规划图）已不再是对话主链路——A3 起主链路走 deepagents
+> 装配层（`app/services/deepagents/agent.py`），复杂任务规划由 prompt 级
+> `_PLAN_INSTRUCTION` 指令承载（意图分类词表约束仍适用）。chat_agent /
+> planner_agent 保留为弃用代码（A4 收官再评估删除），本文档保留为历史设计
+> 参考。
+
 > 日期：2026-08-06 ｜ 船长决策方案B：简单问答走快速路径，复杂多步任务走
 > LangGraph 规划路径（规划 → 多步执行 → 总结），SSE 步骤可视化思考过程
 > 对应任务：阶段3 T1 Agent 深化（双模式）

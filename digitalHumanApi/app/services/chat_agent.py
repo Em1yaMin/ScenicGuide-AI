@@ -1,10 +1,24 @@
 """LangChain 对话 Agent（阶段1 T2：对话主链路 Dify → LangChain agent）。
 
-双轨开关见 `app/routers/dialogue.py`：`DIALOGUE_ENGINE=langchain`（默认）走本
-模块，异常自动回落 Dify；`DIALOGUE_ENGINE=dify` 强制走原 Dify 链路。
+**弃用标注（A3，批次3）**：对话主链路已切换到 deepagents 装配层
+（app/services/deepagents/agent.py，路由 /api/v1/dialogue/chat 默认引擎
+langchain 走装配层）。本模块保留原因：
+
+- 会话存储层被装配层复用（`_get_or_create_conversation` / `_append_history`
+  / `has_conversation` / `evict_expired_conversations`，短期记忆 SQLite 持久化
+  单一数据源）
+- 记忆钩子 `_schedule_memory_extraction` 被装配层复用（对话后自动抽取）
+- 路由层双轨回落仍用 `has_conversation` 做会话 ID 归属判定
+- 自研双模式（快速路径 + planner_agent 规划图）保留为参考实现
+
+A4 收官再评估删除范围（届时装配层需先独立实现 _select_tools / SYSTEM_PROMPT /
+_extract_rag_info 等只读复用项）。
+
+双轨开关见 `app/routers/dialogue.py`：`DIALOGUE_ENGINE=langchain`（默认）走
+本模块（A3 起改走 deepagents 装配层），异常自动回落 Dify；
+`DIALOGUE_ENGINE=dify` 强制走原 Dify 链路。
 
 设计要点（船长决策 2026-08-05）：
-
 - **双模式（阶段3 T1，方案B）**：对话入口先做意图分类（app/services/
   intent_classifier.py）——简单问答（单工具可答）走现有快速路径（零延迟增加）；
   复杂任务（多步骤意图，如规划行程）走 LangGraph 规划图（app/services/
@@ -643,7 +657,8 @@ async def chat(
     use_rag: bool = True,
     rag_top_k: int = 3,
 ) -> ChatAgentResult:
-    """LangChain 对话主链路：工具调用 agent + 进程内多轮上下文。
+    """（弃用链路，A3 起主链路为 deepagents 装配层）LangChain 对话 agent：
+    工具调用 agent + 进程内多轮上下文。
 
     Args:
         query: 用户消息

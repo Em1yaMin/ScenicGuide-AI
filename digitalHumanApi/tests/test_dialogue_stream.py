@@ -1,9 +1,9 @@
 """对话接口流式模式（streaming=true → SSE）单测。
 
 覆盖：SSE 事件序列（step → token → done）、响应头（text/event-stream +
-no-cache）、LangChain 链路异常回落 Dify（error(fallback=true) 标记 + Dify
+no-cache）、装配层链路异常回落 Dify（error(fallback=true) 标记 + Dify
 流式事件）、双链路均失败礼貌报错（error(fallback=false)）、DIALOGUE_ENGINE=dify
-强制 Dify 流式、会话 ID 移交规则（LangChain 生成 id 回落时传空串）。
+强制 Dify 流式、会话 ID 移交规则（会话存储生成 id 回落时传空串）。
 """
 
 import json
@@ -12,7 +12,7 @@ import pytest
 
 from app.core.config import settings
 from app.routers import dialogue
-from app.services import chat_agent
+from app.services import chat_agent, deepagents
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +41,7 @@ def _parse_sse(text: str) -> list:
     return events
 
 
-# ── LangChain 主链路（默认） ───────────────────────────────────────────────
+# ── 装配层主链路（默认） ───────────────────────────────────────────────
 
 
 async def test_streaming_sse_event_sequence(client, monkeypatch):
@@ -55,14 +55,14 @@ async def test_streaming_sse_event_sequence(client, monkeypatch):
         yield {"type": "token", "text": "好"}
         yield {
             "type": "done",
-            "conversation_id": "cid-lc",
+            "conversation_id": "cid-dg",
             "rag_context": "【知识库】...",
             "rag_sources": [
                 {"source": "s1.md", "score": 0.9, "namespace": "documents"}
             ],
         }
 
-    monkeypatch.setattr(chat_agent, "chat_stream", fake_stream)
+    monkeypatch.setattr(deepagents, "chat_stream", fake_stream)
     resp = await _chat(client, "有什么推荐？", streaming=True)
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/event-stream")
@@ -74,7 +74,7 @@ async def test_streaming_sse_event_sequence(client, monkeypatch):
         "tool": "search_knowledge",
         "label": "正在检索知识库…",
     }
-    assert events[-1]["conversation_id"] == "cid-lc"
+    assert events[-1]["conversation_id"] == "cid-dg"
     assert events[-1]["rag_sources"] == [
         {"source": "s1.md", "score": 0.9, "namespace": "documents"}
     ]
@@ -90,7 +90,7 @@ async def test_streaming_done_ends_stream(client, monkeypatch):
     async def fake_stream(**kwargs):
         yield {"type": "done", "conversation_id": "cid", "rag_context": "", "rag_sources": []}
 
-    monkeypatch.setattr(chat_agent, "chat_stream", fake_stream)
+    monkeypatch.setattr(deepagents, "chat_stream", fake_stream)
     resp = await _chat(client, "你好", streaming=True)
     events = _parse_sse(resp.text)
     assert len(events) == 1
@@ -101,7 +101,7 @@ async def test_streaming_done_ends_stream(client, monkeypatch):
 
 
 async def test_streaming_langchain_failure_falls_back_to_dify(client, monkeypatch):
-    """LangChain 流式异常 → error(fallback=true) + 切换步骤 + Dify 流式事件。"""
+    """装配层流式异常 → error(fallback=true) + 切换步骤 + Dify 流式事件。"""
     calls = {"langchain": 0, "dify": 0}
 
     async def boom(**kwargs):
@@ -114,7 +114,7 @@ async def test_streaming_langchain_failure_falls_back_to_dify(client, monkeypatc
         yield {"type": "token", "text": "dify 兜底"}
         yield {"type": "done", "conversation_id": "cid-dify"}
 
-    monkeypatch.setattr(chat_agent, "chat_stream", boom)
+    monkeypatch.setattr(deepagents, "chat_stream", boom)
     monkeypatch.setattr(dialogue, "_call_dify_chat_stream", fake_dify_stream)
     resp = await _chat(client, "你好", streaming=True)
     events = _parse_sse(resp.text)
@@ -135,7 +135,7 @@ async def test_streaming_both_fail_polite_error(client, monkeypatch):
     async def fake_dify_stream(query, user, conversation_id):
         raise RuntimeError("Dify 也不可用")
 
-    monkeypatch.setattr(chat_agent, "chat_stream", boom)
+    monkeypatch.setattr(deepagents, "chat_stream", boom)
     monkeypatch.setattr(dialogue, "_call_dify_chat_stream", fake_dify_stream)
     resp = await _chat(client, "你好", streaming=True)
     assert resp.status_code == 200
@@ -170,7 +170,7 @@ async def test_streaming_dify_done_carries_rag_fields(client, monkeypatch):
         yield {"type": "token", "text": "答"}
         yield {"type": "done", "conversation_id": "cid-dify"}
 
-    monkeypatch.setattr(chat_agent, "chat_stream", boom)
+    monkeypatch.setattr(deepagents, "chat_stream", boom)
     monkeypatch.setattr(dialogue, "_call_dify_chat_stream", fake_dify_stream)
     async def fake_prepare_rag(query, use_rag, rag_top_k):
         return (
@@ -188,7 +188,7 @@ async def test_streaming_dify_done_carries_rag_fields(client, monkeypatch):
 
 
 async def test_streaming_fallback_blank_cid_for_langchain_owned_session(client, monkeypatch):
-    """跨轮回落：id 由 LangChain 生成时，Dify 收到空 conversation_id。"""
+    """跨轮回落：id 由会话存储生成时，Dify 收到空 conversation_id。"""
     dify_calls = []
     lc_cid = chat_agent._get_or_create_conversation("")
 
@@ -199,7 +199,7 @@ async def test_streaming_fallback_blank_cid_for_langchain_owned_session(client, 
         dify_calls.append(conversation_id)
         yield {"type": "done", "conversation_id": "cid-new"}
 
-    monkeypatch.setattr(chat_agent, "chat_stream", boom)
+    monkeypatch.setattr(deepagents, "chat_stream", boom)
     monkeypatch.setattr(dialogue, "_call_dify_chat_stream", fake_dify_stream)
     resp = await _chat(client, "你好", streaming=True, conversation_id=lc_cid)
     assert resp.status_code == 200
@@ -219,7 +219,7 @@ async def test_streaming_keeps_dify_owned_conversation_id(client, monkeypatch):
         dify_calls.append(conversation_id)
         yield {"type": "done", "conversation_id": conversation_id}
 
-    monkeypatch.setattr(chat_agent, "chat_stream", boom)
+    monkeypatch.setattr(deepagents, "chat_stream", boom)
     monkeypatch.setattr(dialogue, "_call_dify_chat_stream", fake_dify_stream)
     resp = await _chat(client, "你好", streaming=True, conversation_id="dify-cid")
     assert resp.status_code == 200
@@ -232,11 +232,15 @@ async def test_streaming_keeps_dify_owned_conversation_id(client, monkeypatch):
 async def test_streaming_false_still_blocking_json(client, monkeypatch):
     """streaming=false（默认）仍返回 ChatResponse JSON（非 SSE）。"""
     async def fake_chat(**kwargs):
-        return chat_agent.ChatAgentResult(
-            answer="blocking 回答", conversation_id="cid-b"
-        )
+        return {
+            "answer": "blocking 回答",
+            "conversation_id": "cid-b",
+            "rag_context": "",
+            "rag_sources": [],
+            "intent": "simple",
+        }
 
-    monkeypatch.setattr(chat_agent, "chat", fake_chat)
+    monkeypatch.setattr(deepagents, "chat", fake_chat)
     resp = await _chat(client, "你好")
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("application/json")

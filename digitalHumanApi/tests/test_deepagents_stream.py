@@ -1,4 +1,4 @@
-"""deepagents 装配层（A2 试点）——流式 SSE 契约（A1 报告 §5 映射）单测。
+"""deepagents 装配层（A2 试点 → A3 主链路）——流式 SSE 契约（A1 报告 §5 映射）单测。
 
 覆盖：
 1. 事件序列：step（工具调用）→ token（回答增量）→ done
@@ -6,8 +6,9 @@
    抑制（模型在调用工具前会输出正文 token），ToolMessage 后恢复输出
 3. step 按调用 id 去重（同一工具调用拆分多个 chunk 只产出一个 step）
 4. 记忆工具步骤文案（_STEP_LABELS 合并）
-5. done 事件契约（rag_context/rag_sources/intent）+ user 传入图状态 +
-   recursion_limit 显式收紧
+5. done 事件契约（conversation_id 透出/rag_context/rag_sources/intent）+
+   user 传入图状态 + recursion_limit 显式收紧（A3 起会话管理接入：
+   done 携带生成的 conversation_id）
 6. 意图分流在流式入口同样生效（复杂 query 注入规划指令）
 
 不依赖真实 LLM：注入假 agent（记录输入并产出构造好的消息 chunk 流）。
@@ -16,8 +17,22 @@
 import pytest
 from langchain_core.messages import AIMessageChunk, ToolMessage
 
+from app.services import chat_agent
 from app.services.deepagents import agent as dg_agent
 from app.services.deepagents.agent import _MAX_AGENT_STEPS, _PLAN_INSTRUCTION
+
+
+@pytest.fixture(autouse=True)
+def _pin_session_and_memory(monkeypatch):
+    """隔离会话存储 + 记忆提取钩子 no-op（A3：chat_stream() 接入会话管理与钩子）。"""
+    async def _noop_memory(*args, **kwargs):
+        return {"written": 0, "skipped": True}
+
+    monkeypatch.setattr(chat_agent, "_memory_extract_hook", _noop_memory)
+    with chat_agent._conversations_lock:
+        chat_agent._conversations.clear()
+        chat_agent._conversation_meta.clear()
+        chat_agent._generated_conversation_ids.clear()
 
 
 class _FakeStreamAgent:
@@ -85,9 +100,9 @@ async def test_stream_step_token_done_sequence(monkeypatch):
     # step 事件：工具名 + 中文步骤文案
     assert events[0]["tool"] == "search_spots"
     assert events[0]["label"] == "正在查询景点…"
-    # done 事件契约
+    # done 事件契约（A3：conversation_id 为会话存储生成的 id，非空）
     done = events[-1]
-    assert done["conversation_id"] == ""
+    assert done["conversation_id"]
     assert done["rag_sources"] == []
     assert done["rag_context"] == ""
     assert done["intent"] == "simple"

@@ -1,21 +1,22 @@
 """对话接口双轨开关（app/routers/dialogue.py）单测。
 
-覆盖：默认 LangChain 引擎、DIALOGUE_ENGINE=dify 强制 Dify、
-LangChain 异常自动回落 Dify（响应字段兼容）、Dify 兜底失败时礼貌报错。
+覆盖：默认装配层引擎（DIALOGUE_ENGINE=langchain 走 deepagents）、
+DIALOGUE_ENGINE=dify 强制 Dify、装配层异常自动回落 Dify（响应字段兼容）、
+Dify 兜底失败时礼貌报错。
 """
 
 import pytest
 
 from app.core.config import settings
 from app.routers import dialogue
-from app.services import chat_agent
+from app.services import chat_agent, deepagents
 
 
 @pytest.fixture(autouse=True)
 def _pin_dialogue_engine(monkeypatch):
     """固定默认引擎为 langchain（与生产默认一致）。"""
     monkeypatch.setattr(settings, "DIALOGUE_ENGINE", "langchain")
-    # 清理 chat_agent 进程内会话，避免跨测试污染归属判定
+    # 清理会话存储（装配层与 chat_agent 共用），避免跨测试污染归属判定
     with chat_agent._conversations_lock:
         chat_agent._conversations.clear()
         chat_agent._conversation_meta.clear()
@@ -28,28 +29,35 @@ async def _chat(client, query="你好", **kwargs):
     )
 
 
-# ── LangChain 主链路（默认） ───────────────────────────────────────────────
+def _dg_result(answer="装配层回答", conversation_id="cid-dg", **extra):
+    """构造装配层 chat() 的 dict 返回（响应契约字段）。"""
+    return {
+        "answer": answer,
+        "conversation_id": conversation_id,
+        "rag_context": "【知识库】...",
+        "rag_sources": [{"source": "s1.md", "score": 0.9, "namespace": "documents"}],
+        "intent": "simple",
+        **extra,
+    }
+
+
+# ── 装配层主链路（默认） ───────────────────────────────────────────────────
 
 
 async def test_default_engine_langchain(client, monkeypatch):
-    """默认（DIALOGUE_ENGINE=langchain）走 chat_agent，响应字段兼容。"""
+    """默认（DIALOGUE_ENGINE=langchain）走 deepagents 装配层，响应字段兼容。"""
     called = {}
 
     async def fake_chat(**kwargs):
         called["kwargs"] = kwargs
-        return chat_agent.ChatAgentResult(
-            answer="langchain 回答",
-            conversation_id="cid-lc",
-            rag_context="【知识库】...",
-            rag_sources=[{"source": "s1.md", "score": 0.9, "namespace": "documents"}],
-        )
+        return _dg_result()
 
-    monkeypatch.setattr(chat_agent, "chat", fake_chat)
+    monkeypatch.setattr(deepagents, "chat", fake_chat)
     resp = await _chat(client, "有什么推荐？")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["answer"] == "langchain 回答"
-    assert data["conversation_id"] == "cid-lc"
+    assert data["answer"] == "装配层回答"
+    assert data["conversation_id"] == "cid-dg"
     assert data["rag_context"] == "【知识库】..."
     assert data["rag_sources"] == [
         {"source": "s1.md", "score": 0.9, "namespace": "documents"}
@@ -61,14 +69,14 @@ async def test_default_engine_langchain(client, monkeypatch):
 
 
 async def test_langchain_passes_use_rag_and_top_k(client, monkeypatch):
-    """请求参数透传：use_rag/rag_top_k/conversation_id 传给 chat_agent。"""
+    """请求参数透传：use_rag/rag_top_k/conversation_id 传给装配层。"""
     called = {}
 
     async def fake_chat(**kwargs):
         called["kwargs"] = kwargs
-        return chat_agent.ChatAgentResult(answer="ok", conversation_id="cid-x")
+        return _dg_result(conversation_id="cid-x")
 
-    monkeypatch.setattr(chat_agent, "chat", fake_chat)
+    monkeypatch.setattr(deepagents, "chat", fake_chat)
     await _chat(client, use_rag=False, rag_top_k=5, conversation_id="cid-1")
     assert called["kwargs"]["use_rag"] is False
     assert called["kwargs"]["rag_top_k"] == 5
@@ -79,7 +87,7 @@ async def test_langchain_passes_use_rag_and_top_k(client, monkeypatch):
 
 
 async def test_engine_dify_forced(client, monkeypatch):
-    """DIALOGUE_ENGINE=dify 强制走 Dify（不调用 chat_agent）。"""
+    """DIALOGUE_ENGINE=dify 强制走 Dify（不调用装配层）。"""
     monkeypatch.setattr(settings, "DIALOGUE_ENGINE", "dify")
 
     async def fake_dify(query, user, conversation_id):
@@ -98,18 +106,18 @@ async def test_engine_invalid_value_defaults_to_langchain(client, monkeypatch):
     monkeypatch.setattr(settings, "DIALOGUE_ENGINE", "garbage")
 
     async def fake_chat(**kwargs):
-        return chat_agent.ChatAgentResult(answer="langchain 回答", conversation_id="cid")
+        return _dg_result()
 
-    monkeypatch.setattr(chat_agent, "chat", fake_chat)
+    monkeypatch.setattr(deepagents, "chat", fake_chat)
     resp = await _chat(client)
-    assert resp.json()["answer"] == "langchain 回答"
+    assert resp.json()["answer"] == "装配层回答"
 
 
 # ── 故障回落 ───────────────────────────────────────────────────────────────
 
 
 async def test_langchain_failure_falls_back_to_dify(client, monkeypatch):
-    """LangChain 链路异常 → 自动回落 Dify，响应字段兼容。"""
+    """装配层链路异常 → 自动回落 Dify，响应字段兼容。"""
     calls = {"langchain": 0, "dify": 0}
 
     async def boom(**kwargs):
@@ -120,7 +128,7 @@ async def test_langchain_failure_falls_back_to_dify(client, monkeypatch):
         calls["dify"] += 1
         return {"answer": "dify 兜底回答", "conversation_id": "cid-fb"}
 
-    monkeypatch.setattr(chat_agent, "chat", boom)
+    monkeypatch.setattr(deepagents, "chat", boom)
     monkeypatch.setattr(dialogue, "_call_dify_chat", fake_dify)
     resp = await _chat(client)
     assert resp.status_code == 200
@@ -131,11 +139,11 @@ async def test_langchain_failure_falls_back_to_dify(client, monkeypatch):
 
 
 async def test_fallback_blank_cid_for_langchain_owned_session(client, monkeypatch):
-    """跨轮回落：id 由 LangChain 生成时，Dify 收到空 conversation_id
+    """跨轮回落：id 由会话存储生成（装配层生成）时，Dify 收到空 conversation_id
     （避免 400 conversation_not_exist，让 Dify 新建会话兜底回答）。"""
     dify_calls = []
 
-    # 真实生成一个 LangChain 会话 id（登记为模块生成）
+    # 真实生成一个会话 id（登记为模块生成，归属判定复用 chat_agent 集合）
     lc_cid = chat_agent._get_or_create_conversation("")
 
     async def boom(**kwargs):
@@ -145,7 +153,7 @@ async def test_fallback_blank_cid_for_langchain_owned_session(client, monkeypatc
         dify_calls.append(conversation_id)
         return {"answer": "dify 兜底回答", "conversation_id": "cid-new"}
 
-    monkeypatch.setattr(chat_agent, "chat", boom)
+    monkeypatch.setattr(deepagents, "chat", boom)
     monkeypatch.setattr(dialogue, "_call_dify_chat", fake_dify)
     resp = await _chat(client, conversation_id=lc_cid)
     assert resp.status_code == 200
@@ -156,11 +164,11 @@ async def test_fallback_blank_cid_for_langchain_owned_session(client, monkeypatc
 
 
 async def test_fallback_keeps_dify_owned_conversation_id(client, monkeypatch):
-    """跨轮回落：id 由 Dify 生成（LangChain 侧仅复用为会话 key）时原样透传，
+    """跨轮回落：id 由 Dify 生成（会话存储仅复用为会话 key）时原样透传，
     保证 Dify 侧多轮上下文延续（回归：上轮修复曾误判此路径）。"""
     dify_calls = []
 
-    # 模拟 R2：Dify 生成的 id 被 LangChain 复用建会（不登记为模块生成）
+    # 模拟 R2：Dify 生成的 id 被复用建会（不登记为模块生成）
     reused = chat_agent._get_or_create_conversation("dify-cid")
     assert reused == "dify-cid"
     assert chat_agent.has_conversation("dify-cid") is False
@@ -172,7 +180,7 @@ async def test_fallback_keeps_dify_owned_conversation_id(client, monkeypatch):
         dify_calls.append(conversation_id)
         return {"answer": "dify 兜底回答", "conversation_id": conversation_id}
 
-    monkeypatch.setattr(chat_agent, "chat", boom)
+    monkeypatch.setattr(deepagents, "chat", boom)
     monkeypatch.setattr(dialogue, "_call_dify_chat", fake_dify)
     resp = await _chat(client, conversation_id="dify-cid")
     assert resp.status_code == 200
@@ -189,7 +197,7 @@ async def test_dify_fallback_failure_returns_polite_error(client, monkeypatch):
     async def fake_dify(query, user, conversation_id):
         raise RuntimeError("Dify 也不可用")
 
-    monkeypatch.setattr(chat_agent, "chat", boom)
+    monkeypatch.setattr(deepagents, "chat", boom)
     monkeypatch.setattr(dialogue, "_call_dify_chat", fake_dify)
     resp = await _chat(client)
     assert resp.status_code == 200
