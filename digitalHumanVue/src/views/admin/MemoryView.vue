@@ -45,6 +45,7 @@ const editorError = ref<string | null>(null)
 // ── State：删除确认 ──
 const showDelete = ref(false)
 const deletingMemory = ref<AdminMemoryItem | null>(null)
+const isDeleting = ref(false)
 
 // ── State：Token 设置 ──
 const showToken = ref(false)
@@ -198,7 +199,8 @@ function confirmDelete(item: AdminMemoryItem) {
 }
 
 async function doDelete() {
-  if (!deletingMemory.value || !selectedUser.value) return
+  if (isDeleting.value || !deletingMemory.value || !selectedUser.value) return
+  isDeleting.value = true
   try {
     await deleteMemory(deletingMemory.value.memory_id)
     showDelete.value = false
@@ -207,6 +209,8 @@ async function doDelete() {
   } catch (e) {
     memoryError.value = e instanceof Error ? e.message : '删除失败'
     showDelete.value = false
+  } finally {
+    isDeleting.value = false
   }
 }
 
@@ -453,7 +457,9 @@ onMounted(() => {
           </div>
           <div class="modal-footer">
             <button class="secondary-btn" @click="showDelete = false">取消</button>
-            <button class="primary-btn danger" @click="doDelete">删除</button>
+            <button class="primary-btn danger" :disabled="isDeleting" @click="doDelete">
+              {{ isDeleting ? '删除中…' : '删除' }}
+            </button>
           </div>
         </div>
       </div>
