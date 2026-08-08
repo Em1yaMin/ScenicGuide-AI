@@ -19,6 +19,7 @@ from app.routers import (
     dialogue,
     home,
     knowledge,
+    memory_admin,
     rag,
     recommend,
     visitor,
@@ -121,6 +122,7 @@ app.include_router(recommend.router)
 app.include_router(knowledge.router)
 app.include_router(announcement.admin_router)
 app.include_router(announcement.public_router)
+app.include_router(memory_admin.router)
 app.include_router(home.router)
 app.include_router(rag.router)
 

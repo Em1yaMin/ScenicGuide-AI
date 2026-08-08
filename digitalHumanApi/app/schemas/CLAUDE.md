@@ -24,6 +24,7 @@ schemas/
   analysis.py   # AnalysisResultItem — 预留未来分析结果 API
   recommend.py  # RecommendRequest / RecommendResponse + RouteRecommendation
   auth.py       # RegisterRequest / LoginRequest / UserResponse / AuthResponse / GuestResponse
+  memory_admin.py # 记忆管理（B5）：AdminMemoryItem/CreateRequest/UpdateRequest/DeleteResponse + AdminUserItem/ListResponse，契约见 doc/memory-admin-api.md
 ```
 
 ## Request/Response Pair Pattern

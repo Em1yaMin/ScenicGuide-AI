@@ -368,6 +368,16 @@ docker-compose up -d --build
 | PATCH | `/api/admin/announcements/{id}/status` | 发布状态切换（published/draft） |
 | DELETE | `/api/admin/announcements/{id}` | 删除公告 |
 
+管理接口（前缀 `/api/admin/memories`，需 `X-Admin-Token` 认证；契约见 [`digitalHumanApi/doc/memory-admin-api.md`](digitalHumanApi/doc/memory-admin-api.md)）：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/admin/memories/users` | 注册用户列表（id/username/nickname/记忆条数/最后登录时间，keyword 模糊搜索 + 分页） |
+| GET | `/api/admin/memories?user={id}` | 按用户查看长期记忆（含 memory_id，legacy 派生 id 兼容；游客返回空列表） |
+| POST | `/api/admin/memories` | 新增记忆（管理员例外：可为任意注册用户新增；游客 400/未注册 404） |
+| PUT | `/api/admin/memories/{memory_id}` | 修改记忆（删除后重建：保留 user/source_conversation_id，memory_id 更新为新建 uuid） |
+| DELETE | `/api/admin/memories/{memory_id}` | 删除记忆（跨用户可用；uuid 与 legacy 派生 id 均可） |
+
 > **知识库与 RAG 联动**：管理后台知识库增/删/改/导入后自动同步重建 `knowledge` 命名空间向量索引，后台检索立即可见；结构化景点/路线数据不走向量，由推荐 Agent 结构化工具直查（零幻觉原则）。
 
 RAG 接口（`/api/rag/*`，统一检索入口，对话 RAG、推荐 Agent 与后台共用）：

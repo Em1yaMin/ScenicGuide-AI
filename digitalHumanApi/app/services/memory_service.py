@@ -135,25 +135,50 @@ def _memory_store():
     return get_vectorstore_for_namespace(NAMESPACE_USER_MEMORY)
 
 
+def _doc_to_entry(doc: Document) -> MemoryEntry:
+    """向量库 Document → MemoryEntry（metadata 解析，字段缺失取默认值）。"""
+    md = doc.metadata or {}
+    return MemoryEntry(
+        user=str(md.get("user", "") or ""),
+        fact_type=str(md.get("fact_type", "fact") or "fact"),
+        content=str(doc.page_content or ""),
+        source_conversation_id=str(md.get("source_conversation_id", "") or ""),
+        timestamp=float(md.get("timestamp", 0.0) or 0.0),
+        memory_id=str(md.get("memory_id", "") or ""),
+    )
+
+
 def _all_entries() -> List[MemoryEntry]:
     """读取 user_memory 命名空间全量记忆（按 metadata 解析，须在持锁时调用）。"""
     store = _memory_store()
     entries: List[MemoryEntry] = []
     for doc in store._documents:
-        md = doc.metadata or {}
-        if not md.get("user"):
-            continue
-        entries.append(
-            MemoryEntry(
-                user=str(md.get("user", "")),
-                fact_type=str(md.get("fact_type", "fact") or "fact"),
-                content=str(doc.page_content or ""),
-                source_conversation_id=str(md.get("source_conversation_id", "") or ""),
-                timestamp=float(md.get("timestamp", 0.0) or 0.0),
-                memory_id=str(md.get("memory_id", "") or ""),
-            )
-        )
+        entry = _doc_to_entry(doc)
+        if entry.user:
+            entries.append(entry)
     return entries
+
+
+# legacy 派生 id 前缀：旧条目（升级前写入、无 memory_id）按「归一化 content」
+# 派生稳定 id 供按 id 删除（与 deepagents/memory_tools.py 的 _LEGACY_ID_PREFIX 对齐）
+_LEGACY_ID_PREFIX = "legacy:"
+
+
+def memory_id_of(entry: MemoryEntry) -> str:
+    """条目对外 memory_id：新条目为 uuid；旧条目（无 memory_id）派生稳定 id。
+
+    派生规则（与 deepagents 记忆工具 _entry_to_json 对齐）：
+    `legacy:{归一化 content}`——同 user 同内容去重覆盖保证派生 id 唯一稳定，
+    可按 id 删除。管理端（B5）列表/查找/删除统一走本函数，避免派生规则漂移。
+    """
+    if entry.memory_id:
+        return entry.memory_id
+    return f"{_LEGACY_ID_PREFIX}{_normalize_content(entry.content)}"
+
+
+def _doc_matches_memory_id(doc: Document, memory_id: str) -> bool:
+    """Document 是否匹配指定 memory_id（含 legacy 派生 id 兼容）。"""
+    return memory_id_of(_doc_to_entry(doc)) == memory_id
 
 
 def _entry_to_document(entry: MemoryEntry) -> Document:
@@ -243,6 +268,8 @@ def _save_user_memory_sync(user: str, facts: List[MemoryEntry]) -> dict:
         )
 
         # 写入新条目（保留调用方时间戳；缺失时用当前时间）
+        # 注意：内部新构造的 MemoryEntry 透传 f.memory_id（B5 管理端预生成
+        # 稳定 id 用）；为空时由 _entry_to_document 生成 uuid（既有行为不变）
         now = time.time()
         docs = [
             _entry_to_document(
@@ -252,6 +279,7 @@ def _save_user_memory_sync(user: str, facts: List[MemoryEntry]) -> dict:
                     content=f.content,
                     source_conversation_id=f.source_conversation_id,
                     timestamp=f.timestamp or now,
+                    memory_id=f.memory_id,
                 )
             )
             for f in incoming
@@ -409,23 +437,12 @@ def _delete_user_memory_sync(user: str, memory_id: str) -> dict:
     """delete_user_memory 的同步实现（经 run_in_executor 在事件循环外执行）。"""
     if is_guest_user(user) or not memory_id:
         return {"deleted": 0, "user": user}
-    # 旧条目（无 memory_id）的派生 id 匹配：legacy:{归一化 content}
-    legacy_match = None
-    if memory_id.startswith("legacy:"):
-        legacy_match = memory_id
     store = _memory_store()
     with _vector_index_lock:
         deleted = store.delete_documents(
             lambda doc: (
                 doc.metadata.get("user") == user
-                and (
-                    doc.metadata.get("memory_id") == memory_id
-                    or (
-                        legacy_match is not None
-                        and legacy_match
-                        == f"legacy:{_normalize_content(doc.page_content)}"
-                    )
-                )
+                and _doc_matches_memory_id(doc, memory_id)
             )
         )
     if deleted:
@@ -448,6 +465,49 @@ def _count_user_memory_sync(user: str) -> int:
         return 0
     with _vector_index_lock:
         return len([e for e in _all_entries() if e.user == user])
+
+
+async def find_memory_by_id(memory_id: str) -> Optional[MemoryEntry]:
+    """按 memory_id 跨用户查找记忆条目（B5 管理端：管理员例外跨用户操作）。
+
+    匹配规则与 delete_user_memory 一致（uuid 精确匹配 + legacy 派生 id 兼容，
+    见 memory_id_of）；未找到返回 None。空 id 直接返回 None。
+    """
+    if not memory_id:
+        return None
+    return await asyncio.get_running_loop().run_in_executor(
+        None, _find_memory_by_id_sync, memory_id
+    )
+
+
+def _find_memory_by_id_sync(memory_id: str) -> Optional[MemoryEntry]:
+    """find_memory_by_id 的同步实现（经 run_in_executor 在事件循环外执行）。"""
+    with _vector_index_lock:
+        for doc in _memory_store()._documents:
+            if _doc_matches_memory_id(doc, memory_id):
+                return _doc_to_entry(doc)
+    return None
+
+
+async def count_memories_per_user() -> Dict[str, int]:
+    """统计各用户的记忆条数（B5 管理端用户列表用，单次持锁批量统计）。
+
+    Returns:
+        {user: count}：user 为记忆库中的用户标识字符串（注册用户为 str(id)，
+        如 "1"）；游客无记忆不会出现。
+    """
+    return await asyncio.get_running_loop().run_in_executor(
+        None, _count_memories_per_user_sync
+    )
+
+
+def _count_memories_per_user_sync() -> Dict[str, int]:
+    """count_memories_per_user 的同步实现（经 run_in_executor 在事件循环外执行）。"""
+    counts: Dict[str, int] = {}
+    with _vector_index_lock:
+        for entry in _all_entries():
+            counts[entry.user] = counts.get(entry.user, 0) + 1
+    return counts
 
 
 # ── LLM 提取（对话完成后台执行，失败静默降级） ───────────────────────────

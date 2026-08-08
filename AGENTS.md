@@ -178,7 +178,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 - `app/services/memory_service.py` — 记忆条目 schema + 写入/检索/提取；`doc/long-term-memory.md` 为**权威设计文档与 T3 契约**（变更 schema/接口必须同步该文档与本节）
 - **记忆条目 schema（T3 契约）**：每条记忆一个字段组 `{user, fact_type, content, source_conversation_id, timestamp}`；`fact_type` ∈ `preference`（偏好）/`fact`（事实）/`habit`（习惯），非法值归一 `fact`；`content` 为自然语言记忆句（≤200 字符）；存储形态为 user_memory 命名空间内**每条记忆一个 Document**（page_content=content，metadata 携带结构化字段），按 user 隔离
-- 公开接口（T3 对齐）：`save_user_memory(user, facts) -> dict`（按 user 写入/覆盖，同 user 同规范化 content 去重更新不膨胀，返回 written/overwritten/total/skipped）、`search_user_memory(user, query, top_k=3) -> List[MemoryEntry]`（user 子集内语义检索，游客/异常返回空）、`count_user_memory(user)`、`extract_facts(query, answer, llm=None)`（LLM 单次提取，可注入 llm 测试）、`extract_and_store(user, cid, query, answer)`（对话后钩子主体）；A2 新增 `list_user_memories(user)` / `delete_user_memory(user, memory_id)`（记忆工具化用，见下方「deepagents 装配层」专节）
+- 公开接口（T3 对齐）：`save_user_memory(user, facts) -> dict`（按 user 写入/覆盖，同 user 同规范化 content 去重更新不膨胀，返回 written/overwritten/total/skipped）、`search_user_memory(user, query, top_k=3) -> List[MemoryEntry]`（user 子集内语义检索，游客/异常返回空）、`count_user_memory(user)`、`extract_facts(query, answer, llm=None)`（LLM 单次提取，可注入 llm 测试）、`extract_and_store(user, cid, query, answer)`（对话后钩子主体）；A2 新增 `list_user_memories(user)` / `delete_user_memory(user, memory_id)`（记忆工具化用，见下方「deepagents 装配层」专节）；B5 新增 `memory_id_of`/`find_memory_by_id`/`count_memories_per_user`（管理端用，见下方「记忆管理 API」专节）
 - **游客隔离**：`is_guest_user()` 判定 visitor / guest-* / 空串为游客；游客（含匿名）**不写长期记忆**（跳过 LLM 调用与写入）
 - **提取钩子**：主链路（deepagents 装配层 A3 起 / 弃用链路 chat_agent）在 `chat()` 末尾 / `chat_stream()` done 事件后调 `_schedule_memory_extraction`（后台 asyncio task，不 await、不阻塞响应；句柄登记 `_memory_tasks` 防 GC、done 回调消费异常）；提取失败/LLM 未配置**静默降级不写记忆**（告警日志），绝不阻断对话；测试用 `monkeypatch.setattr(chat_agent, "_memory_extract_hook", noop)` 隔离（test_chat_agent/test_chat_agent_stream/test_deepagents_main 的 autouse fixture 已固定）
 - 存储复用：`app/core/rag.py` 的 `SimpleVectorStore` 新增 `delete_documents(predicate)`（按谓词删文档+向量，支撑覆盖更新）与 `similarity_search_with_score_filtered(query, k, predicate)`（子集检索，支撑按 user 隔离）两个通用方法；写入/检索均在 `rag_service._vector_index_lock` 下执行
@@ -186,6 +186,16 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - 配置：`MEMORY_ENABLED`（默认 true，总开关）、`MEMORY_MAX_PER_USER`（默认 200，超限淘汰 timestamp 最旧条目）、`MEMORY_INJECT_ENABLED`（默认 true，注入总开关）、`MEMORY_MAX_AGE_DAYS`（默认 180，注入记忆最大时效），见 `.env.example`
 - 单测：`tests/test_memory.py`（schema/按 user 隔离/覆盖去重/条数上限/游客跳过/LLM 提取容错/静默降级/chat+chat_stream 钩子调度，mock LLM 与 MockTransport，不发真实请求）、`tests/test_memory_inject.py`（注入逻辑：有记忆→首轮请求含记忆上下文/无记忆/游客/异常降级/多轮仅首轮/时效过滤/流式/端到端按 user 隔离）、`tests/test_rag.py`（delete_documents 与过滤子集检索回归）
 - **阶段2 T4 登录生效联调（收官，2026-08-06）**：真实环境全链路验证通过（key 用主项目 `digitalHumanApi/.env`，worktree 复制为 gitignored 临时配置）——登录用户注册/登录 → 带 JWT 多轮对话 → 后台提取写入 user_memory（实测 user=1 写入 5 条，来源会话/类型正确）→ 新会话首轮注入生效（回答引用用户画像「带老人小孩/自然风光」，tools=0 即作答）→ 同事实重申覆盖不膨胀（仍 5 条）；游客（无 token / guest token）短期记忆正常、无长期记忆写入与注入（新会话问「还记得我吗」明确答「没有记忆功能」）；未发现联调缺陷、无代码改动；验证矩阵与证据见 `doc/phase2-memory-verification.md`
+
+## 记忆管理 API（批次5 B5：管理端，X-Admin-Token 鉴权）
+
+船长决策：长期记忆管理需后台可手动修改/让 agent 修改；用户侧隔离已由 A2 记忆四工具实现，本模块补**管理端**能力（管理员例外：可查看/新增/修改/删除任意注册用户记忆；游客无记忆——查询空、新增 400）。
+
+- `app/routers/memory_admin.py`（前缀 `/api/admin/memories`，契约 `doc/memory-admin-api.md`）：`GET /users`（注册用户列表 id/username/nickname/**memory_count**/last_login_at，keyword/page/page_size）、`GET ?user={id}`（按用户列记忆，含 memory_id/fact_type/content/source_conversation_id/timestamp）、`POST`（新增，user 须为注册用户，游客 400/未注册 404）、`PUT /{memory_id}`（修改=**删除后重建**：保留 user/source_conversation_id，timestamp 刷新、memory_id 更新为新建 uuid，content/fact_type 部分更新至少其一）、`DELETE /{memory_id}`（跨用户按 id 删除，uuid 与 legacy 派生 id 均可）
+- **审计（日志先行）**：删除/修改/新增记 `app.routers.memory_admin` logger（`operator=admin` + 目标 user/memory_id/内容摘要截断 50 字符）；DB 审计表未引入（需 Alembic 迁移，当前频次低日志可追溯）
+- **输入校验（schema 层先 strip）**：`content`/`user` 纯空白 422、首尾空白自动归一化（`" 1 "` → `"1"`，查询参数同规）；保证修改「先删后建」在任何删除前完成校验（防空白内容先删后失败的数据丢失与带空白 user 孤儿条目）
+- **memory_service 新增公开接口**（复用不重实现）：`memory_id_of(entry)`（对外 memory_id 单一派生规则：uuid，旧条目 `legacy:{归一化 content}`，deepagents `_entry_to_json` 同规则）、`find_memory_by_id(memory_id)`（跨用户查找，含 legacy 兼容）、`count_memories_per_user()`（单次持锁批量统计）；`_save_user_memory_sync` 透传传入 memory_id（管理端预生成 uuid 落库，既有调用方行为不变）；`_delete_user_memory_sync` 匹配改为 `_doc_matches_memory_id` 统一走 memory_id_of（原 legacy 匹配逻辑等价）
+- 测试：`tests/test_memory_admin.py`（21：鉴权 401 全端点/用户列表含 memory_count/按用户列记忆/游客空/legacy 派生 id 删除/新增校验 422/游客 400/未注册 404/空白内容 422 拒绝（含修改先删后建不丢数据）/user 空白归一化/修改部分更新/修改后旧 id 失效/跨用户删除/404/审计日志）
 
 ## AI 运营分析（LangChain + OpenAI，可回退）
 
