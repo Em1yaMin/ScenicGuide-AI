@@ -28,6 +28,7 @@ services/
   planner_agent.py    # **弃用（A3）** — 复杂任务 LangGraph 规划图（规划→多步执行→总结，SSE step/token/done 契约，异常抛 PlannerError 由 chat_agent 降级快速路径；主链路规划能力已由 deepagents 装配层 prompt 级 _PLAN_INSTRUCTION 承载）
   memory_service.py   # 长期记忆（阶段2 T2）— save_user_memory/search_user_memory/count_user_memory/extract_facts/extract_and_store，user_memory 命名空间按 user 隔离（T3 契约见 doc/long-term-memory.md）；A2 新增 list_user_memories/delete_user_memory（记忆工具化按 id 删除，Document metadata 增 memory_id 内部扩展）；B5 新增 memory_id_of/find_memory_by_id/count_memories_per_user（管理端记忆管理复用，见 doc/memory-admin-api.md）
   deepagents/         # deepagents 0.7.5 装配层（A2 试点 → **A3 对话主链路**）— 路由 /api/v1/dialogue/chat 默认引擎走本层：harness.py（HarnessProfile 排除内置 9 工具 + 禁用通用子代理 + 装配常量）、memory_tools.py（记忆四工具 recall/save/list/delete_user_memory，InjectedState('user') 注入实现 user 隔离）、agent.py（get_agent 缓存/chat/chat_stream，会话管理复用 chat_agent 存储层 + 意图分流注入 _PLAN_INSTRUCTION + 轻量摘要注入，SSE step/token/done 契约与 ADH 前端一致）
+  admin_agent/        # 管理端 agent（批次6 B4，deepagents 装配模式变体，X-Admin-Token 鉴权由路由层保证）— agent.py（get_agent 缓存/chat/chat_stream，复用 harness 装配常量，SSE 契约与用户侧一致）、tools.py（管理工具集：知识库/记忆/公告/统计/RAG 索引/首页数据，复用既有 service；删除类两阶段二次确认 + 写操作审计）、confirm.py（待确认项存储，短 TTL）；无会话持久化
   dify_stream.py      # stream_dify_chat() — Dify Chat Agent 流式客户端（response_mode=streaming，SSE 解析 + ThinkFilter 过滤 think 块，双轨流式的兜底链路）
 ```
 

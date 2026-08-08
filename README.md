@@ -378,6 +378,13 @@ docker-compose up -d --build
 | PUT | `/api/admin/memories/{memory_id}` | 修改记忆（删除后重建：保留 user/source_conversation_id，memory_id 更新为新建 uuid） |
 | DELETE | `/api/admin/memories/{memory_id}` | 删除记忆（跨用户可用；uuid 与 legacy 派生 id 均可） |
 
+管理接口（前缀 `/api/admin/agent`，需 `X-Admin-Token` 认证；管理员 agent，可对话调用知识库/记忆/公告/统计/RAG 索引/首页数据工具，删除类操作两阶段二次确认 + 写操作审计日志）：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/admin/agent/chat` | 管理 agent 非流式对话（知识库查询/增改删、用户记忆查询/删除、公告列表/发布下架、运营统计、RAG 重建索引、首页数据；删除类首次调用仅返回待确认 `operation_id`，需再调 `confirm_operation` 确认才真正执行（短 TTL 默认 120s 过期）；LLM 未配置返回 503） |
+| POST | `/api/admin/agent/chat/stream` | 管理 agent 流式对话（SSE，事件契约与用户侧一致：step/token/done，管理端步骤可视化零适配） |
+
 > **知识库与 RAG 联动**：管理后台知识库增/删/改/导入后自动同步重建 `knowledge` 命名空间向量索引，后台检索立即可见；结构化景点/路线数据不走向量，由推荐 Agent 结构化工具直查（零幻觉原则）。
 
 RAG 接口（`/api/rag/*`，统一检索入口，对话 RAG、推荐 Agent 与后台共用）：
@@ -517,6 +524,7 @@ pytest -v
 | 阶段4 量化评估本地化 | ✅ 完成（真实调用：本地 LLM 评估产出情感/满意度/关注点/景点/改进建议，Evaluation 表与管理后台消费不变；`trigger_workflow`/`dify_helpers`/`DIFY_WORKFLOW_API_KEY` 已移除；全量测试全绿，详见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md) §2） |
 | 阶段4 收官：脱离 Dify 全链路自检 | ✅ 通过（真实环境模拟 **Dify 不可达**：对话快速/规划/流式/多轮记忆、推荐问句本地生成、分析链路（LLM+DB 兜底）、量化评估 → Evaluation 表 → 管理后台报告（含 suggestions）、记忆系统（长期/短期/游客隔离）全部正常；仅保留项明确降级——历史数据接口重试后 `synced=0` 不崩溃、对话回落礼貌报错不崩溃；自检未发现代码缺陷，详见 [`doc/phase4-e2e-verification.md`](doc/phase4-e2e-verification.md)） |
 | 批次4 B2 公告模块 + 首页活数据 | ✅ 完成（announcements 迁移升级/回退（首个真实 Alembic 迁移）+ 管理端 CRUD（X-Admin-Token 鉴权）+ 访客接口仅已发布（置顶优先 + 时间倒序）+ 首页活数据接口（`app/data/*.json` 实时读取）；契约见 [`digitalHumanApi/doc/announcement-api.md`](digitalHumanApi/doc/announcement-api.md)；公告/首页/迁移新增单测 19 用例全绿） |
+| 批次6 B4 管理员 agent | ✅ 完成（deepagents 装配模式管理端变体：X-Admin-Token 鉴权对话 API（非流式 + SSE，事件契约与用户侧一致）、12 个管理工具（知识库/记忆/公告/统计/RAG 索引/首页数据，全部复用既有 service）、删除类两阶段二次确认（TTL 默认 120s，`ADMIN_AGENT_CONFIRM_TTL_SECONDS` 可配）+ 写操作审计日志（operator=admin-agent）；新增单测 43 用例全绿） |
 | Docker Compose | 已配置，未在本次验收中实际构建 |
 
 ## 常见问题

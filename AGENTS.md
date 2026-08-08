@@ -208,7 +208,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - **两阶段删除契约（confirm.py）**：删除类工具首次调用只登记待确认项（`confirm.create_pending` 生成 operation_id + 目标摘要，进程内短 TTL 默认 120s，`ADMIN_AGENT_CONFIRM_TTL_SECONDS` 可配），不执行删除；模型需再次调用 `confirm_operation(operation_id)`（`confirm.consume` 取出即删防重放）经 `_CONFIRM_EXECUTORS` 派发实际执行（执行前重新定位目标，已被他人删除如实报告）
 - **审计**：全部写操作（增/删/改/发布下架/重建索引）经 `tools._audit_log` 记 logger（`operator=admin-agent` + 工具名 + 目标 + action + 结果），与 B5 风格一致
 - **无会话持久化**：每请求独立（不落短期/长期记忆，不污染用户侧数据）；conversation_id 仅透传回显（空串生成新 uuid）
-- 测试：`tests/test_admin_agent_confirm.py`（7）+ `test_admin_agent_tools.py`（21，含两阶段全流程/越权拒绝/审计）+ `test_admin_agent.py`（11，装配/SSE 契约/缓存）+ `test_admin_agent_api.py`（8，鉴权 401/非流式/SSE）；全量 529 绿
+- 测试：`tests/test_admin_agent_confirm.py`（7）+ `test_admin_agent_tools.py`（21，含两阶段全流程/越权拒绝/审计）+ `test_admin_agent.py`（8，装配/SSE 契约/缓存）+ `test_admin_agent_api.py`（7，鉴权 401/非流式/SSE）；新增 43 用例，全量 529 绿（pytest 收集 529：497 测试函数 + 34 参数化用例）
 
 ## AI 运营分析（LangChain + OpenAI，可回退）
 
