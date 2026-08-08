@@ -119,4 +119,4 @@ done  conversation_id / rag_context / rag_sources
 延迟说明：规划路径耗时主要为 LLM 推理（规划 + 总结两次调用，deepseek-v4-flash
 约 20-35s）；快速路径同等复杂查询约 27s——规划路径增量约 8s（多一次规划调用 +
 总结聚合），简单问答快速路径不受分类器影响（分类为纯字符串匹配，微秒级）。
-RAG 首次索引加载（TF-IDF 全量重向量化约 17s-2min）为既有已知项，与本次无关。
+RAG 首次索引加载（TF-IDF 全量重向量化约 17s-2min）当时为既有已知项、与本次无关；API embedding 路径的启动重向量化已由批次3 C4 向量落盘解决（sidecar 缓存命中跳过重算，见 AGENTS.md「本地 RAG 知识库」），TF-IDF 路径行为不变。
