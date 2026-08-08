@@ -30,6 +30,7 @@ from typing import Any, Dict, Optional
 from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
+from app.services.usage_tracker import UsageTrackingChatOpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,11 @@ def create_chat_llm(
     # langchain-openai 1.4.1 会把该字段重命名为 max_completion_tokens 发送，
     # DeepSeek 系端点不识别并静默忽略（长度限制失效）。
     # 长度限制统一经 extra_body 注入（见 _build_extra_body）。
-    return ChatOpenAI(
+    # 批次7 C5 token 记账：USAGE_TRACKING_ENABLED 时构造 UsageTrackingChatOpenAI
+    # 子类（模型调用层统一埋点，见 app/services/usage_tracker.py；关闭时行为
+    # 与历史完全一致，零额外开销）
+    llm_cls = UsageTrackingChatOpenAI if settings.USAGE_TRACKING_ENABLED else ChatOpenAI
+    return llm_cls(
         model=model,
         api_key=api_key,
         base_url=api_base,

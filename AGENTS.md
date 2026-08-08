@@ -231,6 +231,17 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - 定时任务 `app/tasks/analysis.py::analysis_loop`（每 300s）做**本地 LLM 量化评估**（`batch_evaluate` → `evaluation_service`，Evaluation 表写入，管理后台数据源；Dify Workflow 评估已阶段4 移除），任务级 try/except 保证故障持续运行；LLM 分析由接口按需触发（无独立调度）
 - 测试：`tests/test_analysis.py`（LLM 成功/失败/无 key 三种降级路径 + 任务韧性）；conftest 固定 `OPENAI_API_KEY=""`（同 CI，防本地 worktree .env 真实 key 污染测试触发慢速网络调用）
 
+## LLM token 记账（批次7 C5：统一埋点 + 后台批量写库 + 报表 API）
+
+船长决策：token 记账放后台、分模型用量、可查询值详细一点（GitHub 用量报表风格：趋势图 + 明细表）；opencode-go 订阅制可只记 token 不记钱，但保留 cost 列与单价映射能力。权威契约：`doc/usage-tracking.md`。
+
+- **统一埋点**：`app/services/usage_tracker.py` 的 `UsageTrackingChatOpenAI`（ChatOpenAI 子类）在模型调用层拦截（_generate/_agenerate/_stream/_astream 四入口）；`llm.py` 工厂在 `USAGE_TRACKING_ENABLED`（默认 true）时构造该子类——**所有经 get_chat_llm/create_chat_llm 的链路自动记账**（analytics_service 的 OPENAI_* 独立构造不在范围）；非流式取 llm_output.token_usage，流式经 `stream_options.include_usage`（`USAGE_STREAM_USAGE` 开关，opencode-go/DeepSeek 实测支持）取最后一个带 usage_metadata 的 chunk；异常/无 usage 不记账（宁缺毋滥）；不改变调用行为
+- **链路/用户上下文**：`usage_context(chain, user)` contextmanager（contextvars，to_thread/langgraph 图内子任务自动继承）由调用点标注——对话（deepagents chat/chat_stream，弃用 chat_agent 同）、推荐、评估、压缩（compaction）、管理员agent（user=admin）、记忆提取（extract_facts）、规划（弃用 planner）；意图分类是规则匹配无 LLM 不需埋点
+- **批量 flush**：record_usage 仅入队（queue.Queue 零阻塞）；lifespan 注册 flush_loop 定时批量写库（`USAGE_FLUSH_INTERVAL_SECONDS`=5）；队列满（`USAGE_QUEUE_MAX_SIZE`=2000）兜底 run_coroutine_threadsafe 立即 flush + 丢最旧；关闭时 shutdown() 最后 flush；写库失败告警丢弃（failed 计数）；开关关闭零开销
+- **llm_usage 表**：model/input/output/total_tokens（本地求和）/duration_ms/chain/user/cost/created_at；迁移 `c5f1a2b3d4e5`（升级建表+索引/回退删表）；`MODEL_PRICES` 单价表（"模型:输入价,输出价" 元/百万 tokens，分号分隔多项；留空 cost=NULL）
+- **报表 API**（`app/routers/usage.py`，前缀 /api/admin/usage，X-Admin-Token，operator 可查）：`GET /overview`（start/end ISO + granularity=day|week|month → totals + 趋势 series + by_model/by_chain，cost 未配置单价为 null）、`GET /details`（分页 + model/chain/user 筛选，created_at 倒序）、`GET /export`（CSV 导出，UTF-8 BOM 兼容 Excel）；时间统一 UTC naive；参数非法 422
+- 测试：`tests/test_usage_tracker.py`（19：队列/上下文/flush/开关/队列满兜底/关闭/单价表）+ `tests/test_llm_usage.py`（14：MockTransport 非流式/流式埋点、无 usage 不记、请求体不变、stream_options 开关、deepagents 端到端对话/流式记账）+ `tests/test_usage_api.py`（17：聚合正确性/分页筛选/CSV/鉴权 401/operator 放行/422）；conftest autouse `_reset_usage_tracker` 每测试重置队列；全量 618 绿（基线 566 + 52）
+
 ## 数据库迁移（Alembic，批次2 地基 C1）
 
 - `alembic.ini` + `migrations/`（env.py 为 **async 模板**：项目是 SQLAlchemy 2.0 async engine（create_async_engine + aiosqlite），在线迁移经 `asyncio.run` 包装）；初始迁移 `04436fda61c5` 为全量基线（DDL 与 ORM create_all 逐字节一致，见 `tests/test_migrations.py::test_upgraded_schema_matches_orm_metadata`）

@@ -46,6 +46,7 @@ from pydantic import BaseModel, Field
 
 from app.core.llm import get_chat_llm
 from app.services.rag_service import build_rag_context
+from app.services.usage_tracker import CHAIN_PLANNER, usage_context
 
 logger = logging.getLogger(__name__)
 
@@ -240,12 +241,14 @@ def _build_graph(*, tools: List[Any], llm: Any) -> Any:
             try:
                 # 图内模型调用被 langgraph 统一转为流式：经 astream 累积后解析 JSON
                 # （不用 with_structured_output，见 _parse_plan 注释）
-                async for chunk in llm.astream(
-                    [SystemMessage(content=plan_prompt)] + list(state["messages"])
-                ):
-                    content = getattr(chunk, "content", "")
-                    if isinstance(content, str) and content:
-                        chunks.append(content)
+                # 批次7 C5 token 记账：规划链路（弃用规划图）
+                with usage_context(CHAIN_PLANNER):
+                    async for chunk in llm.astream(
+                        [SystemMessage(content=plan_prompt)] + list(state["messages"])
+                    ):
+                        content = getattr(chunk, "content", "")
+                        if isinstance(content, str) and content:
+                            chunks.append(content)
             except Exception as e:
                 if attempt < _PLAN_RETRIES:
                     logger.warning(
@@ -325,10 +328,12 @@ def _build_graph(*, tools: List[Any], llm: Any) -> Any:
         )
         chunks: List[str] = []
         try:
-            async for chunk in llm.astream(messages):
-                content = getattr(chunk, "content", "")
-                if isinstance(content, str) and content:
-                    chunks.append(content)
+            # 批次7 C5 token 记账：规划链路（弃用规划图总结节点）
+            with usage_context(CHAIN_PLANNER):
+                async for chunk in llm.astream(messages):
+                    content = getattr(chunk, "content", "")
+                    if isinstance(content, str) and content:
+                        chunks.append(content)
         except Exception as e:
             # 总结失败（含流式无分块的 ValueError）→ 统一转 PlannerError
             raise PlannerError(f"总结生成失败: {e}") from e

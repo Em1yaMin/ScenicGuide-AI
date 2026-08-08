@@ -51,6 +51,7 @@ from app.services.deepagents.harness import (
     _MAX_AGENT_STEPS,
     ensure_harness_profile,
 )
+from app.services.usage_tracker import CHAIN_ADMIN_AGENT, usage_context
 
 logger = logging.getLogger(__name__)
 
@@ -195,10 +196,12 @@ async def chat(
     """
     cid = conversation_id or uuid.uuid4().hex
     agent = agent or get_agent(llm=llm)
-    result = await agent.ainvoke(
-        {"messages": [HumanMessage(content=query)], "is_admin": True},
-        config={"recursion_limit": _MAX_AGENT_STEPS},
-    )
+    # 批次7 C5 token 记账：标注链路/用户（管理员 agent 调用记账 user=admin）
+    with usage_context(CHAIN_ADMIN_AGENT, "admin"):
+        result = await agent.ainvoke(
+            {"messages": [HumanMessage(content=query)], "is_admin": True},
+            config={"recursion_limit": _MAX_AGENT_STEPS},
+        )
     all_messages: List[BaseMessage] = result.get("messages", [])
     answer = _extract_answer(all_messages)
     logger.info(
@@ -239,35 +242,38 @@ async def chat_stream(
     suppress_tokens = False
     answer_parts: List[str] = []
 
-    async for chunk, _meta in agent.astream(
-        {"messages": [HumanMessage(content=query)], "is_admin": True},
-        stream_mode="messages",
-        config={"recursion_limit": _MAX_AGENT_STEPS},
-    ):
-        if isinstance(chunk, AIMessageChunk):
-            tool_calls = chunk.tool_call_chunks or []
-            if tool_calls:
-                suppress_tokens = True
-                for call in tool_calls:
-                    call_id = call.get("id")
-                    name = call.get("name")
-                    if name and call_id and call_id not in seen_call_ids:
-                        seen_call_ids.add(call_id)
-                        yield {
-                            "type": "step",
-                            "tool": name,
-                            "label": _STEP_LABELS.get(
-                                name, f"正在调用工具 {name}…"
-                            ),
-                        }
-            text = chunk.content
-            if not suppress_tokens and isinstance(text, str) and text:
-                answer_parts.append(text)
-                yield {"type": "token", "text": text}
-        elif getattr(chunk, "type", "") == "tool":
-            # 工具执行结果（ToolMessage）：重置抑制标记（工具调用结束，
-            # 后续模型正文正常输出）
-            suppress_tokens = False
+    # 批次7 C5 token 记账：标注链路/用户（生成器跨 yield 持有上下文，
+    # 客户端中断时 contextmanager 仍会复位）
+    with usage_context(CHAIN_ADMIN_AGENT, "admin"):
+        async for chunk, _meta in agent.astream(
+            {"messages": [HumanMessage(content=query)], "is_admin": True},
+            stream_mode="messages",
+            config={"recursion_limit": _MAX_AGENT_STEPS},
+        ):
+            if isinstance(chunk, AIMessageChunk):
+                tool_calls = chunk.tool_call_chunks or []
+                if tool_calls:
+                    suppress_tokens = True
+                    for call in tool_calls:
+                        call_id = call.get("id")
+                        name = call.get("name")
+                        if name and call_id and call_id not in seen_call_ids:
+                            seen_call_ids.add(call_id)
+                            yield {
+                                "type": "step",
+                                "tool": name,
+                                "label": _STEP_LABELS.get(
+                                    name, f"正在调用工具 {name}…"
+                                ),
+                            }
+                text = chunk.content
+                if not suppress_tokens and isinstance(text, str) and text:
+                    answer_parts.append(text)
+                    yield {"type": "token", "text": text}
+            elif getattr(chunk, "type", "") == "tool":
+                # 工具执行结果（ToolMessage）：重置抑制标记（工具调用结束，
+                # 后续模型正文正常输出）
+                suppress_tokens = False
 
     answer = "".join(answer_parts)
     logger.info(

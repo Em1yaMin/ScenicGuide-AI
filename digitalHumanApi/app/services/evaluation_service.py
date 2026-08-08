@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.core.llm import LLMConfigError, get_chat_llm
+from app.services.usage_tracker import CHAIN_EVALUATION, usage_context
 
 logger = logging.getLogger(__name__)
 
@@ -220,6 +221,12 @@ def _parse_evaluation_output(text: Any) -> Optional[Dict[str, Any]]:
     }
 
 
+def _invoke_evaluation_llm(llm: Any, messages: List[Any]) -> Any:
+    """量化评估 LLM 调用（线程内执行，标注记账链路）。"""
+    with usage_context(CHAIN_EVALUATION):
+        return llm.invoke(messages)
+
+
 async def evaluate_content(
     content: str, llm: Optional[Any] = None
 ) -> Optional[Dict[str, Any]]:
@@ -249,7 +256,8 @@ async def evaluate_content(
         # 到线程池（参考 #30 recommend_service 的 asyncio.to_thread 模式），
         # 保证 analysis_loop 事件循环不被长延迟端点卡死
         response = await asyncio.to_thread(
-            llm.invoke,
+            _invoke_evaluation_llm,
+            llm,
             [
                 SystemMessage(content=_EVALUATION_SYSTEM_PROMPT),
                 HumanMessage(content=f"请分析以下游客与景区AI导游的对话：\n\n{content}"),

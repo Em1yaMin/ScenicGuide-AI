@@ -40,6 +40,7 @@ from langchain_core.messages import BaseMessage, SystemMessage
 
 from app.core.config import settings
 from app.core.llm import get_chat_llm
+from app.services.usage_tracker import CHAIN_COMPACTION, usage_context
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +111,9 @@ async def maybe_compact(
         return None
     try:
         middleware = _build_compact_middleware(llm)
-        result = await middleware.abefore_model({"messages": list(history)}, None)
+        # 批次7 C5 token 记账：标注链路（压缩摘要为后台任务，无用户）
+        with usage_context(CHAIN_COMPACTION):
+            result = await middleware.abefore_model({"messages": list(history)}, None)
     except Exception as e:
         # LLM 未配置/网络/解析异常：跳过压缩（历史原样，截断兜底），
         # 绝不阻断对话（与记忆提取钩子同策略）

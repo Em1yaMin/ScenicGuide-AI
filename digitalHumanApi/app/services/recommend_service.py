@@ -27,6 +27,7 @@ from app.core.database import async_session_factory
 from app.core.llm import LLMConfigError, get_chat_llm
 from app.models.dialogue import Dialogue
 from app.models.evaluation import Evaluation
+from app.services.usage_tracker import CHAIN_RECOMMEND, usage_context
 
 logger = logging.getLogger(__name__)
 
@@ -242,6 +243,12 @@ async def _aggregate_dashboard_7d(db: AsyncSession) -> Optional[Dict[str, Any]]:
     }
 
 
+def _invoke_recommend_llm(llm: Any, messages: List[Any]) -> Any:
+    """推荐问句生成 LLM 调用（线程内执行，标注记账链路）。"""
+    with usage_context(CHAIN_RECOMMEND):
+        return llm.invoke(messages)
+
+
 async def fetch_recommended_questions(
     llm: Optional[Any] = None,
 ) -> Optional[List[str]]:
@@ -272,7 +279,8 @@ async def fetch_recommended_questions(
         )
 
         response = await asyncio.to_thread(
-            llm.invoke,
+            _invoke_recommend_llm,
+            llm,
             [
                 SystemMessage(content=_RECOMMEND_SYSTEM_PROMPT),
                 HumanMessage(content=_build_recommend_prompt(inputs)),
