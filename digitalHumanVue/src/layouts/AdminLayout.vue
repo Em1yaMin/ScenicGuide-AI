@@ -43,6 +43,10 @@ function withRedirect(path: string) {
           <span class="nav-icon">✦</span>
           <span>管理员 Agent</span>
         </RouterLink>
+        <RouterLink to="/admin/usage" class="nav-item">
+          <span class="nav-icon">◔</span>
+          <span>成本仪表盘</span>
+        </RouterLink>
       </nav>
       <div class="sidebar-footer">
         <div class="auth-area">
