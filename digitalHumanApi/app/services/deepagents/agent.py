@@ -22,6 +22,11 @@ chat_agent 的会话存储（`_get_or_create_conversation` / `_append_history`�
 conversation_id 续聊可恢复多轮上下文；② 路由层回落 Dify 时
 `chat_agent.has_conversation` 归属判定无需改动（生成的 id 登记在同一集合）。
 
+**A4 成本/速度调优**（批次3 收官，实测定参见 doc/deepagents-tuning.md）：
+ToolCallLimitMiddleware 单轮工具调用上限（默认 15，continue 优雅降级）
++ 高频只读工具归一化缓存（tool_cache.py）+ 回答后触发上下文压缩
+（compaction.py，SummarizationMiddleware 引擎）——见下方对应函数注释。
+
 **只读复用主链路**：场景工具选择（`chat_agent._select_tools`）、系统提示词
 （`chat_agent.SYSTEM_PROMPT`）、RAG 来源提取（`chat_agent._extract_rag_info`）
 均从 chat_agent 只读引用（chat_agent 保留期间维持单一来源，A4 删除时再
@@ -31,12 +36,14 @@ conversation_id 续聊可恢复多轮上下文；② 路由层回落 Dify 时
 `user` 字段，对话入口经 `{"messages": ..., "user": user}` 传入，记忆工具经
 `InjectedState("user")` 从图状态注入（见 memory_tools.py）。
 """
+import asyncio
 import logging
 import threading
 from typing import Any, AsyncIterator, Dict, List, NotRequired, Optional
 
 from deepagents import create_deep_agent
 from deepagents.graph import DeepAgentState
+from langchain.agents.middleware.tool_call_limit import ToolCallLimitMiddleware
 from langchain_core.messages import (
     AIMessageChunk,
     BaseMessage,
@@ -44,9 +51,11 @@ from langchain_core.messages import (
     SystemMessage,
 )
 
+from app.core.config import settings
 from app.core.llm import get_chat_llm
 from app.services import chat_agent as main_chain  # 只读复用，不改主链路
 from app.services import memory_service
+from app.services.deepagents import compaction, tool_cache
 from app.services.deepagents.harness import (
     _AGENT_MAX_TOKENS,
     _AGENT_TIMEOUT,
@@ -130,16 +139,49 @@ _KNOWLEDGE_TOOL_NAME = "search_knowledge"
 
 # ── 工具装配 ──────────────────────────────────────────────────────────────
 
+# A4 工具结果归一化缓存（同 query 不重查，见 tool_cache.py）：
+# - 静态数据工具（景点/路线/推荐）：长 TTL（默认 1h，数据源为 app/data/ 静态 JSON）
+# - 知识检索（search_knowledge）：短 TTL（默认 5min）+ 索引重建版本失效
+# 包装仅替换执行函数（同名/同描述/同 args_schema），SSE 契约与 RAG 来源提取不变
+_CACHEABLE_TOOLS = frozenset(
+    {
+        "search_spots",
+        "search_routes",
+        "get_spot_detail",
+        "get_route_detail",
+        "filter_by_tags",
+        "recommend_routes",
+    }
+)
+_KNOWLEDGE_CACHE_TTL = settings.AGENT_TOOL_CACHE_TTL_KNOWLEDGE
+_STATIC_CACHE_TTL = settings.AGENT_TOOL_CACHE_TTL_STATIC
+
 
 def _select_tools(use_rag: bool) -> List[Any]:
     """装配工具集 = 场景工具（复用主链路选择逻辑）+ 记忆四工具。
 
     场景工具经 `chat_agent._select_tools` 只读复用（use_rag 决定是否含
     search_knowledge），记忆四工具始终装配（A2 试点目标能力）。
+
+    A4 调优：高频只读场景工具包装为归一化缓存版本（同 query 不重查，
+    降工具调用开销与 token 消耗）；记忆工具不缓存（有副作用）。
     """
     tools: List[Any] = main_chain._select_tools(use_rag)
-    tools.extend([recall_user_memory, save_user_memory, list_user_memories, delete_user_memory])
-    return tools
+    cached: List[Any] = []
+    for t in tools:
+        name = getattr(t, "name", "")
+        if name == "search_knowledge":
+            cached.append(
+                tool_cache.wrap_tool(t, ttl_seconds=_KNOWLEDGE_CACHE_TTL)
+            )
+        elif name in _CACHEABLE_TOOLS:
+            cached.append(tool_cache.wrap_tool(t, ttl_seconds=_STATIC_CACHE_TTL))
+        else:
+            cached.append(t)
+    cached.extend(
+        [recall_user_memory, save_user_memory, list_user_memories, delete_user_memory]
+    )
+    return cached
 
 
 # ── Agent 构建（缓存：构造耗时 ~24s，必须缓存） ───────────────────────────
@@ -157,11 +199,23 @@ def _build_agent(*, use_rag: bool, llm: Optional[Any] = None) -> Any:
     ensure_harness_profile()
     if llm is None:
         llm = get_chat_llm(max_tokens=_AGENT_MAX_TOKENS, timeout=_AGENT_TIMEOUT)
+    # A4 调优：单轮工具调用上限（ToolCallLimitMiddleware，langchain 自带）。
+    # run_limit=AGENT_MAX_TOOL_CALLS（默认 15，依据 A1 实测：复杂任务平均 9 步、
+    # 峰值 13 步）；exit_behavior="continue" 优雅降级——超限工具调用被拦截并
+    # 以错误 ToolMessage 回给模型，模型基于已有信息直接作答（不报错、不回落）；
+    # 中间件 state schema（工具计数）由 create_deep_agent 自动与自定义
+    # ScenicDeepAgentState 合并。上限值与实测依据见 doc/deepagents-tuning.md
     return create_deep_agent(
         model=llm,
         tools=_select_tools(use_rag),
         system_prompt=SYSTEM_PROMPT,
         state_schema=ScenicDeepAgentState,
+        middleware=[
+            ToolCallLimitMiddleware(
+                run_limit=settings.AGENT_MAX_TOOL_CALLS,
+                exit_behavior="continue",
+            )
+        ],
         name="scenic_deep_agent",
     )
 
@@ -299,6 +353,109 @@ async def _build_light_summary(user: str) -> str:
 # ── 对话入口 ──────────────────────────────────────────────────────────────
 
 
+def _serialize_history_for_store(
+    messages: List[BaseMessage],
+) -> List[Any]:
+    """压缩后历史序列化为 (role, content) 行（SQLite 落盘用）。
+
+    支持 system（摘要 SystemMessage）/ human / ai 三种角色；非字符串
+    content 转字符串兜底（本层历史均为纯文本，防御性）。
+    """
+    rows: List[Any] = []
+    for m in messages:
+        role = getattr(m, "type", "")
+        if role not in ("system", "human", "ai"):
+            role = "human"
+        content = m.content
+        rows.append((role, content if isinstance(content, str) else str(content or "")))
+    return rows
+
+
+async def _maybe_compact_history(
+    conversation_id: str,
+    llm: Optional[Any] = None,
+) -> None:
+    """回答后触发：长会话历史超过阈值时压缩早期轮次为摘要（A4 调优）。
+
+    在 `_append_history` 之后调度（回答已完成，压缩不占用用户侧延迟，
+    不阻塞响应/done）：读取会话历史 → `compaction.maybe_compact`
+    （内置 SummarizationMiddleware 引擎，阈值/保留窗口见 AGENT_COMPACT_*
+    配置）→ 压缩成功则写回（进程内缓存 + SQLite replace_messages，
+    重启不丢、不重复压缩）。
+
+    降级：任何异常/未达阈值静默跳过（历史保持原样，由消息上限截断兜底），
+    绝不阻断对话、不影响 SSE 契约。并发安全：写回前校验快照末条消息未被
+    新轮次追加（并发对话时放弃本次压缩，下次触发再压）。
+    """
+    try:
+        with main_chain._conversations_lock:
+            history = list(main_chain._conversations.get(conversation_id, []))
+        compacted = await compaction.maybe_compact(history, llm)
+        if compacted is None:
+            return
+        # 写回校验：快照后若已有新轮次追加（并发对话），放弃本次压缩
+        # （下次超过阈值时再压，避免覆盖新消息）
+        with main_chain._conversations_lock:
+            current = main_chain._conversations.get(conversation_id)
+            if current is None or not current:
+                return
+            if (
+                len(current) != len(history)
+                or getattr(current[-1], "content", "") != getattr(history[-1], "content", "")
+            ):
+                logger.info(
+                    "会话压缩写回跳过（并发有新轮次追加）: conversation_id=%s",
+                    conversation_id,
+                )
+                return
+            main_chain._conversations[conversation_id] = compacted
+            main_chain._conversations.move_to_end(conversation_id)
+        # SQLite 落盘（失败仅告警：进程内已生效，库中保持未压缩历史，
+        # 语义等价于跳过本次压缩，可接受）
+        main_chain._store_call(
+            "replace_messages",
+            conversation_id,
+            _serialize_history_for_store(compacted),
+        )
+    except Exception as e:
+        logger.warning("会话历史压缩失败（跳过，保持原历史）: %s", e)
+
+
+# 上下文压缩后台任务句柄集合（防 GC；done 回调消费异常，与记忆提取钩子
+# 同模式——压缩不阻塞用户可见路径，客户端断开也不丢调度）
+_compaction_tasks: "set[asyncio.Task]" = set()
+
+
+def _on_compaction_task_done(task: asyncio.Task) -> None:
+    """回收后台任务引用并消费异常（防 asyncio 未检索异常告警）。"""
+    _compaction_tasks.discard(task)
+    if task.cancelled():
+        return
+    try:
+        exc = task.exception()
+    except asyncio.CancelledError:
+        return
+    if exc is not None:
+        logger.warning("会话历史压缩后台任务失败（静默降级）: %s", exc)
+
+
+def _schedule_compaction(conversation_id: str, llm: Optional[Any] = None) -> None:
+    """回答后调度上下文压缩（尽力而为：不 await、不阻塞响应、不抛错）。
+
+    与 `_schedule_memory_extraction` 同模式：asyncio.create_task 后台执行
+    `_maybe_compact_history`（任务句柄登记 `_compaction_tasks` 防 GC、
+    done 回调消费异常）；并发写回快照校验在压缩任务内部（冲突放弃）；
+    客户端断开也不丢调度（done 前已调度）；进程退出丢压缩等价于跳过。
+    """
+    try:
+        task = asyncio.create_task(_maybe_compact_history(conversation_id, llm))
+        _compaction_tasks.add(task)
+        task.add_done_callback(_on_compaction_task_done)
+    except Exception as e:
+        # 事件循环不可用等极端情况：静默忽略（绝不阻断对话）
+        logger.warning("会话历史压缩调度失败（忽略）: %s", e)
+
+
 def _extract_answer(all_messages: List[BaseMessage]) -> str:
     """提取最终回答（最后一条非工具 AI 消息，与 chat_agent 同逻辑）。"""
     for msg in reversed(all_messages):
@@ -370,6 +527,9 @@ async def chat(
 
     # 3. 会话持久化 + 长期记忆钩子（与 chat_agent 主链路一致：先落盘后返回）
     main_chain._append_history(conversation_id, query, answer, user)
+    # A4 调优：回答后触发上下文压缩（后台任务调度，不阻塞响应；长会话
+    # 历史超过阈值时压缩早期轮次为摘要，见 _schedule_compaction）
+    _schedule_compaction(conversation_id, llm)
     main_chain._schedule_memory_extraction(user, conversation_id, query, answer)
     logger.info(
         "deepagents 对话完成: intent=%s user=%s conversation=%s tools=%d answer_len=%d",
@@ -494,6 +654,9 @@ async def chat_stream(
     #    后调度存在 GeneratorExit 跳过窗口，改为 done 前更稳妥）
     answer = "".join(answer_parts)
     main_chain._append_history(conversation_id, query, answer, user)
+    # A4 调优：回答后触发上下文压缩（与 chat() 一致；done 前调度后台任务，
+    # 客户端收到 done 即关闭连接也不丢压缩调度，执行不阻塞流）
+    _schedule_compaction(conversation_id, llm)
     main_chain._schedule_memory_extraction(user, conversation_id, query, answer)
     rag_context, rag_sources = main_chain._extract_rag_info(
         rag_tool_messages, rag_top_k

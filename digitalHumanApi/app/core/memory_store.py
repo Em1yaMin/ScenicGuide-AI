@@ -190,6 +190,56 @@ class ConversationMemoryStore:
             self._conn.commit()
             return True
 
+    def replace_messages(
+        self,
+        conversation_id: str,
+        messages: List[Tuple[str, str]],
+        now: Optional[float] = None,
+    ) -> bool:
+        """整体替换会话消息序列（A4 上下文压缩持久化用）。
+
+        不刷新 TTL / last_active_at / user（压缩只是改写既有历史的内容，
+        不构成新的活跃行为——TTL 滑动窗口已在对话追加时刷新）。
+
+        Args:
+            conversation_id: 会话 ID
+            messages: [(role, content), ...]，role 可为 system/human/ai
+                （压缩后首条为摘要 SystemMessage）
+
+        Returns:
+            True 替换成功；False 会话不存在/已过期（调用方应按新会话处理）
+        """
+        now = time.time() if now is None else now
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT ttl_expires_at FROM conversation_sessions"
+                " WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            if row["ttl_expires_at"] <= now:
+                # 过期：删除该行（惰性清理），调用方按新会话处理
+                self._conn.execute(
+                    "DELETE FROM conversation_sessions WHERE conversation_id = ?",
+                    (conversation_id,),
+                )
+                self._conn.commit()
+                return False
+            self._conn.execute(
+                "UPDATE conversation_sessions SET messages = ?"
+                " WHERE conversation_id = ?",
+                (
+                    json.dumps(
+                        [{"role": r, "content": c} for r, c in messages],
+                        ensure_ascii=False,
+                    ),
+                    conversation_id,
+                ),
+            )
+            self._conn.commit()
+            return True
+
     def delete_session(self, conversation_id: str) -> None:
         with self._lock:
             self._conn.execute(

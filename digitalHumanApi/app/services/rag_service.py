@@ -184,6 +184,23 @@ def _split_by_separators(text: str, separators: List[str]) -> List[str]:
 # 索引 & 检索
 # ---------------------------------------------------------------------------
 
+def _invalidate_knowledge_tool_cache() -> None:
+    """知识库索引重建后失效装配层工具缓存（A4 调优联动）。
+
+    search_knowledge 工具缓存（app/services/deepagents/tool_cache.py）以
+    knowledge+documents 为检索面——任一命名空间全量重建（文档索引 / 知识库
+    CRUD 同步 / 手动索引）都会改变检索结果，立即失效缓存（版本号 +1，不等
+    短 TTL）。导入放模块函数内避免循环依赖（tool_cache 为叶子模块）。
+    失败仅告警（缓存靠短 TTL 自愈），不阻断索引主流程。
+    """
+    try:
+        from app.services.deepagents.tool_cache import get_cache
+
+        get_cache().invalidate_knowledge()
+    except Exception as e:
+        logger.warning("知识库工具缓存失效失败（短 TTL 兜底）: %s", e)
+
+
 def _index_documents_sync(
     doc_dir: Optional[Path] = None,
     namespace: Optional[str] = None,
@@ -224,6 +241,10 @@ def _index_documents_sync(
     with _vector_index_lock:
         vectorstore.clear()  # 全量重建
         vectorstore.add_documents(chunks)
+
+    # A4 工具缓存失效：knowledge+documents 是 search_knowledge 的检索面，
+    # 任一命名空间全量重建后，知识检索缓存立即失效（不等 TTL）
+    _invalidate_knowledge_tool_cache()
 
     return {
         "status": "ok",
@@ -323,10 +344,15 @@ def _index_knowledge_entries_sync(
         if not documents:
             # 库已清空：清空向量存储，避免残留旧条目可被检索
             vectorstore.clear()
+            # A4 工具缓存失效（库清空同样影响检索结果）
+            _invalidate_knowledge_tool_cache()
             return {"status": "empty", "documents": 0, "namespace": ns}
 
         vectorstore.clear()  # 全量重建
         vectorstore.add_documents(documents)
+
+    # A4 工具缓存失效：知识库 CRUD 同步索引后，search_knowledge 缓存立即失效
+    _invalidate_knowledge_tool_cache()
 
     return {
         "status": "ok",
