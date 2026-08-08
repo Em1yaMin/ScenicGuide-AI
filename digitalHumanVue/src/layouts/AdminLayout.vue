@@ -31,6 +31,10 @@ function withRedirect(path: string) {
           <span class="nav-icon">✎</span>
           <span>知识库</span>
         </RouterLink>
+        <RouterLink to="/admin/announcements" class="nav-item">
+          <span class="nav-icon">▤</span>
+          <span>公告管理</span>
+        </RouterLink>
       </nav>
       <div class="sidebar-footer">
         <div class="auth-area">

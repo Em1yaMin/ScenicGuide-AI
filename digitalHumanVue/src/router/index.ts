@@ -21,6 +21,7 @@ const router = createRouter({
         { path: '', name: 'admin-dashboard', component: () => import('@/views/DashboardView.vue') },
         { path: 'report', name: 'admin-report', component: () => import('@/views/ReportView.vue') },
         { path: 'knowledge', name: 'admin-knowledge', component: () => import('@/views/admin/KnowledgeView.vue') },
+        { path: 'announcements', name: 'admin-announcements', component: () => import('@/views/admin/AnnouncementView.vue') },
       ],
     },
     // 认证页为顶层路由：访客端与管理后台均可直达
