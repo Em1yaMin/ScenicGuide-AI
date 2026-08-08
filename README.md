@@ -496,13 +496,31 @@ SSE 由 ADH 数字人消费（`live2d-frontend/digitalHuman/agent/core/langchain
 
 ## 测试
 
+### 后端（pytest + 覆盖率门禁）
+
 ```bash
 cd digitalHumanApi
 pip install -r requirements-dev.txt
+# 常规运行
 pytest -v
+# 覆盖率报告（基线实测 84%，门禁阈值 75%，低于阈值退出码非零）
+pytest -q --cov=app --cov-report=term:skip-covered --cov-fail-under=75
 ```
 
-测试使用内存 SQLite，不依赖外部服务，不使用 mock 库。
+测试使用内存 SQLite，不依赖外部服务，不使用 mock 库。CI 的 Backend job 以 `--cov-fail-under=75` 执行覆盖率门禁（批次7 C6：阈值基于当前基线留余量设定）。
+
+### 前端（Playwright E2E 冒烟）
+
+```bash
+cd digitalHumanVue
+npm ci
+# 首次需安装浏览器（chromium，含系统依赖）
+npx playwright install --with-deps chromium
+# 运行冒烟套件（自动起 vite dev server；后端接口全部在浏览器层 mock，无需真实后端）
+npm run e2e
+```
+
+E2E 冒烟覆盖核心路径：首页（加载 + 浏览推荐滚动）、对话页（进入 + 推荐问句浮层）、管理端（登录 + 知识库/公告/用量页基础渲染）。用例通过 `page.route` 拦截 `**/api/**` 返回夹具数据，稳定可重复、不依赖后端与外部服务；CI 的 E2E job 与 Backend/Frontend 并行执行（批次7 C6）。
 
 ## 验收状态
 

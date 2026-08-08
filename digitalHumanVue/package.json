@@ -9,14 +9,17 @@
     "preview": "vite preview",
     "build-only": "vite build",
     "type-check": "vue-tsc --build",
+    "e2e": "playwright test",
+    "e2e:headed": "playwright test --headed",
+    "e2e:install": "playwright install --with-deps chromium",
     "lint": "run-s \"lint:*\"",
     "lint:oxlint": "oxlint . --fix",
     "lint:eslint": "eslint . --fix --cache",
     "format": "prettier --write --experimental-cli src/"
   },
   "dependencies": {
-    "echarts": "^6.1.0",
     "dompurify": "^3.2.4",
+    "echarts": "^6.1.0",
     "marked": "^18.0.0",
     "pinia": "^3.0.4",
     "vue": "^3.5.38",
@@ -24,6 +27,7 @@
     "vue-router": "^5.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tsconfig/node24": "^24.0.4",
     "@types/node": "^24.13.2",
     "@vitejs/plugin-vue": "^6.0.7",

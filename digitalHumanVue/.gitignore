@@ -37,3 +37,8 @@ __screenshots__/
 
 # Vite
 *.timestamp-*-*.mjs
+
+# Playwright（批次7 C6 E2E 冒烟产物）
+/test-results/
+/playwright-report/
+/blob-report/
