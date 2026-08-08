@@ -96,9 +96,14 @@ def _resolve_client_id(request: Request) -> str:
             return str(payload["sub"])
         # 无效/过期 token：不在此告警（对话接口有专属告警），按匿名处理
         return "-"
-    if settings.ADMIN_API_TOKEN:
+    if settings.ADMIN_API_TOKEN or settings.ADMIN_TOKENS:
         admin_token = request.headers.get("x-admin-token")
-        if admin_token and admin_token == settings.ADMIN_API_TOKEN:
+        # 批次6 C3 RBAC：ADMIN_TOKENS 映射键集与 ADMIN_API_TOKEN 同源匹配
+        # （与 app/routers/deps.py::_role_for_token 逻辑一致，不重复实现）
+        if admin_token and (
+            admin_token in settings.ADMIN_TOKENS
+            or (settings.ADMIN_API_TOKEN and admin_token == settings.ADMIN_API_TOKEN)
+        ):
             return "admin"
     return "-"
 

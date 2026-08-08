@@ -196,6 +196,28 @@ async def test_request_log_client_id_admin(client, caplog, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_request_log_client_id_admin_tokens_map(client, caplog, monkeypatch):
+    """RBAC（批次6 C3）：经 ADMIN_TOKENS 映射认证的管理员同样标记 client=admin。"""
+    monkeypatch.setattr(settings, "ADMIN_API_TOKEN", "legacy-admin-token")
+    monkeypatch.setattr(
+        settings, "ADMIN_TOKENS", {"mapped-admin-token": "admin", "op-token": "operator"}
+    )
+    caplog.set_level(logging.INFO, logger=REQUEST_LOGGER_NAME)
+    resp = await client.get(
+        "/api/admin/knowledge", headers={"X-Admin-Token": "mapped-admin-token"}
+    )
+    assert resp.status_code == 200
+
+    records = _request_records(caplog)
+    assert any(
+        "path=/api/admin/knowledge" in r.message and "client=admin" in r.message
+        for r in records
+    )
+    # 映射 token 本身同样绝不入日志
+    assert all("mapped-admin-token" not in r.message for r in records)
+
+
+@pytest.mark.asyncio
 async def test_request_log_client_invalid_token_not_crash(client, caplog):
     """无效/过期 token：解析不到客户端标识，按 "-" 处理且不报错。"""
     caplog.set_level(logging.INFO, logger=REQUEST_LOGGER_NAME)
