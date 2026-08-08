@@ -42,6 +42,10 @@ MEMORY_STEP_LABELS: Dict[str, str] = {
 _RECALL_TOP_K = 3
 # 单次写入事实条数上限（防模型一次性灌入超长列表）
 _SAVE_MAX_FACTS = 10
+# 单条记忆内容长度上限：与 memory_service._MEMORY_MAX_CONTENT_LEN 契约一致
+# （记忆 schema content ≤200 字符，见 doc/long-term-memory.md；模型经工具
+# 写入同样受限，与对话后提取路径 _parse_facts 截断行为对齐）
+_CONTENT_MAX_LEN = 200
 # 兼容旧条目（无 memory_id）的派生 id 前缀，见 list_user_memories
 _LEGACY_ID_PREFIX = "legacy:"
 
@@ -130,6 +134,10 @@ def _parse_facts_input(facts: str) -> List[memory_service.MemoryEntry]:
                 content = str(item.get("content", "") or "").strip()
                 if not content:
                     continue
+                # 内容长度截断：与 memory_service._parse_facts 提取路径一致
+                # （记忆 schema 契约 content ≤200 字符，防模型经工具写入超长句）
+                if len(content) > _CONTENT_MAX_LEN:
+                    content = content[:_CONTENT_MAX_LEN]
                 entries.append(
                     memory_service.MemoryEntry(
                         fact_type=str(item.get("fact_type", "fact") or "fact"),
@@ -147,7 +155,9 @@ def _parse_facts_input(facts: str) -> List[memory_service.MemoryEntry]:
     # 2. 疑似 JSON 残片（含括号但解析失败）：非法输入，不保存
     if "[" in text or "{" in text:
         return []
-    # 3. 自然语言句：单个事实（类型归一 fact）
+    # 3. 自然语言句：单个事实（类型归一 fact；同样截断到内容长度上限）
+    if len(text) > _CONTENT_MAX_LEN:
+        text = text[:_CONTENT_MAX_LEN]
     return [memory_service.MemoryEntry(fact_type="fact", content=text)]
 
 

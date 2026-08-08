@@ -242,3 +242,30 @@ async def test_save_overwrite_not_grow():
     await _run_tool(save_user_memory, {"facts": facts}, user="u1")
     entries = _as_list(await _run_tool(list_user_memories, {}, user="u1"))
     assert len(entries) == 1
+
+
+async def test_save_truncates_oversized_content():
+    """超长记忆句（>200 字符）被截断：与记忆 schema 契约与提取路径一致。
+
+    平行提取路径（memory_service._parse_facts）截断到 _MEMORY_MAX_CONTENT_LEN
+    （200 字符）；save_user_memory 工具经 _parse_facts_input 写入同样受限，
+    防模型经工具绕过上限写入超长句（review F1）。JSON 数组与自然语言句
+    两个分支均覆盖。
+    """
+    from app.services.deepagents.memory_tools import _CONTENT_MAX_LEN
+
+    long_content = "超长" * 300  # 600 字符
+    # JSON 数组分支
+    await _run_tool(
+        save_user_memory,
+        {"facts": json.dumps([{"fact_type": "fact", "content": long_content}])},
+        user="u1",
+    )
+    entries = _as_list(await _run_tool(list_user_memories, {}, user="u1"))
+    assert len(entries) == 1
+    assert len(entries[0]["content"]) == _CONTENT_MAX_LEN
+    assert entries[0]["content"].endswith("长")  # 截断取前 200 字符（偶数位）
+    # 自然语言句分支
+    await _run_tool(save_user_memory, {"facts": long_content}, user="u2")
+    entries2 = _as_list(await _run_tool(list_user_memories, {}, user="u2"))
+    assert len(entries2[0]["content"]) == _CONTENT_MAX_LEN
