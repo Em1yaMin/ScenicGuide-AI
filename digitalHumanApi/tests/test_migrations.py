@@ -27,6 +27,7 @@ MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 
 # 业务表集合（不含 alembic_version / sqlite_* 系统表）
 BUSINESS_TABLES = {
+    "announcements",
     "dialogues",
     "evaluations",
     "knowledge_base",
@@ -202,6 +203,41 @@ def test_versioned_db_upgrade_is_noop(tmp_path):
     finally:
         conn.close()
     assert _current_revision(db) == _head_revision(cfg)
+
+
+# ---------- 新增表迁移：升级/回退 ----------
+
+def test_announcements_migration_upgrade_downgrade(tmp_path):
+    """公告表迁移：upgrade 建表（含索引）→ downgrade 回退删表，其余业务表不受影响。"""
+    db = tmp_path / "ann.db"
+    cfg = _make_config(db)
+    command.upgrade(cfg, "head")
+
+    assert "announcements" in _table_sql(db)["tables"]
+    assert "ix_announcements_status" in _table_sql(db)["indexes"]
+    # 新表可正常读写
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "INSERT INTO announcements (title, content, status, pinned, created_at, updated_at) "
+            "VALUES ('t', 'c', 'draft', 0, '2026-01-01 00:00:00', '2026-01-01 00:00:00')"
+        )
+        conn.commit()
+        assert conn.execute("SELECT COUNT(*) FROM announcements").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+    # 回退到基线：仅删除 announcements，其余表保留
+    command.downgrade(cfg, "04436fda61c5")
+    tables = _table_sql(db)["tables"]
+    assert "announcements" not in tables
+    assert set(tables) == BUSINESS_TABLES - {"announcements"}
+
+    # 再次升级可重建
+    command.upgrade(cfg, "head")
+    assert "announcements" in _table_sql(db)["tables"]
+    assert _current_revision(db) == _head_revision(cfg)
+
 
 
 # ---------- 程序化入口 run_migrations（app/core/migrations.py） ----------
