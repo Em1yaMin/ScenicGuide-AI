@@ -30,6 +30,11 @@ const router = createRouter({
           name: 'admin-announcements',
           component: () => import('@/views/admin/AnnouncementView.vue'),
         },
+        {
+          path: 'memories',
+          name: 'admin-memories',
+          component: () => import('@/views/admin/MemoryView.vue'),
+        },
       ],
     },
     // 认证页为顶层路由：访客端与管理后台均可直达

@@ -13,6 +13,7 @@
 | `ReportView.vue` | `/admin/report` | API 数据+ECharts | fetch(API_ADMIN_REPORT) |
 | `admin/KnowledgeView.vue` | `/admin/knowledge` | API 数据+CRUD 弹窗 | fetch(API_ADMIN_KNOWLEDGE) |
 | `admin/AnnouncementView.vue` | `/admin/announcements` | API 数据+CRUD 弹窗（X-Admin-Token） | fetch(API_ADMIN_ANNOUNCEMENTS) |
+| `admin/MemoryView.vue` | `/admin/memories` | 双栏：用户列表（搜索/分页）→ 记忆列表（增/改/删，X-Admin-Token） | src/api/memory.ts（API_ADMIN_MEMORIES） |
 | `LoginView.vue` | `/login`（顶层路由） | 表单+游客模式 | Pinia auth store |
 | `RegisterView.vue` | `/register`（顶层路由） | 表单校验+自动登录 | Pinia auth store |
 
