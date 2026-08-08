@@ -11,11 +11,13 @@ RAG 核心配置与向量存储。
 """
 
 import fcntl
+import hashlib
 import json
 import logging
 import math
 import os
 import re
+import tempfile
 import threading
 from collections import Counter
 from pathlib import Path
@@ -26,7 +28,7 @@ import numpy as np
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
-from app.core.embedding import get_embedding_model
+from app.core.embedding import MinimaxEmbeddings, get_embedding_model
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +73,38 @@ NAMESPACE_COLLECTIONS: dict = {
     NAMESPACE_DOCUMENTS: "scenic_knowledge",
     NAMESPACE_USER_MEMORY: "user_memory",
 }
+
+
+# ---------------------------------------------------------------------------
+# 原子 JSON 写入（C4：向量落盘基础设施）
+# ---------------------------------------------------------------------------
+
+def _atomic_write_json(path: Path, data, indent: Optional[int] = 2) -> None:
+    """临时文件 + 原子替换写 JSON（防中途崩溃损坏持久化文件）。
+
+    先写同目录临时文件并 fsync，再 os.replace 原子替换；任一异常时
+    清理临时文件不残留。indent=None 时紧凑输出（向量 sidecar 数据量大，
+    缩进会放大文件体积近 5 倍）。
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            if indent is None:
+                json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+            else:
+                json.dump(data, f, ensure_ascii=False, indent=indent)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -210,16 +244,14 @@ class TFIDFEmbeddings(Embeddings):
         return self._fitted
 
     def save(self, path: Path) -> None:
-        """保存词汇表到文件。"""
+        """保存词汇表到文件（临时文件+原子替换，防中途崩溃损坏）。"""
         data = {
             "vocabulary": self._vocabulary,
             "idf": self._idf,
             "doc_count": self._doc_count,
             "fitted": self._fitted,
         }
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False)
+        _atomic_write_json(path, data)
 
     def load(self, path: Path) -> bool:
         """从文件加载词汇表。"""
@@ -253,6 +285,9 @@ class SimpleVectorStore:
     检索时向量以 numpy 矩阵形态一次性做矩阵乘法（X @ q），
     避免逐向量 Python 循环，大幅提升检索速度。
     持久化到 JSON 文件，兼容离线环境。
+    C4（批次3）：文档文件旁新增 `{collection}_vectors.json` sidecar 落盘向量 +
+    embedding 绑定标识 + 文档摘要，配置一致时启动复用缓存跳过 embedding API
+    重算（详见 _load/_try_reuse_cached_vectors）。
 
     Embedding API 不可用（未配置 key / 网络失败）时自动降级为本地 TF-IDF：
     - 记录告警日志，并通过 `degraded` / `degraded_reason` / `embedding_backend`
@@ -300,6 +335,11 @@ class SimpleVectorStore:
     def _vocab_path(self) -> Path:
         return self.persist_dir / f"{self.collection_name}_vocab.json"
 
+    @property
+    def _vectors_path(self) -> Path:
+        """向量 sidecar 文件（C4：向量落盘，{collection}_vectors.json）。"""
+        return self.persist_dir / f"{self.collection_name}_vectors.json"
+
     def _acquire_file_lock(self):
         """获取文件锁，防止多进程并发读写。"""
         lock_path = self.persist_dir / f"{self.collection_name}.lock"
@@ -314,7 +354,16 @@ class SimpleVectorStore:
         lock_file.close()
 
     def _load(self) -> None:
-        """从磁盘加载向量存储。"""
+        """从磁盘加载向量存储。
+
+        C4（批次3）向量落盘：docs 文件旁新增 `{collection}_vectors.json` sidecar，
+        持久化向量 + embedding 绑定标识 + 文档摘要。启动时若缓存有效
+        （配置一致、条数/维度齐整、文档摘要匹配）则直接复用，跳过
+        embedding API 全量重算（3769 片段 ≈ 2 分钟，且 Qwen 按量计费）。
+        旧格式（无 sidecar）自动回退重算并升级写入；embedding 配置变更
+        （模型/请求体风格/端点）自动失效重建；TF-IDF 路径行为不变
+        （词汇表机制，重算成本可忽略，不写 sidecar）。
+        """
         lock = self._acquire_file_lock()
         try:
             # 本地 TF-IDF 时加载词汇表（API embedding 无词汇表概念）
@@ -333,8 +382,11 @@ class SimpleVectorStore:
                         )
                         for d in data
                     ]
-                    # 重新向量化（API embedding 失败时自动降级 TF-IDF）
-                    if self._documents:
+                    # 优先复用 sidecar 落盘向量（缓存命中则跳过 embedding API 重算）
+                    if self._documents and self._try_reuse_cached_vectors():
+                        pass
+                    else:
+                        # 缓存缺失/失效：回退重算（API 失败自动降级 TF-IDF）
                         if (
                             isinstance(self.embedding, TFIDFEmbeddings)
                             and not self.embedding.is_fitted
@@ -350,6 +402,14 @@ class SimpleVectorStore:
                             texts = [d.page_content for d in self._documents]
                             self._vectors = self._embed_documents_safe(texts)
                             self._refresh_matrix()
+                            # 升级写入：旧格式升级 / 配置变更重建均在此落盘新缓存；
+                            # 写失败不影响已加载的内存态（下次启动回退重算）
+                            try:
+                                self._save_locked()
+                            except Exception as e:
+                                logger.warning(
+                                    "Failed to persist vector cache: %s", e
+                                )
                     logger.info(
                         "Loaded %d documents from %s",
                         len(self._documents),
@@ -362,26 +422,171 @@ class SimpleVectorStore:
         finally:
             self._release_file_lock(lock)
 
+    def _try_reuse_cached_vectors(self) -> bool:
+        """尝试复用 sidecar 落盘向量；成功返回 True 并填充 _vectors/_vector_matrix。
+
+        校验顺序（任一不满足即判定缓存失效，回退重算）：
+        1. 向量条数与文档数一致（文档增删后旧缓存条数不符）；
+        2. 向量维度齐整（损坏/手改文件防御）；
+        3. 文档摘要一致（docs 与 sidecar 两次原子写之间的崩溃窗口防御）；
+        4. embedding 绑定标识一致（配置变更如 minimax→qwen 必须失效重建，
+           维度不同复用会静默检索错乱）；
+        5. TF-IDF 词汇表已拟合（查询向量与文档向量须同源同维度）。
+        """
+        if not self._vectors_path.exists():
+            return False
+        try:
+            with open(self._vectors_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            logger.warning(
+                "Failed to read vector cache %s: %s", self._vectors_path, e
+            )
+            return False
+        cached = data.get("vectors")
+        if not isinstance(cached, list) or len(cached) != len(self._documents):
+            logger.info(
+                "Vector cache invalid for %s: 条数不符，回退重算",
+                self.collection_name,
+            )
+            return False
+        if not self._vectors_are_homogeneous(cached):
+            logger.info(
+                "Vector cache invalid for %s: 向量维度不齐整，回退重算",
+                self.collection_name,
+            )
+            return False
+        if data.get("docs_digest") != self._docs_digest(self._documents):
+            logger.info(
+                "Vector cache stale for %s: 文档摘要不匹配，回退重算",
+                self.collection_name,
+            )
+            return False
+        cached_binding = data.get("embedding")
+        if cached_binding != self._embedding_identity():
+            logger.info(
+                "Vector cache invalid for %s: embedding 配置变更"
+                "（%s → %s），回退重建",
+                self.collection_name,
+                cached_binding,
+                self._embedding_identity(),
+            )
+            return False
+        if (
+            isinstance(self.embedding, TFIDFEmbeddings)
+            and not self.embedding.is_fitted
+        ):
+            logger.info(
+                "Vector cache invalid for %s: TF-IDF 词汇表未拟合，回退重算",
+                self.collection_name,
+            )
+            return False
+        self._vectors = cached
+        self._refresh_matrix()
+        logger.info(
+            "Vector cache hit for %s: 复用 %d 条向量"
+            "（binding=%s，跳过 embedding API 重算）",
+            self.collection_name,
+            len(cached),
+            json.dumps(cached_binding, ensure_ascii=False),
+        )
+        return True
+
     def _save(self) -> None:
-        """持久化到磁盘。"""
+        """持久化到磁盘（加文件锁）。"""
         lock = self._acquire_file_lock()
         try:
-            # 保存词汇表（仅本地 TF-IDF 后端需要）
-            if isinstance(self.embedding, TFIDFEmbeddings) and self.embedding.is_fitted:
-                self.embedding.save(self._vocab_path)
-
-            # 保存文档
-            data = [
-                {
-                    "page_content": d.page_content,
-                    "metadata": d.metadata,
-                }
-                for d in self._documents
-            ]
-            with open(self._docs_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            self._save_locked()
         finally:
             self._release_file_lock(lock)
+
+    def _save_locked(self) -> None:
+        """持久化（调用方须已持有文件锁）。
+
+        C4 起文档文件旁同步写入 `{collection}_vectors.json` sidecar：
+        向量 + embedding 绑定标识 + 文档摘要，供下次启动复用缓存跳过
+        embedding API 重算（详见 _load/_try_reuse_cached_vectors）。
+        TF-IDF 后端不写 sidecar（词汇表机制，重算成本可忽略，行为不变；
+        历史 API sidecar 亦不删除——文档未变时 API 恢复后仍可复用）。
+        """
+        # 保存词汇表（仅本地 TF-IDF 后端需要）
+        if isinstance(self.embedding, TFIDFEmbeddings) and self.embedding.is_fitted:
+            self.embedding.save(self._vocab_path)
+
+        # 保存文档（保持既有数组格式，向后兼容旧版读取）
+        data = [
+            {
+                "page_content": d.page_content,
+                "metadata": d.metadata,
+            }
+            for d in self._documents
+        ]
+        _atomic_write_json(self._docs_path, data)
+
+        if isinstance(self.embedding, TFIDFEmbeddings):
+            return
+        if self._documents:
+            sidecar = {
+                "version": 2,
+                "embedding": self._embedding_identity(),
+                "docs_digest": self._docs_digest(self._documents),
+                "dimension": len(self._vectors[0]) if self._vectors else 0,
+                "vectors": self._vectors,
+            }
+            # 向量数据量大，紧凑输出（indent=None）避免文件体积膨胀近 5 倍
+            _atomic_write_json(self._vectors_path, sidecar, indent=None)
+        elif self._vectors_path.exists():
+            # 文档清空后删除旧 sidecar，避免残留过期缓存
+            self._vectors_path.unlink()
+
+    def _embedding_identity(self) -> dict:
+        """当前生效 embedding 的绑定标识（sidecar 缓存向量须与其一致才可复用）。
+
+        - API embedding（MinimaxEmbeddings）：绑定后端/模型/请求体风格/端点。
+          任一变更（minimax→qwen 切换、EMBEDDING_API_STYLE 变更、换端点）都会
+          改变向量空间，复用旧向量将静默检索错乱，必须自动失效重建。
+        - 其他 embedding（自定义/降级 TF-IDF）：仅绑定后端名。
+        """
+        emb = self._active_embedding
+        identity = {"backend": getattr(emb, "backend_name", "unknown")}
+        if isinstance(emb, MinimaxEmbeddings):
+            identity.update(
+                model=emb.model,
+                api_style=emb.api_style,
+                api_base=emb.api_base,
+            )
+        return identity
+
+    @staticmethod
+    def _docs_digest(documents: List[Document]) -> str:
+        """文档内容摘要（顺序敏感序列化 + SHA-256），sidecar 与 docs 一致性校验。
+
+        文档顺序影响向量对齐，摘要须覆盖顺序；metadata 键序经 sort_keys
+        归一，保证写入与加载两端摘要一致。
+        """
+        payload = [
+            {"page_content": d.page_content, "metadata": d.metadata}
+            for d in documents
+        ]
+        raw = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _vectors_are_homogeneous(vectors: List[List[float]]) -> bool:
+        """校验缓存向量为齐整的数值列表（非空、维度一致、元素为数值）。"""
+        dim: Optional[int] = None
+        for v in vectors:
+            if not isinstance(v, list) or not v:
+                return False
+            if not all(isinstance(x, (int, float)) for x in v):
+                return False
+            if dim is None:
+                dim = len(v)
+            elif len(v) != dim:
+                return False
+        return True
 
     def add_documents(self, documents: List[Document]) -> None:
         """添加文档到向量存储并持久化。"""
@@ -582,6 +787,8 @@ class SimpleVectorStore:
                 self._docs_path.unlink()
             if self._vocab_path.exists():
                 self._vocab_path.unlink()
+            if self._vectors_path.exists():
+                self._vectors_path.unlink()
         finally:
             self._release_file_lock(lock)
 

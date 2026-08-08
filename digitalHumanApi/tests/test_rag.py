@@ -6,12 +6,20 @@
    返回的文档与旧实现不同）。
 2. 检索性能：2000 文档亚秒级（宽松阈值，防 CI 抖动）。
 3. 持久化重载后检索结果一致。
+4. C4（批次3）向量落盘：sidecar 缓存命中跳过 embedding API 重算、
+   配置变更自动失效重建、旧格式升级写入、原子写安全、TF-IDF 路径不变。
 """
+import json
 import math
 import time
 
-from langchain_core.documents import Document
+import httpx
+import pytest
 
+from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
+
+from app.core.embedding import MinimaxEmbeddings
 from app.core.rag import SimpleVectorStore, TFIDFEmbeddings
 
 TOPICS = [
@@ -172,3 +180,326 @@ def test_delete_documents_and_filtered_search(tmp_path):
     store2 = SimpleVectorStore(collection_name="mem", persist_dir=tmp_path)
     assert store2.count() == 2
     assert all("拍照" not in d.page_content for d in store2._documents)
+
+
+# ---------------------------------------------------------------------------
+# C4：向量落盘——启动免重算
+# ---------------------------------------------------------------------------
+
+class _CountingEmbeddings(Embeddings):
+    """确定性 5 维向量 + embed_documents/embed_query 调用计数。"""
+
+    backend_name = "counting"
+
+    def __init__(self):
+        self.embed_documents_calls = 0
+        self.embed_query_calls = 0
+
+    def _vec(self, text: str) -> list:
+        chars = [float(ord(c) % 7 + 1) / 10.0 for c in text[:5]]
+        return chars + [0.0] * (5 - len(chars))
+
+    def embed_documents(self, texts):
+        self.embed_documents_calls += 1
+        return [self._vec(t) for t in texts]
+
+    def embed_query(self, text):
+        self.embed_query_calls += 1
+        return self._vec(text)
+
+
+def _counting_transport(calls: dict):
+    """构造可计数的 Minimax 风格 MockTransport（固定 3 维向量）。
+
+    MinimaxEmbeddings 解析响应时 vectors 数组优先，openai 兼容风格
+    的 data 数组同样兼容（handler 同时读取 texts/input 两个字段）。
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["count"] = calls.get("count", 0) + 1
+        body = json.loads(request.content)
+        texts = body.get("texts") or body.get("input") or []
+        return httpx.Response(200, json={
+            "vectors": [
+                [float(i + 1) / 10, 0.2, 0.3]
+                for i in range(len(texts))
+            ],
+            "model": body.get("model"),
+        })
+
+    return httpx.MockTransport(handler)
+
+
+def _make_minimax_emb(model: str = "embo-01", calls: dict = None):
+    """构造 MinimaxEmbeddings（MockTransport，可共享 calls 计数）。"""
+    calls = calls if calls is not None else {}
+    return MinimaxEmbeddings(
+        api_key="test-key",
+        api_base="https://api.minimaxi.com/v1",
+        model=model,
+        _transport=_counting_transport(calls),
+    )
+
+
+def test_vector_cache_hit_skips_embedding_api(tmp_path):
+    """C4 验收：启动加载命中缓存时零 embedding API 调用（MockTransport 计数）。"""
+    calls: dict = {}
+    store = SimpleVectorStore(
+        collection_name="cache_hit",
+        persist_dir=tmp_path,
+        embedding=_make_minimax_emb(calls=calls),
+    )
+    store.add_documents(_make_docs(20))
+    assert calls["count"] > 0, "首次索引必须调用 embedding API"
+    before = [
+        (d.page_content, round(s, 6))
+        for d, s in store.similarity_search_with_score("织金洞门票", k=3)
+    ]
+
+    # 同配置重启：加载命中缓存，不得产生任何 embedding API 调用
+    calls["count"] = 0
+    store2 = SimpleVectorStore(
+        collection_name="cache_hit",
+        persist_dir=tmp_path,
+        embedding=_make_minimax_emb(calls=calls),
+    )
+    assert calls["count"] == 0, "缓存命中时不得调用 embedding API"
+    assert store2.count() == 20
+
+    after = [
+        (d.page_content, round(s, 6))
+        for d, s in store2.similarity_search_with_score("织金洞门票", k=3)
+    ]
+    assert before == after
+
+
+def test_vector_cache_hit_skips_embed_documents_direct(tmp_path):
+    """直接断言：缓存命中时 embed_documents 完全未被调用（加载阶段）。"""
+    emb1 = _CountingEmbeddings()
+    store = SimpleVectorStore(
+        collection_name="direct_count", persist_dir=tmp_path, embedding=emb1
+    )
+    store.add_documents(_make_docs(10))
+    assert emb1.embed_documents_calls > 0
+
+    emb2 = _CountingEmbeddings()
+    store2 = SimpleVectorStore(
+        collection_name="direct_count", persist_dir=tmp_path, embedding=emb2
+    )
+    assert emb2.embed_documents_calls == 0
+    assert emb2.embed_query_calls == 0
+    assert store2.count() == 10
+
+    before = [
+        (d.page_content, round(s, 6))
+        for d, s in store.similarity_search_with_score("西江千户苗寨", k=3)
+    ]
+    after = [
+        (d.page_content, round(s, 6))
+        for d, s in store2.similarity_search_with_score("西江千户苗寨", k=3)
+    ]
+    assert before == after
+
+
+def test_vector_cache_invalidated_on_embedding_config_change(tmp_path):
+    """embedding 配置变更（模型/风格/端点）→ 缓存自动失效重建并更新绑定。"""
+    store1 = SimpleVectorStore(
+        collection_name="cfg_change",
+        persist_dir=tmp_path,
+        embedding=_make_minimax_emb(model="embo-01"),
+    )
+    store1.add_documents(_make_docs(10))
+
+    # minimax→qwen 切换（模型/请求体风格/端点均变）：必须重新向量化
+    calls2: dict = {}
+    emb2 = MinimaxEmbeddings(
+        api_key="test-key",
+        api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        model="qwen3.7-text-embedding",
+        api_style="openai",
+        _transport=_counting_transport(calls2),
+    )
+    store2 = SimpleVectorStore(
+        collection_name="cfg_change", persist_dir=tmp_path, embedding=emb2
+    )
+    assert calls2["count"] > 0, "配置变更后必须重新向量化"
+    assert store2.count() == 10
+
+    # sidecar 绑定已更新为新配置
+    with open(tmp_path / "cfg_change_vectors.json", encoding="utf-8") as f:
+        sidecar = json.load(f)
+    assert sidecar["embedding"]["model"] == "qwen3.7-text-embedding"
+    assert sidecar["embedding"]["api_style"] == "openai"
+    assert sidecar["embedding"]["api_base"].startswith("https://dashscope")
+
+    # 新配置再次启动 → 命中缓存（零 API 调用）
+    calls2["count"] = 0
+    store3 = SimpleVectorStore(
+        collection_name="cfg_change",
+        persist_dir=tmp_path,
+        embedding=MinimaxEmbeddings(
+            api_key="test-key",
+            api_base="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            model="qwen3.7-text-embedding",
+            api_style="openai",
+            _transport=_counting_transport(calls2),
+        ),
+    )
+    assert calls2["count"] == 0
+    assert store3.count() == 10
+
+
+def test_vector_cache_invalidated_on_backend_change(tmp_path):
+    """后端变更（如 API 切换为另一自定义 embedding）→ 缓存失效重建。"""
+    emb1 = _CountingEmbeddings()
+    store = SimpleVectorStore(
+        collection_name="backend_change", persist_dir=tmp_path, embedding=emb1
+    )
+    store.add_documents(_make_docs(8))
+
+    class _OtherCounting(_CountingEmbeddings):
+        backend_name = "counting-other"
+
+    emb2 = _OtherCounting()
+    store2 = SimpleVectorStore(
+        collection_name="backend_change", persist_dir=tmp_path, embedding=emb2
+    )
+    assert emb2.embed_documents_calls > 0, "后端变更必须重新向量化"
+    assert store2.count() == 8
+
+
+def test_old_format_docs_upgrade_writes_vectors(tmp_path):
+    """旧格式（无向量无绑定信息）自动回退重算并升级写入 sidecar。"""
+    docs = _make_docs(5)
+    old_file = [
+        {"page_content": d.page_content, "metadata": d.metadata}
+        for d in docs
+    ]
+    (tmp_path / "oldfmt_docs.json").write_text(
+        json.dumps(old_file, ensure_ascii=False), encoding="utf-8"
+    )
+
+    calls: dict = {}
+    store = SimpleVectorStore(
+        collection_name="oldfmt",
+        persist_dir=tmp_path,
+        embedding=_make_minimax_emb(calls=calls),
+    )
+    assert calls.get("count", 0) > 0, "旧格式无缓存，须回退重算"
+    assert store.count() == 5
+
+    # 升级写入：sidecar 已生成，绑定当前配置
+    sidecar_path = tmp_path / "oldfmt_vectors.json"
+    assert sidecar_path.exists()
+    with open(sidecar_path, encoding="utf-8") as f:
+        sidecar = json.load(f)
+    assert sidecar["version"] == 2
+    assert sidecar["embedding"]["model"] == "embo-01"
+    assert len(sidecar["vectors"]) == 5
+    assert len(sidecar["vectors"][0]) == 3
+
+    # 升级后再启动 → 命中缓存（零 API 调用）
+    calls["count"] = 0
+    store2 = SimpleVectorStore(
+        collection_name="oldfmt",
+        persist_dir=tmp_path,
+        embedding=_make_minimax_emb(calls=calls),
+    )
+    assert calls["count"] == 0
+    assert store2.count() == 5
+
+
+def test_vector_cache_stale_when_docs_digest_mismatch(tmp_path):
+    """docs 与 sidecar 内容不一致（同条数但文档已变）→ 摘要校验失败回退重算。"""
+    store = SimpleVectorStore(
+        collection_name="digest",
+        persist_dir=tmp_path,
+        embedding=_make_minimax_emb(),
+    )
+    store.add_documents(_make_docs(4))
+
+    # 模拟崩溃窗口：docs 被覆盖为同条数不同内容（sidecar 未同步）
+    replaced = [
+        Document(
+            page_content=f"替换后的第{i}篇内容，与缓存文档完全不同",
+            metadata={"title": f"new-{i}"},
+        )
+        for i in range(4)
+    ]
+    (tmp_path / "digest_docs.json").write_text(
+        json.dumps(
+            [
+                {"page_content": d.page_content, "metadata": d.metadata}
+                for d in replaced
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    calls: dict = {}
+    store2 = SimpleVectorStore(
+        collection_name="digest",
+        persist_dir=tmp_path,
+        embedding=_make_minimax_emb(calls=calls),
+    )
+    assert calls.get("count", 0) > 0, "摘要不匹配须回退重算"
+    assert store2.count() == 4
+    # 重算后 sidecar 已同步更新（绑定新文档摘要）
+    with open(tmp_path / "digest_vectors.json", encoding="utf-8") as f:
+        sidecar = json.load(f)
+    assert len(sidecar["vectors"]) == 4
+    assert sidecar["docs_digest"] == SimpleVectorStore._docs_digest(replaced)
+
+
+def test_atomic_write_preserves_original_on_failure(tmp_path, monkeypatch):
+    """原子写：os.replace 失败时原文件不受损、临时文件不残留。"""
+    store = SimpleVectorStore(collection_name="atomic", persist_dir=tmp_path)
+    store.add_documents(_make_docs(3))
+    docs_path = tmp_path / "atomic_docs.json"
+    original = docs_path.read_text(encoding="utf-8")
+
+    def boom(src, dst):
+        raise OSError("simulated replace failure")
+
+    monkeypatch.setattr("os.replace", boom)
+    with pytest.raises(OSError):
+        store._save()
+
+    assert docs_path.read_text(encoding="utf-8") == original
+    leftovers = [p for p in tmp_path.iterdir() if p.suffix == ".tmp"]
+    assert leftovers == []
+
+
+def test_tfidf_path_behavior_unchanged_no_sidecar(tmp_path):
+    """TF-IDF 路径行为不变：不写 sidecar，重载重算（词汇表机制）。"""
+    store = SimpleVectorStore(collection_name="tfidf_ns", persist_dir=tmp_path)
+    store.add_documents(_make_docs(5))
+    assert not (tmp_path / "tfidf_ns_vectors.json").exists()
+    assert (tmp_path / "tfidf_ns_vocab.json").exists()
+
+    before = [
+        (d.page_content, round(s, 6))
+        for d, s in store.similarity_search_with_score("黄果树瀑布", k=3)
+    ]
+    store2 = SimpleVectorStore(collection_name="tfidf_ns", persist_dir=tmp_path)
+    after = [
+        (d.page_content, round(s, 6))
+        for d, s in store2.similarity_search_with_score("黄果树瀑布", k=3)
+    ]
+    assert before == after
+    assert store2.count() == 5
+
+
+def test_clear_removes_vector_sidecar(tmp_path):
+    """clear() 同步删除 docs/vocab/vectors sidecar。"""
+    store = SimpleVectorStore(
+        collection_name="clear_sidecar",
+        persist_dir=tmp_path,
+        embedding=_CountingEmbeddings(),
+    )
+    store.add_documents(_make_docs(3))
+    assert (tmp_path / "clear_sidecar_vectors.json").exists()
+    store.clear()
+    assert not (tmp_path / "clear_sidecar_vectors.json").exists()
+    assert not (tmp_path / "clear_sidecar_docs.json").exists()
