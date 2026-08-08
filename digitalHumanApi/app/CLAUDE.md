@@ -15,7 +15,7 @@
 ## Lifespan Lifecycle
 
 ```
-startup:  logging.basicConfig() → Base.metadata.create_all → spawn tasks
+startup:  configure_logging()（统一日志格式，见 app/core/logging_config.py）→ Base.metadata.create_all → spawn tasks
 runtime:  HTTP serving + background loops
 shutdown: cancel tasks → await cleanup → engine.dispose()
 ```

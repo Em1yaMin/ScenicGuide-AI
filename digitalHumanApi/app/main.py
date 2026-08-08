@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.core.database import engine
+from app.core.logging_config import RequestLoggingMiddleware, configure_logging
 from app.models import Base
 from app.routers import admin, analysis, auth, dialogue, knowledge, rag, recommend, visitor
 from app.schemas.common import ErrorResponse
@@ -39,12 +40,8 @@ def _handle_task_result(task: asyncio.Task) -> None:
 async def lifespan(app: FastAPI):
     global _polling_task, _analysis_task, _recommend_task, _memory_cleanup_task
 
-    # Phase 0: configure logging early — before any tasks are spawned
-    logging.basicConfig(
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        level=logging.DEBUG if settings.DEBUG else logging.INFO,
-        force=True,
-    )
+    # Phase 0: 统一日志配置（结构化格式，见 app/core/logging_config.py）——在任务启动前完成
+    configure_logging()
 
     # Phase 1: create_all (IF NOT EXISTS, no destructive DROP)
     async with engine.begin() as conn:
@@ -92,6 +89,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# 请求日志中间件（最后添加 = 最外层，覆盖 CORS/预检等全部请求；
+# 见 app/core/logging_config.py 与 doc/logging-request-logs.md）
+app.add_middleware(RequestLoggingMiddleware)
 
 app.include_router(visitor.router)
 app.include_router(auth.router)
