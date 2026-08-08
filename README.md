@@ -345,6 +345,8 @@ docker-compose up -d --build
 | GET | `/analysis/trends` | 趋势数据（每日对话量 + 满意度均分） |
 | GET | `/admin/dashboard` | 数据大屏聚合数据 |
 | GET | `/admin/report` | 分析报告数据 |
+| GET | `/announcements` | 访客公告列表（公开；仅已发布，置顶优先 + 时间倒序，`limit` 1-100；契约见 [`digitalHumanApi/doc/announcement-api.md`](digitalHumanApi/doc/announcement-api.md)） |
+| GET | `/home/highlights` | 首页活数据（热门景点/推荐路线，每次请求实时读 `app/data/*.json`，`spots_limit`/`routes_limit` 可调，文件缺失降级空数组） |
 
 管理接口（前缀 `/api/admin/knowledge`，需 `X-Admin-Token` 认证）：
 
@@ -355,6 +357,16 @@ docker-compose up -d --build
 | PUT | `/api/admin/knowledge/{id}` | 编辑知识库条目 |
 | DELETE | `/api/admin/knowledge/{id}` | 删除知识库条目 |
 | POST | `/api/admin/knowledge/import` | 批量导入（JSON/Markdown 文件） |
+
+管理接口（前缀 `/api/admin/announcements`，需 `X-Admin-Token` 认证；契约见 [`digitalHumanApi/doc/announcement-api.md`](digitalHumanApi/doc/announcement-api.md)）：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/admin/announcements` | 公告列表（status/keyword 筛选 + 分页） |
+| POST | `/api/admin/announcements` | 创建公告（默认草稿） |
+| PUT | `/api/admin/announcements/{id}` | 部分更新公告 |
+| PATCH | `/api/admin/announcements/{id}/status` | 发布状态切换（published/draft） |
+| DELETE | `/api/admin/announcements/{id}` | 删除公告 |
 
 > **知识库与 RAG 联动**：管理后台知识库增/删/改/导入后自动同步重建 `knowledge` 命名空间向量索引，后台检索立即可见；结构化景点/路线数据不走向量，由推荐 Agent 结构化工具直查（零幻觉原则）。
 
@@ -494,6 +506,7 @@ pytest -v
 | 阶段3 Dify 依赖盘点 | ✅ 完成（推荐/分析已脱离 Dify；剩余为对话双轨回落 + 历史数据接口 + Workflow 量化评估，清理建议见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md)） |
 | 阶段4 量化评估本地化 | ✅ 完成（真实调用：本地 LLM 评估产出情感/满意度/关注点/景点/改进建议，Evaluation 表与管理后台消费不变；`trigger_workflow`/`dify_helpers`/`DIFY_WORKFLOW_API_KEY` 已移除；全量测试全绿，详见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md) §2） |
 | 阶段4 收官：脱离 Dify 全链路自检 | ✅ 通过（真实环境模拟 **Dify 不可达**：对话快速/规划/流式/多轮记忆、推荐问句本地生成、分析链路（LLM+DB 兜底）、量化评估 → Evaluation 表 → 管理后台报告（含 suggestions）、记忆系统（长期/短期/游客隔离）全部正常；仅保留项明确降级——历史数据接口重试后 `synced=0` 不崩溃、对话回落礼貌报错不崩溃；自检未发现代码缺陷，详见 [`doc/phase4-e2e-verification.md`](doc/phase4-e2e-verification.md)） |
+| 批次4 B2 公告模块 + 首页活数据 | ✅ 完成（announcements 迁移升级/回退（首个真实 Alembic 迁移）+ 管理端 CRUD（X-Admin-Token 鉴权）+ 访客接口仅已发布（置顶优先 + 时间倒序）+ 首页活数据接口（`app/data/*.json` 实时读取）；契约见 [`digitalHumanApi/doc/announcement-api.md`](digitalHumanApi/doc/announcement-api.md)；公告/首页/迁移新增单测 19 用例全绿） |
 | Docker Compose | 已配置，未在本次验收中实际构建 |
 
 ## 常见问题

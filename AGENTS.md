@@ -75,9 +75,18 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 - `app/models/knowledge.py` + `app/services/knowledge_service.py` + `app/routers/knowledge.py` — `/api/admin/knowledge*` CRUD + `/import`
 - **CRUD/导入变更后自动同步向量索引**：增/删/改/导入后 `knowledge_service._sync_knowledge_index` 以 DB 全量条目重建 knowledge 命名空间（`index_knowledge_entries`，条目量小、全量重建开销可忽略）；索引失败仅告警日志不阻断 CRUD（下次变更/手动索引自愈）；批量导入仅最后统一同步一次
-- 认证：`X-Admin-Token` 请求头，token 来自 `ADMIN_API_TOKEN` 环境变量（`app/core/config.py`）
+- 认证：`X-Admin-Token` 请求头，token 来自 `ADMIN_API_TOKEN` 环境变量（`app/core/config.py`；校验实现公共依赖 `app/routers/deps.py::verify_admin_token`，公告管理同源复用）
 - 前端：`digitalHumanVue/src/views/admin/KnowledgeView.vue`，token 存 `localStorage` 的 `admin_api_token`
 - 导入支持 `.json` 数组和按 `# ` 标题切分的 `.md` 文件
+
+## 公告模块 + 首页活数据（批次4 B2：首个真实 Alembic 迁移）
+
+- **公告**：`app/models/announcement.py`（announcements 表：title/content/status[published|draft]/pinned/created_at/updated_at）+ `app/schemas/announcement.py` + `app/services/announcement_service.py` + `app/routers/announcement.py`；迁移 `migrations/versions/e06ede5acb5a`（升级建表/回退删表，downgrade 已补全）
+- **管理端** `/api/admin/announcements`（X-Admin-Token 鉴权）：列表（status/keyword 筛选 + 分页）/创建（默认草稿）/部分更新 PUT /{id}/状态切换 PATCH /{id}/status/删除；**访客端** `/api/v1/announcements`（公开，仅已发布，置顶优先 + 时间倒序）
+- **鉴权依赖提取**：`app/routers/deps.py` 的 `verify_admin_token` 为公共实现（knowledge.py 同源复用，行为不变）
+- **首页活数据**：`GET /api/v1/home/highlights`（公开）——`app/routers/home.py` + `app/services/home_service.py` 每次请求实时读 `app/data/{spots,routes}.json`（默认各 3 条，spots_limit/routes_limit 可调），前端首页卡片不再写死；文件缺失/损坏降级空数组不报错
+- **契约文档**：`doc/announcement-api.md`（路径/请求响应 schema/鉴权/排序约定，前端任务对接用）
+- 测试：`tests/test_announcement.py`（12）+ `tests/test_home.py`（6）+ `tests/test_migrations.py` 新增 announcements 升级/回退用例；**坑：`config.py` 的 `load_dotenv(override=True)` 使 .env 优先于环境变量，临时改配置需直接改 .env 或用 pytest monkeypatch**
 
 ## 用户体系（注册/登录/JWT/游客）
 
@@ -193,7 +202,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - **启动自动迁移**：`app/core/migrations.py::run_migrations()`（main.py lifespan Phase 1 替代 create_all；独立 CLI backfill.py 同用）三态分流——空库 `upgrade head` 建齐 / **遗留库（有业务表无版本表）先幂等 create_all 补建缺失业务表再 `stamp head` 基线化（不丢数据）** / 版本化库 `upgrade head`；迁移失败回退 create_all（幂等）不阻断启动；Alembic 命令为同步 API 且 env.py 内部 asyncio.run，必须 `asyncio.to_thread` 执行
 - URL 解析优先级：`alembic -x db_url=...` > ini `sqlalchemy.url`（留空；测试 Config.set_main_option 覆盖）> `settings.DATABASE_URL`；env.py 已显式把 digitalHumanApi/ 加入 sys.path
 - 开发流程：改 models → `alembic revision --autogenerate -m "..."`（草稿必须 review，补 downgrade）→ `alembic upgrade head` 验证 → `pytest -q` → 合并；SQLite 改列用 `op.batch_alter_table`（已开 `render_as_batch=True`），禁止手写裸 ALTER TABLE
-- 权威文档：`doc/alembic-migrations.md`；测试：`tests/test_migrations.py`（8 用例：空库建齐/DDL 等价/遗留库 stamp 不丢数据/版本化库幂等/run_migrations 三态/遗留库缺表补建）
+- 权威文档：`doc/alembic-migrations.md`；测试：`tests/test_migrations.py`（9 用例：空库建齐/DDL 等价/遗留库 stamp 不丢数据/版本化库幂等/run_migrations 三态/遗留库缺表补建/公告表升级回退）
 
 # Commands
 

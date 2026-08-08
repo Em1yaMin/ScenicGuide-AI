@@ -11,7 +11,18 @@ from app.core.config import settings
 from app.core.database import engine
 from app.core.logging_config import RequestLoggingMiddleware, configure_logging
 from app.models import Base
-from app.routers import admin, analysis, auth, dialogue, knowledge, rag, recommend, visitor
+from app.routers import (
+    admin,
+    analysis,
+    announcement,
+    auth,
+    dialogue,
+    home,
+    knowledge,
+    rag,
+    recommend,
+    visitor,
+)
 from app.schemas.common import ErrorResponse
 from app.schemas.health import HealthResponse
 from app.tasks.analysis import analysis_loop
@@ -108,6 +119,9 @@ app.include_router(dialogue.router)
 app.include_router(analysis.router)
 app.include_router(recommend.router)
 app.include_router(knowledge.router)
+app.include_router(announcement.admin_router)
+app.include_router(announcement.public_router)
+app.include_router(home.router)
 app.include_router(rag.router)
 
 

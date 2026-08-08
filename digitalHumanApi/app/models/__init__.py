@@ -6,6 +6,7 @@ from app.models.evaluation import Evaluation
 from app.models.stat import Stat
 from app.models.knowledge import KnowledgeBase
 from app.models.user import User
+from app.models.announcement import Announcement
 
 __all__ = [
     "Base",
@@ -15,4 +16,5 @@ __all__ = [
     "Stat",
     "KnowledgeBase",
     "User",
+    "Announcement",
 ]
