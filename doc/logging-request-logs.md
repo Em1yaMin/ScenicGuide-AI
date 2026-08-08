@@ -59,6 +59,20 @@ grep 'app.request' backend.log | grep '^2026-08-08 14:0[0-9]'
 密码、token、key、请求体、请求头（Authorization/X-Admin-Token 值）一律不写入日志：
 中间件只读请求头做身份解析，不读请求体（SSE/流式安全）、不记 query、不记原始 token 值。
 
+- **uvicorn.access 已抑制**（`configure_logging()` 压到 WARNING）：服务器层自带 access log
+  的固定格式会原样记录完整 query string（如 `?token=...&password=...`），与红线冲突且
+  与中间件日志重复——请求日志统一由 `app.request` 中间件承担（更丰富且零泄漏）；
+  `uvicorn.error` 启动/错误日志不受影响。
+
+## 已知取舍
+
+- 既有 catch-all 异常处理器把未处理的路由异常转为 HTTP 200（body `code=500`），因此
+  中间件的 5xx→ERROR 分支对最常见的路由错误路径不触发——此类失败以 `status=200` 出现，
+  排查时不能只按 `status=5xx` 过滤；真正的服务端错误仍由 `main.py` 全局异常处理器
+  `logger.error(..., exc_info=...)` 落盘（`app.main` logger），两条线索配合定位。
+- SSE 流在响应头发出后中途抛错（status 已为 200）：中间件按「异常优先」判 ERROR，
+  带 `exc_info` 堆栈 + `error=<异常类型>`，不会被记为成功 INFO 行。
+
 ## 中间件挂载
 
 `main.py` 中 `app.add_middleware(RequestLoggingMiddleware)` 最后添加（最外层），

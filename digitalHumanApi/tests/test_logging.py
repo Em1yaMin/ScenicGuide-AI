@@ -92,6 +92,21 @@ def test_configure_logging_debug_switch(monkeypatch):
     assert captured["level"] == logging.INFO
 
 
+def test_configure_logging_suppresses_uvicorn_access(monkeypatch):
+    """抑制 uvicorn.access：其固定格式原样记录 query 串（可能含 token），
+    与「敏感信息绝不入日志」红线冲突——请求日志统一由中间件承担。"""
+    captured = {}
+    monkeypatch.setattr(logging, "basicConfig", lambda **kw: captured.update(kw))
+    monkeypatch.setattr(
+        logging.getLogger("uvicorn.access"),
+        "setLevel",
+        lambda lv: captured.update(uvicorn_access_level=lv),
+    )
+
+    configure_logging(debug=False)
+    assert captured["uvicorn_access_level"] == logging.WARNING
+
+
 # --- 请求日志中间件（经 ASGITransport 全链路） ---
 
 

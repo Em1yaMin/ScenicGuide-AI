@@ -55,6 +55,9 @@ def configure_logging(debug: Optional[bool] = None) -> None:
 
     - debug=True → 根级别 DEBUG（更详细），debug=False → INFO，与历史行为一致
     - 不传参时读 settings.DEBUG；测试可显式传参避免依赖环境
+    - 抑制 uvicorn.access（服务器层自带 access log）：其固定格式会原样记录
+      query string（如 ?token=...&password=...），与「敏感信息绝不入日志」
+      红线冲突，且与 app.request 中间件日志重复——请求日志统一由中间件承担
     """
     if debug is None:
         debug = settings.DEBUG
@@ -64,6 +67,10 @@ def configure_logging(debug: Optional[bool] = None) -> None:
         level=logging.DEBUG if debug else logging.INFO,
         force=True,
     )
+    # uvicorn 在 server 启动时会把 uvicorn.access 级别设为 INFO（其自有 handler 保留）；
+    # lifespan（此处）在其后运行，这里压到 WARNING 即可静默其 access 行（仅本行生效，
+    # uvicorn.error 启动/错误日志不受影响）。
+    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
 
 
 def _is_noise_path(path: str) -> bool:
