@@ -15,7 +15,7 @@
 ## Lifespan Lifecycle
 
 ```
-startup:  logging.basicConfig() → run_migrations()（Alembic，失败回退 create_all）→ spawn tasks
+startup:  configure_logging()（统一日志格式，见 app/core/logging_config.py）→ run_migrations()（Alembic，失败回退 create_all）→ spawn tasks
 runtime:  HTTP serving + background loops
 shutdown: cancel tasks → await cleanup → engine.dispose()
 ```

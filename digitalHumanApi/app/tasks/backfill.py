@@ -37,6 +37,7 @@ from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.database import async_session_factory
+from app.core.logging_config import configure_logging
 from app.models.dialogue import Dialogue, DialogueRole
 from app.models.visitor import Visitor
 
@@ -485,10 +486,9 @@ async def _main(argv: Optional[List[str]] = None) -> int:
 
 def main() -> None:
     """CLI 入口（python -m app.tasks.backfill）。"""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    # 复用统一日志格式（与 main.py lifespan Phase 0 一致；CLI 不经 lifespan，
+    # 显式传 debug=False 保持历史行为：无论 settings.DEBUG 均 INFO）
+    configure_logging(debug=False)
     raise SystemExit(asyncio.run(_main()))
 
 
