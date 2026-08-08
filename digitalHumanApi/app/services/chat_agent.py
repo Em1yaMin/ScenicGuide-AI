@@ -657,7 +657,8 @@ async def chat(
     use_rag: bool = True,
     rag_top_k: int = 3,
 ) -> ChatAgentResult:
-    """LangChain 对话主链路：工具调用 agent + 进程内多轮上下文。
+    """（弃用链路，A3 起主链路为 deepagents 装配层）LangChain 对话 agent：
+    工具调用 agent + 进程内多轮上下文。
 
     Args:
         query: 用户消息

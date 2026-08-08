@@ -379,7 +379,7 @@ RAG 接口（`/api/rag/*`，统一检索入口，对话 RAG、推荐 Agent 与�
 | `done` | `conversation_id` / `rag_context` / `rag_sources` | 流式完成（字段与 `ChatResponse` 对齐，`conversation_id` 供多轮续接） |
 | `error` | `message` / `fallback` | 链路错误；`fallback=true` 表示主链路异常已切换 Dify 兜底（清空部分回答继续输出），`false` 表示双链路均失败 |
 
-事件序列：LangChain 链路 `step → token → done`；故障回落时先发 `error(fallback=true)` 再发 Dify 流式事件；双链路均失败时以 `error(fallback=false)` 礼貌报错结束。
+事件序列：主链路（deepagents 装配层）`step → token → done`；故障回落时先发 `error(fallback=true)` 再发 Dify 流式事件；双链路均失败时以 `error(fallback=false)` 礼貌报错结束。
 
 ```json
 {"type": "step", "tool": "search_knowledge", "label": "正在检索知识库…"}

@@ -97,7 +97,8 @@ def _build_system_prompt() -> str:
 4. 工具效率：一次检索到足够信息后直接作答，不要对同一主题反复重搜。"""
 
 
-# 复用主链路系统提示词作为基础（A3 切换前保持单一来源）
+# 复用主链路系统提示词作为基础（chat_agent 保留期间维持单一来源，
+# A4 删除时再迁移为独立实现）
 SYSTEM_PROMPT = _build_system_prompt()
 
 
@@ -110,7 +111,8 @@ _PLAN_INSTRUCTION = """本次请求是需要多步骤完成的复杂任务（如
 3. 最后总结：用分节的结构化回答（如「行程安排」「适合人群」「注意事项」等小节）组织输出，引用真实名称与数据，不要编造"""
 
 # 步骤展示文案（场景工具与 chat_agent._STEP_LABELS 同源；记忆工具见
-# memory_tools.MEMORY_STEP_LABELS）——装配层独立维护，A3 切换时随迁
+# memory_tools.MEMORY_STEP_LABELS）——装配层独立维护，chat_agent 保留期间
+# 维持同源同步（A4 删除时再评估合并）
 _STEP_LABELS: Dict[str, str] = {
     "search_knowledge": "正在检索知识库…",
     "search_spots": "正在查询景点…",

@@ -56,8 +56,10 @@ class Settings(BaseModel):
     # 对话默认温度（工厂层默认值，可按调用覆盖）
     LLM_TEMPERATURE: float = float(os.environ.get("LLM_TEMPERATURE", "0.7"))
 
-    # 对话引擎（阶段1 T2：LangChain agent 主链路，Dify 兜底，见 app/services/chat_agent.py）
-    # langchain: 默认，LangChain agent（LLM_* 配置 + 本地工具，异常自动回落 Dify）
+    # 对话引擎（A3 起主链路为 deepagents 装配层，Dify 兜底，见
+    # app/services/deepagents/agent.py；chat_agent 自研链路已弃用，保留参考实现）
+    # langchain: 默认，deepagents 装配层（LLM_* 配置 + 本地工具 + 记忆四工具，
+    #            异常自动回落 Dify）
     # dify: 强制走 Dify Chat Agent（原链路，RAG 预检索 + Dify）
     DIALOGUE_ENGINE: str = os.environ.get("DIALOGUE_ENGINE", "langchain")
 
