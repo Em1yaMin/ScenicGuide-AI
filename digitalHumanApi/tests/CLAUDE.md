@@ -12,6 +12,7 @@ pytest + pytest-asyncio 测试套件。覆盖 FastAPI HTTP 端点、服务层逻
 
 ```
 _reset_memory_store (autouse, 重置短期记忆存储为 :memory:，防跨测试污染；持久化/重启恢复专项测试自行 reset_store 到临时文件)
+_reset_auth_rate_limiter (autouse, 重置认证限流器 auth._limiter，防既有登录/注册测试被 429 误伤；批次6 C3)
 _pin_embedding_api_key_off (autouse, 固定 EMBEDDING_API_KEY 为空 → 走本地 TF-IDF)
 _pin_openai_api_key_off (autouse, 固定 OPENAI_API_KEY 为空 → 运营分析不触发真实 LLM 调用；LLM 成功/失败路径由测试显式 monkeypatch `_get_analysis_chain` 模拟，见 test_analysis.py)
 db_engine → db_session → client

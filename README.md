@@ -109,7 +109,8 @@ cp .env.example .env
 | 变量 | 说明 |
 |------|------|
 | `DATABASE_URL` | SQLite 路径，默认 `sqlite+aiosqlite:///./digital_human.db` |
-| `CORS_ORIGINS` | 开发环境填前端地址 `http://localhost:5173`（多个用英文逗号分隔） |
+| `CORS_ORIGINS` | CORS 白名单（逗号分隔多个 origin）；未配置时默认 localhost / 127.0.0.1 / 192.168.16.132 × 5173/8001/3000（演示环境跨端口，生产务必显式收紧）；`CORS_ALLOW_CREDENTIALS=true`（默认）时白名单不能含通配符 `*` |
+| `CORS_ALLOW_CREDENTIALS` | 是否允许跨域携带凭证（默认 `true`，JWT Bearer 透传需要）；仅当显式设为 `false` 时 `CORS_ORIGINS` 才可使用 `*` |
 | `DIFY_API_URL` | Dify API 基础地址，如 `https://your-dify.example.com/v1` |
 | `DIFY_API_KEY` | Chat Agent 应用 Key（拉取对话） |
 | `DIFY_LIGHT4AI_USER` | light4ai 调 Dify 时固定的 user 字段 |
@@ -348,7 +349,7 @@ docker-compose up -d --build
 | GET | `/announcements` | 访客公告列表（公开；仅已发布，置顶优先 + 时间倒序，`limit` 1-100；契约见 [`digitalHumanApi/doc/announcement-api.md`](digitalHumanApi/doc/announcement-api.md)） |
 | GET | `/home/highlights` | 首页活数据（热门景点/推荐路线，每次请求实时读 `app/data/*.json`，`spots_limit`/`routes_limit` 可调，文件缺失降级空数组） |
 
-管理接口（前缀 `/api/admin/knowledge`，需 `X-Admin-Token` 认证）：
+管理接口（前缀 `/api/admin/knowledge`，需 `X-Admin-Token` 认证；**删除操作要求 admin 角色**（operator 403），角色映射 `ADMIN_TOKENS` 见 `digitalHumanApi/.env.example`）：
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -368,7 +369,7 @@ docker-compose up -d --build
 | PATCH | `/api/admin/announcements/{id}/status` | 发布状态切换（published/draft） |
 | DELETE | `/api/admin/announcements/{id}` | 删除公告 |
 
-管理接口（前缀 `/api/admin/memories`，需 `X-Admin-Token` 认证；契约见 [`digitalHumanApi/doc/memory-admin-api.md`](digitalHumanApi/doc/memory-admin-api.md)）：
+管理接口（前缀 `/api/admin/memories`，需 `X-Admin-Token` 认证；**删除操作要求 admin 角色**（operator 403）；契约见 [`digitalHumanApi/doc/memory-admin-api.md`](digitalHumanApi/doc/memory-admin-api.md)）：
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -477,6 +478,7 @@ SSE 由 ADH 数字人消费（`live2d-frontend/digitalHuman/agent/core/langchain
 
 - **注册/登录**：`POST /api/v1/auth/register`、`POST /api/v1/auth/login`（凭据校验失败返回 401，登录成功签发 JWT，有效期默认 24 小时）
 - **游客身份**：`POST /api/v1/auth/guest` 签发短期 token（默认 30 分钟，匿名、无持久化记录）
+- **认证限流（批次6 C3）**：login/register/guest 端点按 IP+账号维度进程内限流（默认 5 次失败/60s 滑动窗口后进入 15 分钟冷却，冷却期内返回 429 且带 `Retry-After` 头，前端可展示剩余秒数；登录成功自动清零防误伤；guest 端点纯 IP 每分钟 30 次频率限制），仅作用于认证端点不误伤对话；`AUTH_RATE_LIMIT_ENABLED=false` 可关闭，见 `digitalHumanApi/.env.example`
 - **对话接口用户标识**：`POST /api/v1/dialogue/chat` 优先从 `Authorization: Bearer <token>` 解析用户（登录用户 → 用户 id；游客 token → 游客 id）；无 token 时向后兼容回退请求体 `user` 字段（默认 `visitor`）；token 无效时降级为 `visitor` 并写告警日志（不阻断对话）。`/auth/me` 等认证接口对无效 token 严格返回 401
 - **安全**：密码使用 pwdlib[bcrypt] 哈希存储，绝不落明文；日志不打印 token/密码
 - **配置**：`JWT_SECRET`（生产必须设置，留空时启动生成随机临时密钥、重启后 token 失效）、`JWT_EXPIRES_MINUTES`（默认 1440）、`GUEST_TOKEN_EXPIRES_MINUTES`（默认 30），见 `digitalHumanApi/.env.example`

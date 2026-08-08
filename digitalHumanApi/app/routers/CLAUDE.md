@@ -17,10 +17,10 @@ FastAPI HTTP 端点定义层。纯接线层——验证请求体、注入 DB 会
 ```
 routers/
   visitor.py   # POST /api/v1/visitor/register — DB 注入 CRUD
-  auth.py      # /api/v1/auth/register|login|me|guest — 注册/登录/JWT/游客 token
+  auth.py      # /api/v1/auth/register|login|me|guest — 注册/登录/JWT/游客 token；login/register/guest 接入进程内限流（IP+账号维度，429 冷却，见 app/core/rate_limiter.py）
   admin.py     # GET /api/v1/admin/dashboard、/report — 纯聚合委托
-  knowledge.py # /api/admin/knowledge CRUD + import — X-Admin-Token 认证
-  memory_admin.py # /api/admin/memories*（users 列表 + 按用户查/增/改/删记忆）— X-Admin-Token 认证，管理员例外跨用户操作，审计日志见 doc/memory-admin-api.md
+  knowledge.py # /api/admin/knowledge CRUD + import — X-Admin-Token 认证，删除需 admin 角色（RBAC，批次6 C3）
+  memory_admin.py # /api/admin/memories*（users 列表 + 按用户查/增/改/删记忆）— X-Admin-Token 认证，管理员例外跨用户操作，删除需 admin 角色（RBAC，批次6 C3），审计日志见 doc/memory-admin-api.md
   admin_agent.py # /api/admin/agent/chat + /chat/stream（管理 agent 对话，非流式 + SSE）— X-Admin-Token 认证，删除类两阶段二次确认 + 写操作审计，无 Dify 兜底（装配/工具集见 AGENTS.md「管理员 agent」专节）
   dialogue.py  # POST /api/v1/dialogue/chat（双轨：deepagents 装配层主链路 + Dify 回落；streaming=true 时返回 SSE 流式事件，见 README「SSE 流式对话」）、/rag-context（ADH 用）、/sync-now（任务触发器，绕过服务层）
   analysis.py  # POST /api/v1/analysis/run-now — 任务触发器

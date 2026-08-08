@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.models.user import User
-from app.routers.deps import verify_admin_token
+from app.routers.deps import require_role, verify_admin_token
 from app.schemas.memory_admin import (
     AdminMemoryCreateRequest,
     AdminMemoryDeleteResponse,
@@ -228,7 +228,7 @@ async def update_memory(
 @router.delete("/{memory_id}", response_model=AdminMemoryDeleteResponse)
 async def delete_memory(
     memory_id: str,
-    _: str = Depends(verify_admin_token),
+    _: str = Depends(require_role("admin")),
 ) -> AdminMemoryDeleteResponse:
     """按 memory_id 删除单条记忆（管理员例外：跨用户可用；legacy 派生 id 兼容）。
 
