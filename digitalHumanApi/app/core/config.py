@@ -76,6 +76,42 @@ class Settings(BaseModel):
     # AGENT_DUAL_MODE=false：弃用链路全部走快速路径，行为与阶段2 完全一致
     AGENT_DUAL_MODE: bool = os.environ.get("AGENT_DUAL_MODE", "true").lower() == "true"
 
+    # A4 成本/速度调优（deepagents 装配层组合拳，见 doc/deepagents-tuning.md）
+    # 1) 工具调用次数上限：ToolCallLimitMiddleware 单轮（单次对话）全部工具
+    #    调用上限；超限后继续拦截并以错误 ToolMessage 回给模型，模型基于
+    #    已有信息直接作答（优雅降级不报错）。初始值 15 依据 A1 实测
+    #    （复杂任务平均 9 步、峰值 13 步），A4 实测后校准（见 doc）
+    AGENT_MAX_TOOL_CALLS: int = int(os.environ.get("AGENT_MAX_TOOL_CALLS", "15"))
+    # 2) 工具结果归一化缓存：同查询不重查（景点/路线静态 JSON 数据可安全
+    #    长缓存；知识检索内容可变——短 TTL + 索引重建即时失效）
+    AGENT_TOOL_CACHE_ENABLED: bool = (
+        os.environ.get("AGENT_TOOL_CACHE_ENABLED", "true").lower() == "true"
+    )
+    # 静态数据工具（search_spots/search_routes/get_spot_detail/get_route_detail/
+    # filter_by_tags/recommend_routes）缓存 TTL（秒）：数据源为 app/data/ 静态
+    # JSON（仅随版本变更），长缓存安全
+    AGENT_TOOL_CACHE_TTL_STATIC: int = int(
+        os.environ.get("AGENT_TOOL_CACHE_TTL_STATIC", "3600")
+    )
+    # 知识检索工具（search_knowledge）缓存 TTL（秒）：知识库内容可通过管理
+    # 后台 CRUD 变更，短 TTL 兜底 + 索引重建时版本失效（见 tool_cache.py）
+    AGENT_TOOL_CACHE_TTL_KNOWLEDGE: int = int(
+        os.environ.get("AGENT_TOOL_CACHE_TTL_KNOWLEDGE", "300")
+    )
+    # 3) 长会话上下文压缩（回答后触发）：多轮历史消息数超过
+    #    AGENT_COMPACT_TRIGGER_MESSAGES 时，压缩早期轮次为摘要、保留最近
+    #    AGENT_COMPACT_KEEP_MESSAGES 条完整消息（阈值按 2 条/轮折算：
+    #    24 条 ≈ 12 轮触发、10 条 ≈ 5 轮保留，A4 实测校准见 doc）
+    AGENT_COMPACT_ENABLED: bool = (
+        os.environ.get("AGENT_COMPACT_ENABLED", "true").lower() == "true"
+    )
+    AGENT_COMPACT_TRIGGER_MESSAGES: int = int(
+        os.environ.get("AGENT_COMPACT_TRIGGER_MESSAGES", "24")
+    )
+    AGENT_COMPACT_KEEP_MESSAGES: int = int(
+        os.environ.get("AGENT_COMPACT_KEEP_MESSAGES", "10")
+    )
+
     # RAG 向量化 Embedding（与对话 LLM 的 LLM_* 及运营分析的 OPENAI_* 完全独立）
     # 不配置 EMBEDDING_API_KEY 时自动降级为本地 TF-IDF 向量化（见 app/core/embedding.py）
     # EMBEDDING_API_STYLE 控制请求体格式（2026-08-07 从 Minimax 迁移到 Qwen/DashScope 实测）：

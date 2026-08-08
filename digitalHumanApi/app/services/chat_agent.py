@@ -105,8 +105,11 @@ SYSTEM_PROMPT = """你是「景区导览」的 AI 数字人助手，运行在景
 _CHAT_MAX_TOKENS = 2048
 # LLM 调用超时（秒），与 Dify 兜底路径的 60s 超时一致，挂起时尽快触发回落
 _CHAT_TIMEOUT = 60
-# 进程内会话保留的最大消息数（超限丢弃最早的，按 20 条 ≈ 10 轮）
-_MAX_HISTORY_MESSAGES = 20
+# 进程内会话保留的最大消息数（超限丢弃最早的）。A4 起会话历史支持
+# 上下文压缩（deepagents/compaction.py，回答后触发）：压缩后历史 ≈ 摘要
+# 1 条 + 保留窗口，正常有界；上限 30 仅为压缩失败/关闭时的截断兜底
+# （≈15 轮；压缩阈值 24 条 ≈ 12 轮，见 AGENT_COMPACT_TRIGGER_MESSAGES）
+_MAX_HISTORY_MESSAGES = 30
 # 进程内会话总数上限（超限 LRU 淘汰最久未活跃会话，防长跑进程内存无限增长）
 _MAX_CONVERSATIONS = 1000
 # agent 图执行步数上限：langchain 1.3 的 create_agent 把 recursion_limit
@@ -287,7 +290,11 @@ def _store_call(name: str, *args: Any, **kwargs: Any) -> Any:
 
 
 def _deserialize_history(seq: List[Dict[str, Any]]) -> List[BaseMessage]:
-    """SQLite 消息序列 → BaseMessage 历史列表（忽略未知 role，防御性）。"""
+    """SQLite 消息序列 → BaseMessage 历史列表（忽略未知 role，防御性）。
+
+    A4 起支持 system 角色（上下文压缩后首条为摘要 SystemMessage，重启
+    恢复时按原角色还原，继续参与后续压缩与模型上下文）。
+    """
     history: List[BaseMessage] = []
     for item in seq:
         role = item.get("role")
@@ -296,6 +303,8 @@ def _deserialize_history(seq: List[Dict[str, Any]]) -> List[BaseMessage]:
             history.append(HumanMessage(content=content))
         elif role == "ai":
             history.append(AIMessage(content=content))
+        elif role == "system":
+            history.append(SystemMessage(content=content))
     return history
 
 
