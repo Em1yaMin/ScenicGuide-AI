@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.core.security import resolve_dialogue_user
-from app.services import chat_agent
+from app.services import chat_agent, deepagents
 from app.services.dify_stream import stream_dify_chat as _call_dify_chat_stream
 from app.services.rag_service import build_rag_context, search_documents
 from app.tasks.polling import poll_once
@@ -74,13 +74,16 @@ async def chat_with_rag(
         "无 token 时向后兼容，使用请求体 user（默认 visitor）",
     ),
 ) -> Any:
-    """RAG 增强的对话接口（双轨：LangChain agent 主链路，Dify 兜底）。
+    """RAG 增强的对话接口（双轨：deepagents 装配层主链路，Dify 兜底）。
 
     流程（DIALOGUE_ENGINE=langchain，默认）:
-    1. 走 LangChain 对话 agent（app/services/chat_agent.py）：结构化工具
-       直查景点/路线（零幻觉）+ search_knowledge 统一检索入口查知识库
-       + recommend_routes 规则推荐，多轮上下文（短期记忆持久化：SQLite 落盘，重启可恢复）
-    2. agent 链路异常（LLM 未配置/网络/API 故障）时自动回落 Dify：
+    1. 走 deepagents 装配层（app/services/deepagents/agent.py，A3 主链路）：
+       LangChain 系 agent（结构化工具直查景点/路线零幻觉 + search_knowledge
+       统一检索入口查知识库 + recommend_routes 规则推荐 + 记忆四工具），
+       多轮上下文（短期记忆持久化：SQLite 落盘，重启可恢复）、意图分类
+       双模式（复杂任务注入规划指令）、轻量用户摘要注入、对话后自动
+       抽取长期记忆写入（按 user 隔离，游客不写）
+    2. 主链路异常（LLM 未配置/网络/API 故障）时自动回落 Dify：
        先本地 RAG 预检索注入 query，再调用 Dify Chat Agent
 
     DIALOGUE_ENGINE=dify 时强制走 Dify（原链路）。
@@ -108,10 +111,10 @@ async def chat_with_rag(
             },
         )
 
-    # Step A: LangChain 对话 agent 主链路（默认引擎；异常自动回落 Dify）
+    # Step A: deepagents 装配层主链路（默认引擎；异常自动回落 Dify）
     if settings.DIALOGUE_ENGINE != "dify":
         try:
-            result = await chat_agent.chat(
+            result = await deepagents.chat(
                 query=request.query,
                 user=effective_user,
                 conversation_id=request.conversation_id,
@@ -119,16 +122,16 @@ async def chat_with_rag(
                 rag_top_k=request.rag_top_k,
             )
             return ChatResponse(
-                answer=result.answer,
-                conversation_id=result.conversation_id,
-                rag_context=result.rag_context,
-                rag_sources=result.rag_sources,
+                answer=result["answer"],
+                conversation_id=result["conversation_id"],
+                rag_context=result["rag_context"],
+                rag_sources=result["rag_sources"],
             )
         except Exception as e:
-            # 故障回落：agent 链路任何异常（含 LLM 未配置）都不阻断对话，
+            # 故障回落：主链路任何异常（含 LLM 未配置）都不阻断对话，
             # 自动降级到 Dify 原链路（演示不翻车）
             logger.exception(
-                "LangChain 对话链路失败，自动回落 Dify (engine=%s): %s",
+                "对话主链路失败，自动回落 Dify (engine=%s): %s",
                 settings.DIALOGUE_ENGINE,
                 e,
             )
@@ -218,16 +221,16 @@ async def _stream_chat(
     request: ChatRequest,
     user: str,
 ) -> AsyncIterator[str]:
-    """流式对话事件生成器（双轨：LangChain 主链路，Dify 兜底）。
+    """流式对话事件生成器（双轨：deepagents 装配层主链路，Dify 兜底）。
 
-    事件序列：LangChain 链路 step → token → done；链路异常时先发
+    事件序列：主链路 step → token → done；链路异常时先发
     error(fallback=true) 事件（前端据此清空部分回答）再切换 Dify 流式
     输出；双链路均失败时发 error(fallback=false) 礼貌报错并结束。
     """
-    # Step A: LangChain 对话 agent 主链路（默认引擎；异常自动回落 Dify）
+    # Step A: deepagents 装配层主链路（默认引擎；异常自动回落 Dify）
     if settings.DIALOGUE_ENGINE != "dify":
         try:
-            async for event in chat_agent.chat_stream(
+            async for event in deepagents.chat_stream(
                 query=request.query,
                 user=user,
                 conversation_id=request.conversation_id,
@@ -237,10 +240,10 @@ async def _stream_chat(
                 yield _sse(event)
             return
         except Exception as e:
-            # 故障回落：agent 链路任何异常（含 LLM 未配置）都不阻断对话，
+            # 故障回落：主链路任何异常（含 LLM 未配置）都不阻断对话，
             # 自动降级到 Dify 原链路（演示不翻车）；error 事件告知前端
             logger.exception(
-                "LangChain 对话链路失败，自动回落 Dify (engine=%s): %s",
+                "对话主链路失败，自动回落 Dify (engine=%s): %s",
                 settings.DIALOGUE_ENGINE,
                 e,
             )
