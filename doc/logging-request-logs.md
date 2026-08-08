@@ -5,8 +5,8 @@
 
 ## 统一格式
 
-所有 logger 经 `configure_logging()`（main.py lifespan Phase 0 调用，替代就地 basicConfig）
-统一格式，时间含毫秒：
+所有 logger 经 `configure_logging()`（main.py lifespan Phase 0 调用，替代就地 basicConfig；
+CLI 入口 `python -m app.tasks.backfill` 同样复用）统一格式，时间含毫秒：
 
 ```
 2026-08-08 14:03:25.123 [INFO] app.core.security: JWT_SECRET 未配置，已生成随机临时密钥...
