@@ -39,6 +39,7 @@ from app.core.config import settings
 from app.core.llm import get_chat_llm
 from app.core.rag import NAMESPACE_USER_MEMORY, get_vectorstore_for_namespace
 from app.services.rag_service import _vector_index_lock
+from app.services.usage_tracker import CHAIN_MEMORY, usage_context
 
 logger = logging.getLogger(__name__)
 
@@ -562,7 +563,9 @@ def extract_facts(
             query=query[:2000],
             answer=answer[:2000],
         )
-        response = llm.invoke(prompt)
+        # 批次7 C5 token 记账：标注链路（记忆提取在后台钩子，无用户）
+        with usage_context(CHAIN_MEMORY):
+            response = llm.invoke(prompt)
         content = getattr(response, "content", response)
         if not isinstance(content, str):
             content = str(content or "")

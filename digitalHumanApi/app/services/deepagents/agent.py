@@ -70,6 +70,7 @@ from app.services.deepagents.memory_tools import (
     save_user_memory,
 )
 from app.services.intent_classifier import classify_intent
+from app.services.usage_tracker import CHAIN_DIALOGUE, usage_context
 
 logger = logging.getLogger(__name__)
 
@@ -517,10 +518,12 @@ async def chat(
         light_summary=light_summary,
     )
     agent = agent or get_agent(use_rag=use_rag, llm=llm)
-    result = await agent.ainvoke(
-        {"messages": messages, "user": user},
-        config={"recursion_limit": _MAX_AGENT_STEPS},
-    )
+    # 批次7 C5 token 记账：标注链路/用户上下文（图内模型调用自动继承）
+    with usage_context(CHAIN_DIALOGUE, user):
+        result = await agent.ainvoke(
+            {"messages": messages, "user": user},
+            config={"recursion_limit": _MAX_AGENT_STEPS},
+        )
     all_messages: List[BaseMessage] = result.get("messages", [])
     answer = _extract_answer(all_messages)
     rag_context, rag_sources = main_chain._extract_rag_info(all_messages, rag_top_k)
@@ -618,36 +621,39 @@ async def chat_stream(
     rag_tool_messages: List[BaseMessage] = []  # search_knowledge 的 ToolMessage
     answer_parts: List[str] = []
 
-    async for chunk, _meta in agent.astream(
-        {"messages": messages, "user": user},
-        stream_mode="messages",
-        config={"recursion_limit": _MAX_AGENT_STEPS},
-    ):
-        if isinstance(chunk, AIMessageChunk):
-            tool_calls = chunk.tool_call_chunks or []
-            if tool_calls:
-                suppress_tokens = True
-                for call in tool_calls:
-                    call_id = call.get("id")
-                    name = call.get("name")
-                    if name and call_id and call_id not in seen_call_ids:
-                        seen_call_ids.add(call_id)
-                        yield {
-                            "type": "step",
-                            "tool": name,
-                            "label": _STEP_LABELS.get(
-                                name, f"正在调用工具 {name}…"
-                            ),
-                        }
-            text = chunk.content
-            if not suppress_tokens and isinstance(text, str) and text:
-                answer_parts.append(text)
-                yield {"type": "token", "text": text}
-        elif getattr(chunk, "type", "") == "tool":
-            # 工具执行结果（deepagents messages 流模式亦产出 ToolMessage）
-            suppress_tokens = False
-            if getattr(chunk, "name", "") == _KNOWLEDGE_TOOL_NAME:
-                rag_tool_messages.append(chunk)
+    # 批次7 C5 token 记账：标注链路/用户上下文（图内流式模型调用自动继承；
+    # 生成器跨 yield 持有上下文，流被客户端中断时 contextmanager 仍会复位）
+    with usage_context(CHAIN_DIALOGUE, user):
+        async for chunk, _meta in agent.astream(
+            {"messages": messages, "user": user},
+            stream_mode="messages",
+            config={"recursion_limit": _MAX_AGENT_STEPS},
+        ):
+            if isinstance(chunk, AIMessageChunk):
+                tool_calls = chunk.tool_call_chunks or []
+                if tool_calls:
+                    suppress_tokens = True
+                    for call in tool_calls:
+                        call_id = call.get("id")
+                        name = call.get("name")
+                        if name and call_id and call_id not in seen_call_ids:
+                            seen_call_ids.add(call_id)
+                            yield {
+                                "type": "step",
+                                "tool": name,
+                                "label": _STEP_LABELS.get(
+                                    name, f"正在调用工具 {name}…"
+                                ),
+                            }
+                text = chunk.content
+                if not suppress_tokens and isinstance(text, str) and text:
+                    answer_parts.append(text)
+                    yield {"type": "token", "text": text}
+            elif getattr(chunk, "type", "") == "tool":
+                # 工具执行结果（deepagents messages 流模式亦产出 ToolMessage）
+                suppress_tokens = False
+                if getattr(chunk, "name", "") == _KNOWLEDGE_TOOL_NAME:
+                    rag_tool_messages.append(chunk)
 
     # 3. 会话持久化 + 长期记忆钩子（done 前调度：客户端收到 done 即关闭
     #    连接也不丢上下文/不丢记忆提取；review F1 2026-08-08——yield done

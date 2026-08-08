@@ -43,6 +43,21 @@ def _pin_embedding_api_key_off(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _reset_usage_tracker():
+    """每个测试重置 LLM 用量记账队列/统计，避免跨测试污染。
+
+    批次7 C5：llm.py 工厂默认包装 UsageTrackingChatOpenAI（测试中大量
+    mock LLM 调用会入队），不重置会跨测试累计；关闭状态（shutdown 后）
+    由专项测试自行管理。
+    """
+    from app.services.usage_tracker import usage_tracker
+
+    usage_tracker.reset()
+    yield
+    usage_tracker.reset()
+
+
+@pytest.fixture(autouse=True)
 def _pin_openai_api_key_off(monkeypatch):
     """测试环境固定关闭运营分析 LLM key（与 CI 一致，不依赖本地 .env）。
 

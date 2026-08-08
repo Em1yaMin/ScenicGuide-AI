@@ -23,6 +23,7 @@ from app.routers import (
     memory_admin,
     rag,
     recommend,
+    usage,
     visitor,
 )
 from app.schemas.common import ErrorResponse
@@ -31,6 +32,7 @@ from app.tasks.analysis import analysis_loop
 from app.tasks.memory_cleanup import memory_cleanup_loop
 from app.tasks.polling import polling_loop
 from app.tasks.recommend_questions import recommend_loop
+from app.services.usage_tracker import usage_tracker
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,7 @@ _polling_task: Optional[asyncio.Task] = None
 _analysis_task: Optional[asyncio.Task] = None
 _recommend_task: Optional[asyncio.Task] = None
 _memory_cleanup_task: Optional[asyncio.Task] = None
+_usage_flush_task: Optional[asyncio.Task] = None
 
 
 def _handle_task_result(task: asyncio.Task) -> None:
@@ -52,6 +55,7 @@ def _handle_task_result(task: asyncio.Task) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _polling_task, _analysis_task, _recommend_task, _memory_cleanup_task
+    global _usage_flush_task
 
     # Phase 0: 统一日志配置（结构化格式，见 app/core/logging_config.py）——在任务启动前完成
     configure_logging()
@@ -78,6 +82,9 @@ async def lifespan(app: FastAPI):
     # 短期记忆过期清理（启动立即执行一次 + 定期，见 app/tasks/memory_cleanup.py）
     _memory_cleanup_task = asyncio.create_task(memory_cleanup_loop())
     _memory_cleanup_task.add_done_callback(_handle_task_result)
+    # 批次7 C5：LLM 用量记账后台 flush（定时批量落库，关闭时兜底 flush）
+    _usage_flush_task = asyncio.create_task(usage_tracker.flush_loop())
+    _usage_flush_task.add_done_callback(_handle_task_result)
 
     yield
 
@@ -93,6 +100,13 @@ async def lifespan(app: FastAPI):
     _memory_cleanup_task.cancel()
     with suppress(asyncio.CancelledError):
         await _memory_cleanup_task
+    # 用量记账关闭：先 cancel flush 循环，再兜底 flush 剩余队列（防丢账）
+    if _usage_flush_task is not None:
+        _usage_flush_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await _usage_flush_task
+        _usage_flush_task = None
+    await usage_tracker.shutdown()
     await engine.dispose()
 
 
@@ -129,6 +143,7 @@ app.include_router(memory_admin.router)
 app.include_router(admin_agent.router)
 app.include_router(home.router)
 app.include_router(rag.router)
+app.include_router(usage.router)
 
 
 @app.get("/api/v1/health", response_model=HealthResponse)

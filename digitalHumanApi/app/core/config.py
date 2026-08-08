@@ -257,6 +257,32 @@ class Settings(BaseModel):
     # 注入的记忆最大时效（天）：超过视为陈旧事实不注入（防过时信息误导）
     MEMORY_MAX_AGE_DAYS: int = int(os.environ.get("MEMORY_MAX_AGE_DAYS", "180"))
 
+    # ── LLM token 记账（批次7 C5，见 app/services/usage_tracker.py 与 doc/usage-tracking.md） ──
+    # 总开关：关闭后 llm.py 工厂不再包装埋点模型，所有调用零额外开销
+    USAGE_TRACKING_ENABLED: bool = (
+        os.environ.get("USAGE_TRACKING_ENABLED", "true").lower() == "true"
+    )
+    # 后台批量写库周期（秒）：进程内队列由 lifespan 注册的 flush 循环定时落库，
+    # 避免每次调用同步写库拖慢响应；关闭应用时兜底 flush 一次
+    USAGE_FLUSH_INTERVAL_SECONDS: int = int(
+        os.environ.get("USAGE_FLUSH_INTERVAL_SECONDS", "5")
+    )
+    # 进程内队列上限：超出后立即兜底落库（不再排队，防内存膨胀）
+    USAGE_QUEUE_MAX_SIZE: int = int(
+        os.environ.get("USAGE_QUEUE_MAX_SIZE", "2000")
+    )
+    # 流式调用是否请求 usage（stream_options.include_usage）：
+    # opencode-go / DeepSeek 官方均支持（实测 opencode-go 返回流式 usage）；
+    # 若部署到不兼容的网关可关闭（关闭后流式调用无 token 明细，仅记耗时/次数）
+    USAGE_STREAM_USAGE: bool = (
+        os.environ.get("USAGE_STREAM_USAGE", "true").lower() == "true"
+    )
+    # 模型单价表（可选，订阅制可留空只记 token 不记钱）：
+    # 格式 "模型:每百万输入tokens价,每百万输出tokens价"，多项分号分隔，如
+    # "deepseek-v4-flash:1.0,2.0;deepseek-chat:1.0,2.0"（单位：元）
+    MODEL_PRICES: str = os.environ.get("MODEL_PRICES", "")
+
+
     @model_validator(mode="after")
     def _validate_cors_config(self) -> "Settings":
         """CORS 白名单校验（批次6 C3）：credentials 模式禁止与通配符 * 混用。

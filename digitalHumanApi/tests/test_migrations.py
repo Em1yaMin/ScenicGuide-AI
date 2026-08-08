@@ -31,6 +31,7 @@ BUSINESS_TABLES = {
     "dialogues",
     "evaluations",
     "knowledge_base",
+    "llm_usage",
     "stats",
     "users",
     "visitors",
@@ -227,15 +228,54 @@ def test_announcements_migration_upgrade_downgrade(tmp_path):
     finally:
         conn.close()
 
-    # 回退到基线：仅删除 announcements，其余表保留
+    # 回退到基线：仅删除 announcements（llm_usage 在基线之后引入，同被回退），
+    # 其余早期表保留
     command.downgrade(cfg, "04436fda61c5")
     tables = _table_sql(db)["tables"]
     assert "announcements" not in tables
-    assert set(tables) == BUSINESS_TABLES - {"announcements"}
+    assert "llm_usage" not in tables
+    assert set(tables) == BUSINESS_TABLES - {"announcements", "llm_usage"}
 
     # 再次升级可重建
     command.upgrade(cfg, "head")
     assert "announcements" in _table_sql(db)["tables"]
+    assert _current_revision(db) == _head_revision(cfg)
+
+
+# ---------- 批次7 C5：llm_usage 表迁移 ----------
+
+def test_llm_usage_migration_upgrade_downgrade(tmp_path):
+    """llm_usage 表迁移：upgrade 建表（含索引）→ downgrade 回退删表，其余表不受影响。"""
+    db = tmp_path / "usage.db"
+    cfg = _make_config(db)
+    command.upgrade(cfg, "head")
+
+    assert "llm_usage" in _table_sql(db)["tables"]
+    assert "ix_llm_usage_created_at" in _table_sql(db)["indexes"]
+    assert "ix_llm_usage_model" in _table_sql(db)["indexes"]
+    assert "ix_llm_usage_chain" in _table_sql(db)["indexes"]
+    # 新表可正常读写
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "INSERT INTO llm_usage (model, input_tokens, output_tokens, total_tokens, "
+            "duration_ms, chain, created_at) "
+            "VALUES ('m', 10, 20, 30, 100, '对话', '2026-08-01 00:00:00')"
+        )
+        conn.commit()
+        assert conn.execute("SELECT COUNT(*) FROM llm_usage").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+    # 回退到公告表版本：仅删除 llm_usage，其余表保留
+    command.downgrade(cfg, "e06ede5acb5a")
+    tables = _table_sql(db)["tables"]
+    assert "llm_usage" not in tables
+    assert set(tables) == BUSINESS_TABLES - {"llm_usage"}
+
+    # 再次升级可重建
+    command.upgrade(cfg, "head")
+    assert "llm_usage" in _table_sql(db)["tables"]
     assert _current_revision(db) == _head_revision(cfg)
 
 

@@ -72,6 +72,7 @@ from app.core.llm import get_chat_llm
 from app.services import memory_service, planner_agent, recommend_agent
 from app.services.intent_classifier import classify_intent
 from app.services.rag_service import build_rag_context
+from app.services.usage_tracker import CHAIN_DIALOGUE, usage_context
 
 logger = logging.getLogger(__name__)
 
@@ -724,10 +725,12 @@ async def chat(
     #    （双模式关闭 / 分类简单 / 规划路径失败时走这里，行为与阶段2 完全一致）
     if answer is None:
         agent = _get_agent(use_rag=use_rag)
-        result = await agent.ainvoke(
-            {"messages": messages},
-            config={"recursion_limit": _MAX_AGENT_STEPS},
-        )
+        # 批次7 C5 token 记账：标注链路/用户（弃用链路与主链路同维度）
+        with usage_context(CHAIN_DIALOGUE, user):
+            result = await agent.ainvoke(
+                {"messages": messages},
+                config={"recursion_limit": _MAX_AGENT_STEPS},
+            )
         all_messages: List[BaseMessage] = result.get("messages", [])
         answer = ""
 
@@ -850,36 +853,38 @@ async def chat_stream(
     rag_tool_messages: List[BaseMessage] = []  # search_knowledge 的 ToolMessage
     answer_parts: List[str] = []
 
-    async for chunk, _meta in agent.astream(
-        {"messages": messages},
-        stream_mode="messages",
-        config={"recursion_limit": _MAX_AGENT_STEPS},
-    ):
-        if isinstance(chunk, AIMessageChunk):
-            tool_calls = chunk.tool_call_chunks or []
-            if tool_calls:
-                suppress_tokens = True
-                for call in tool_calls:
-                    call_id = call.get("id")
-                    name = call.get("name")
-                    if name and call_id and call_id not in seen_call_ids:
-                        seen_call_ids.add(call_id)
-                        yield {
-                            "type": "step",
-                            "tool": name,
-                            "label": _STEP_LABELS.get(
-                                name, f"正在调用工具 {name}…"
-                            ),
-                        }
-            text = chunk.content
-            if not suppress_tokens and isinstance(text, str) and text:
-                answer_parts.append(text)
-                yield {"type": "token", "text": text}
-        elif getattr(chunk, "type", "") == "tool":
-            # 工具执行结果（langgraph 1.2 的 messages 流模式亦产出 ToolMessage）
-            suppress_tokens = False
-            if getattr(chunk, "name", "") == _KNOWLEDGE_TOOL_NAME:
-                rag_tool_messages.append(chunk)
+    # 批次7 C5 token 记账：标注链路/用户（弃用链路与主链路同维度）
+    with usage_context(CHAIN_DIALOGUE, user):
+        async for chunk, _meta in agent.astream(
+            {"messages": messages},
+            stream_mode="messages",
+            config={"recursion_limit": _MAX_AGENT_STEPS},
+        ):
+            if isinstance(chunk, AIMessageChunk):
+                tool_calls = chunk.tool_call_chunks or []
+                if tool_calls:
+                    suppress_tokens = True
+                    for call in tool_calls:
+                        call_id = call.get("id")
+                        name = call.get("name")
+                        if name and call_id and call_id not in seen_call_ids:
+                            seen_call_ids.add(call_id)
+                            yield {
+                                "type": "step",
+                                "tool": name,
+                                "label": _STEP_LABELS.get(
+                                    name, f"正在调用工具 {name}…"
+                                ),
+                            }
+                text = chunk.content
+                if not suppress_tokens and isinstance(text, str) and text:
+                    answer_parts.append(text)
+                    yield {"type": "token", "text": text}
+            elif getattr(chunk, "type", "") == "tool":
+                # 工具执行结果（langgraph 1.2 的 messages 流模式亦产出 ToolMessage）
+                suppress_tokens = False
+                if getattr(chunk, "name", "") == _KNOWLEDGE_TOOL_NAME:
+                    rag_tool_messages.append(chunk)
 
     # 3. 追加历史（进程内 + SQLite 双写，短期记忆持久化）
     answer = "".join(answer_parts)
