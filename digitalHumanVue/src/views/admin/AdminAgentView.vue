@@ -51,6 +51,7 @@ interface ChatMessage {
   steps: AgentStep[] // agent 工具调用步骤（用户消息恒为空）
   pending: PendingConfirm | null // 解析出的待确认操作（agent 消息）
   cancelled: boolean // 用户已点击「取消」（待确认项本地失效）
+  isConfirm: boolean // 用户消息为二次确认注入（「确认执行 operation_id: …」）
   error: string | null // 流式链路错误（error 事件 / fetch 异常）
 }
 
@@ -113,6 +114,8 @@ async function send(text?: string): Promise<void> {
   const content = (text ?? input.value).trim()
   if (!content || isStreaming.value) return
   if (text === undefined) input.value = ''
+  // 二次确认注入标记：点击「确认执行」自动发送的消息（供回执处理区分）
+  const isConfirm = /^确认执行 operation_id:/i.test(content)
   messages.value.push({
     id: nextId++,
     role: 'user',
@@ -121,9 +124,10 @@ async function send(text?: string): Promise<void> {
     steps: [],
     pending: null,
     cancelled: false,
+    isConfirm,
     error: null,
   })
-  // agent 占位消息：流式事件逐步填充
+  // agent 占位消息：流式事件逐步填充（isConfirm 仅用户消息有意义，恒为 false）
   const assistantMsg: ChatMessage = {
     id: nextId++,
     role: 'assistant',
@@ -132,6 +136,7 @@ async function send(text?: string): Promise<void> {
     steps: [],
     pending: null,
     cancelled: false,
+    isConfirm: false,
     error: null,
   }
   messages.value.push(assistantMsg)
@@ -153,8 +158,15 @@ async function send(text?: string): Promise<void> {
     onDone: (event) => {
       conversationId.value = event.conversation_id
       assistantMsg.streaming = false
-      // 回答完成后解析待确认操作（供二次确认按钮渲染）
-      assistantMsg.pending = extractPending(assistantMsg.content)
+      // 回答完成后解析待确认操作（供二次确认按钮渲染）。
+      // 上一条用户消息为二次确认注入时，本条回执只是确认执行结果
+      // （agent 常回显 operation_id，避免误解析出虚假的确认框）
+      const prevUser = [...messages.value]
+        .reverse()
+        .find((m) => m.role === 'user')
+      assistantMsg.pending = prevUser?.isConfirm
+        ? null
+        : extractPending(assistantMsg.content)
       void scrollToBottom()
     },
     onError: (event) => {
