@@ -72,7 +72,7 @@ data: {"type":"done","conversation_id":"48947535-…"}
 | 1 | RAG 索引时 Minimax Embedding API 返回 `响应条数不符: 请求 32 条，返回 0 条`，自动降级 TF-IDF | `MinimaxEmbeddings` 按 **OpenAI 兼容格式**发请求（`{"input"}`，解析 `data` 数组）；实际 `embo-01` 走 **Minimax 原生格式**（`{"texts", "type"}`，响应 `vectors`；curl 实测 2013 missing required parameter） | `app/core/embedding.py`：请求改 `texts`+`type`（`embed_documents`→`db`、`embed_query`→`query`），响应解析 `vectors` 为主、兼容 `data` 格式 | `tests/test_embedding.py` 更新通过（18 passed）；真实索引 `embedding_backend=minimax degraded=false`，检索 0.958 |
 | 2 | ADH LangChainAgent 流式解析不到回答（冒烟 FAIL，0 chunks） | 引擎按旧契约解析 `event: message/answer`，本后端 T3 实际发 `type: token/step/done` | `live2d-frontend/digitalHuman/agent/core/langchainAgent.py`：改解析 `type` 字段（token/step/done/error），兼容旧形态；`done` 事件取会话 ID | 冒烟复跑 **3/3 通过**（440/509 chunks） |
 | 3 | 故障回落时 ADH 引擎抛错中断，丢掉 Dify 兜底输出 | 引擎对任何 `error` 事件都 `raise`；实际 `fallback=true` 时后端**继续**流出 Dify 回答 | 引擎对 `fallback=true` 仅告警并继续消费，`fallback=false` 才抛错 | 冒烟（LLM 不可达）**3/3 通过**，Dify 兜底回答完整输出 |
-| 4 | 服务重启后首次 RAG 检索阻塞约 2 分钟（3769 片段全量重向量化） | `SimpleVectorStore._load` 每次启动从 `_docs.json` 重算向量（向量不落盘） | 暂不修复（阶段2 优化项）：运行期已缓存、链路不受影响；已在 AGENTS.md 记录现象 | 二次检索 11s 返回 |
+| 4 | 服务重启后首次 RAG 检索阻塞约 2 分钟（3769 片段全量重向量化） | `SimpleVectorStore._load` 每次启动从 `_docs.json` 重算向量（向量不落盘） | 当时暂不修复（阶段2 优化项）：运行期已缓存、链路不受影响；**已由批次3 C4 向量落盘解决**（sidecar 缓存命中跳过启动重算，见 AGENTS.md「本地 RAG 知识库」） | 二次检索 11s 返回 |
 
 ## 4. 复现方法
 
@@ -94,4 +94,4 @@ cd live2d-frontend && PYTHONPATH=. python scripts/smoke_langchain_agent.py --url
 
 - 阶段1 双轨（LangChain 主链路 + Dify 兜底）端到端验证通过：新链路全流程 OK、故障自动回落 OK、ADH 接入 OK、前端流式渲染 OK
 - 联调暴露 3 个真实缺陷（Embedding API 格式、ADH SSE 契约、回落错误处理）已修复并有测试/复验
-- 遗留优化项（启动重向量化耗时）记录于 AGENTS.md，不影响演示
+- 遗留优化项（启动重向量化耗时）当时记录于 AGENTS.md、不影响演示；已由批次3 C4 向量落盘解决（sidecar 缓存命中跳过启动重算）
