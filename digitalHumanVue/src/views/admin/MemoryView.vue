@@ -52,6 +52,9 @@ const adminToken = ref(localStorage.getItem(TOKEN_KEY) ?? '')
 const tokenInput = ref('')
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
+// 请求序号（latest-wins：防防抖/分页/刷新并发时旧响应乱序覆盖新结果）
+let usersRequestSeq = 0
+let memoriesRequestSeq = 0
 
 // ── Computed ──
 const userTotalPages = computed(() => Math.ceil(userTotal.value / USER_PAGE_SIZE))
@@ -69,6 +72,7 @@ watch(keyword, (value) => {
 
 // ── 用户列表 ──
 async function fetchUsers() {
+  const seq = ++usersRequestSeq
   isLoadingUsers.value = true
   userError.value = null
   try {
@@ -77,6 +81,7 @@ async function fetchUsers() {
       page: userPage.value,
       page_size: USER_PAGE_SIZE,
     })
+    if (seq !== usersRequestSeq) return
     users.value = data.items
     userTotal.value = data.total
     // 列表刷新后校正选中用户（可能已不在当前页/被过滤）
@@ -91,9 +96,10 @@ async function fetchUsers() {
       }
     }
   } catch (e) {
+    if (seq !== usersRequestSeq) return
     userError.value = e instanceof Error ? e.message : '用户列表加载失败'
   } finally {
-    isLoadingUsers.value = false
+    if (seq === usersRequestSeq) isLoadingUsers.value = false
   }
 }
 
@@ -104,16 +110,19 @@ function selectUser(user: AdminUserItem) {
 }
 
 async function loadMemories(user: AdminUserItem) {
+  const seq = ++memoriesRequestSeq
   isLoadingMemories.value = true
   memoryError.value = null
   try {
     const data = await fetchUserMemories(String(user.id))
+    if (seq !== memoriesRequestSeq) return
     memories.value = data.items
   } catch (e) {
+    if (seq !== memoriesRequestSeq) return
     memoryError.value = e instanceof Error ? e.message : '记忆列表加载失败'
     memories.value = []
   } finally {
-    isLoadingMemories.value = false
+    if (seq === memoriesRequestSeq) isLoadingMemories.value = false
   }
 }
 
