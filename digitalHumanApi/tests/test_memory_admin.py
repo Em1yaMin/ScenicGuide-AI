@@ -9,6 +9,8 @@
 6. 删除记忆：跨用户可用（管理员例外）、404
 7. legacy 条目派生 id：列表暴露 `legacy:{归一化 content}` 且可按其删除
 8. 审计日志：删除/修改/新增记录 operator=admin
+9. 空白/带空白输入：纯空白 content 422 拒绝（修改先删后建在任何删除前校验失败，
+   不丢数据）；user 首尾空白归一化（" 1 " → "1"，列表/计数可见非孤儿）
 """
 import logging
 import time
@@ -278,6 +280,47 @@ async def test_create_memory_unknown_user_404(client: AsyncClient, db_session):
         assert resp.status_code == 404, f"user={user} 应 404"
 
 
+@pytest.mark.asyncio
+async def test_list_memories_user_whitespace_normalized(client: AsyncClient, db_session):
+    """按用户查看：user 带首尾空白时归一化（与裸 id 同效果）。"""
+    uid = await _seed_user(db_session, "alice")
+    await _seed_memory(str(uid), "喜欢拍照")
+    resp = await client.get(f"{API}", params={"user": f" {uid} "}, headers=_auth())
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["user"] == str(uid)  # 参数已归一化，响应回显归一化值
+    assert data["total"] == 1
+
+
+@pytest.mark.asyncio
+async def test_create_memory_blank_content_rejected(client: AsyncClient, db_session):
+    """纯空白内容（" "）在 schema 层 422 拒绝（而非误导性 400）。"""
+    uid = await _seed_user(db_session, "alice")
+    resp = await client.post(
+        f"{API}", json={"user": str(uid), "content": "   "}, headers=_auth()
+    )
+    assert resp.status_code == 422
+    # 未产生任何条目
+    assert await memory_service.count_user_memory(str(uid)) == 0
+
+
+@pytest.mark.asyncio
+async def test_create_memory_user_normalized(client: AsyncClient, db_session):
+    """user 带首尾空白归一化后落库（" 1 " → "1"），列表/计数可见非孤儿条目。"""
+    uid = await _seed_user(db_session, "alice")
+    resp = await client.post(
+        f"{API}", json={"user": f" {uid} ", "content": "喜欢拍照"}, headers=_auth()
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["user"] == str(uid)
+    # 按裸 id 查询与用户列表计数均可见（未产生 user=" 1 " 孤儿条目）
+    listed = (await client.get(f"{API}", params={"user": str(uid)}, headers=_auth())).json()
+    assert listed["total"] == 1
+    users = (await client.get(f"{API}/users", headers=_auth())).json()
+    assert users["items"][0]["memory_count"] == 1
+
+
 # ── 修改记忆（删除后重建） ───────────────────────────────────────────────
 
 
@@ -361,6 +404,47 @@ async def test_update_memory_validation_and_404(client: AsyncClient, db_session)
         f"{API}/no-such-id", json={"content": "新内容"}, headers=_auth()
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_update_memory_blank_content_no_data_loss(client: AsyncClient, db_session):
+    """纯空白内容更新 → 422 且原记忆不被删除（先删后建在任何删除前校验失败）。"""
+    uid = await _seed_user(db_session, "alice")
+    created = (
+        await client.post(
+            f"{API}", json={"user": str(uid), "content": "喜欢拍照"}, headers=_auth()
+        )
+    ).json()
+
+    resp = await client.put(
+        f"{API}/{created['memory_id']}", json={"content": "   "}, headers=_auth()
+    )
+    assert resp.status_code == 422
+    # 原记忆完好、旧 id 仍有效
+    listed = (await client.get(f"{API}", params={"user": str(uid)}, headers=_auth())).json()
+    assert listed["total"] == 1
+    assert listed["items"][0]["content"] == "喜欢拍照"
+    resp = await client.delete(f"{API}/{created['memory_id']}", headers=_auth())
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_update_memory_content_stripped(client: AsyncClient, db_session):
+    """新内容带首尾空白：保存前归一化（" 喜欢摄影 " → "喜欢摄影"）。"""
+    uid = await _seed_user(db_session, "alice")
+    created = (
+        await client.post(
+            f"{API}", json={"user": str(uid), "content": "喜欢拍照"}, headers=_auth()
+        )
+    ).json()
+
+    resp = await client.put(
+        f"{API}/{created['memory_id']}", json={"content": "  喜欢摄影  "}, headers=_auth()
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["content"] == "喜欢摄影"
+    assert data["memory_id"] != created["memory_id"]
 
 
 # ── 删除记忆（跨用户管理员例外） ─────────────────────────────────────────

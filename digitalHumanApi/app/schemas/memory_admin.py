@@ -3,9 +3,9 @@
 契约权威文档：doc/memory-admin-api.md；变更 schema 必须同步该文档。
 """
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 # 事实类型取值（preference/fact/habit），与记忆 schema 契约（doc/long-term-memory.md
 # 与 memory_service.FACT_TYPES）保持一致；Pydantic Literal 校验非法值返回 422
@@ -13,6 +13,17 @@ MemoryFactType = Literal["preference", "fact", "habit"]
 
 # 记忆内容长度上限：与 memory_service._MEMORY_MAX_CONTENT_LEN 契约一致（≤200 字符）
 MEMORY_CONTENT_MAX_LEN = 200
+
+# 输入统一约束：先 strip 再校验长度——纯空白内容（" "）在 schema 层 422 拒绝、
+# user 保存前归一化（" 1 " → "1"）。保证修改「先删后建」流程在任何删除前完成
+# 校验，杜绝空白内容先删后失败的数据丢失与带空白 user 的孤儿条目。
+MemoryContent = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=MEMORY_CONTENT_MAX_LEN),
+]
+MemoryUser = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=64)
+]
 
 
 class AdminMemoryItem(BaseModel):
@@ -41,22 +52,16 @@ class AdminMemoryListResponse(BaseModel):
 class AdminMemoryCreateRequest(BaseModel):
     """管理端新增记忆请求（管理员例外：可为任意注册用户新增）。"""
 
-    user: str = Field(
-        ..., min_length=1, max_length=64, description="目标注册用户 id（字符串形式）"
-    )
+    user: MemoryUser = Field(..., description="目标注册用户 id（字符串形式，首尾空白自动去除）")
     fact_type: MemoryFactType = "fact"
-    content: str = Field(
-        ..., min_length=1, max_length=MEMORY_CONTENT_MAX_LEN, description="记忆句（1-200 字符）"
-    )
+    content: MemoryContent = Field(..., description="记忆句（1-200 字符，纯空白 422）")
 
 
 class AdminMemoryUpdateRequest(BaseModel):
     """管理端修改记忆请求（部分更新：content 与 fact_type 至少提供其一）。"""
 
     fact_type: Optional[MemoryFactType] = None
-    content: Optional[str] = Field(
-        None, min_length=1, max_length=MEMORY_CONTENT_MAX_LEN, description="记忆句（1-200 字符）"
-    )
+    content: Optional[MemoryContent] = Field(None, description="记忆句（1-200 字符，纯空白 422）")
 
     @model_validator(mode="after")
     def _at_least_one_field(self) -> "AdminMemoryUpdateRequest":

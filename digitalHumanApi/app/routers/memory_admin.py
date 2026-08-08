@@ -14,7 +14,7 @@ find_memory_by_id/count_memories_per_user/memory_id_of），不重复实现存�
 """
 import logging
 import uuid
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
@@ -31,6 +31,7 @@ from app.schemas.memory_admin import (
     AdminMemoryUpdateRequest,
     AdminUserItem,
     AdminUserListResponse,
+    MemoryUser,
 )
 from app.services import memory_service
 
@@ -124,9 +125,9 @@ async def list_users(
 
 @router.get("", response_model=AdminMemoryListResponse)
 async def list_user_memories(
-    user: str = Query(
-        ..., min_length=1, max_length=64, description="目标用户标识（注册用户 id / 游客标识）"
-    ),
+    user: Annotated[
+        MemoryUser, Query(..., description="目标用户标识（注册用户 id / 游客标识）")
+    ],
     _: str = Depends(verify_admin_token),
 ) -> AdminMemoryListResponse:
     """按用户查看记忆列表（含 memory_id/fact_type/content/timestamp）。

@@ -193,8 +193,9 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 - `app/routers/memory_admin.py`（前缀 `/api/admin/memories`，契约 `doc/memory-admin-api.md`）：`GET /users`（注册用户列表 id/username/nickname/**memory_count**/last_login_at，keyword/page/page_size）、`GET ?user={id}`（按用户列记忆，含 memory_id/fact_type/content/source_conversation_id/timestamp）、`POST`（新增，user 须为注册用户，游客 400/未注册 404）、`PUT /{memory_id}`（修改=**删除后重建**：保留 user/source_conversation_id，timestamp 刷新、memory_id 更新为新建 uuid，content/fact_type 部分更新至少其一）、`DELETE /{memory_id}`（跨用户按 id 删除，uuid 与 legacy 派生 id 均可）
 - **审计（日志先行）**：删除/修改/新增记 `app.routers.memory_admin` logger（`operator=admin` + 目标 user/memory_id/内容摘要截断 50 字符）；DB 审计表未引入（需 Alembic 迁移，当前频次低日志可追溯）
+- **输入校验（schema 层先 strip）**：`content`/`user` 纯空白 422、首尾空白自动归一化（`" 1 "` → `"1"`，查询参数同规）；保证修改「先删后建」在任何删除前完成校验（防空白内容先删后失败的数据丢失与带空白 user 孤儿条目）
 - **memory_service 新增公开接口**（复用不重实现）：`memory_id_of(entry)`（对外 memory_id 单一派生规则：uuid，旧条目 `legacy:{归一化 content}`，deepagents `_entry_to_json` 同规则）、`find_memory_by_id(memory_id)`（跨用户查找，含 legacy 兼容）、`count_memories_per_user()`（单次持锁批量统计）；`_save_user_memory_sync` 透传传入 memory_id（管理端预生成 uuid 落库，既有调用方行为不变）；`_delete_user_memory_sync` 匹配改为 `_doc_matches_memory_id` 统一走 memory_id_of（原 legacy 匹配逻辑等价）
-- 测试：`tests/test_memory_admin.py`（16：鉴权 401 全端点/用户列表含 memory_count/按用户列记忆/游客空/legacy 派生 id 删除/新增校验 422/游客 400/未注册 404/修改部分更新/修改后旧 id 失效/跨用户删除/404/审计日志）
+- 测试：`tests/test_memory_admin.py`（21：鉴权 401 全端点/用户列表含 memory_count/按用户列记忆/游客空/legacy 派生 id 删除/新增校验 422/游客 400/未注册 404/空白内容 422 拒绝（含修改先删后建不丢数据）/user 空白归一化/修改部分更新/修改后旧 id 失效/跨用户删除/404/审计日志）
 
 ## AI 运营分析（LangChain + OpenAI，可回退）
 
