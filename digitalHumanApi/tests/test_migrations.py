@@ -5,7 +5,8 @@
 2. 遗留库（create_all 建成、无 alembic_version）stamp head → upgrade 为 no-op、数据不丢；
 3. 已版本化库重复 upgrade head → 幂等 no-op。
 
-另验证 run_migrations() 程序化入口对三种库状态的选择正确。
+另覆盖遗留库缺表场景（仅部分业务表的遗留库，run_migrations 在 stamp 前幂等 create_all 补齐缺失表、
+数据不丢）与 run_migrations() 程序化入口对三种库状态的选择正确。
 测试全部使用临时文件 SQLite，不触碰真实 digital_human.db。
 """
 import asyncio
@@ -99,6 +100,27 @@ async def _create_orm_schema(db_path: Path, seed: bool = False) -> None:
                 )
                 await conn.execute(
                     text("INSERT INTO users (username, password_hash, created_at) VALUES ('tester', 'x', '2026-01-01 00:00:00')")
+                )
+    finally:
+        await engine.dispose()
+
+
+async def _create_partial_legacy_schema(db_path: Path, seed: bool = False) -> None:
+    """模拟历史增量建表：仅建早期引入的 visitors/dialogues，其余业务表缺失。"""
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+    try:
+        async with engine.begin() as conn:
+            for name in ("visitors", "dialogues"):
+                await conn.run_sync(
+                    lambda sync_conn, n=name: Base.metadata.tables[n].create(sync_conn)
+                )
+        if seed:
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text("INSERT INTO visitors (id, first_visit, last_visit) VALUES ('v1', '2026-01-01 00:00:00', '2026-01-01 00:00:00')")
+                )
+                await conn.execute(
+                    text("INSERT INTO visitors (id, first_visit, last_visit) VALUES ('v2', '2026-01-01 00:00:00', '2026-01-01 00:00:00')")
                 )
     finally:
         await engine.dispose()
@@ -238,6 +260,35 @@ async def test_run_migrations_legacy_db_stamps(monkeypatch, tmp_path):
         conn = sqlite3.connect(db)
         try:
             assert conn.execute("SELECT COUNT(*) FROM visitors").fetchone()[0] == 2
+        finally:
+            conn.close()
+    finally:
+        await migrations_mod.engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_run_migrations_legacy_db_missing_tables_filled(monkeypatch, tmp_path):
+    """遗留库缺表场景：仅部分业务表的遗留库，stamp 前 create_all 补齐缺失表、数据不丢。"""
+    import app.core.migrations as migrations_mod
+
+    db = _run_migrations_with_db(monkeypatch, tmp_path, "legacy")
+    await _create_partial_legacy_schema(db, seed=True)
+    # 缺表遗留库：无 alembic_version，且 knowledge_base/users 等表缺失
+    assert _current_revision(db) is None
+    assert "users" not in _table_sql(db)["tables"]
+
+    from app.core.migrations import run_migrations
+
+    try:
+        await run_migrations()
+        # 缺失业务表被幂等 create_all 补建，版本表指向 head
+        assert set(_table_sql(db)["tables"]) == BUSINESS_TABLES
+        assert _current_revision(db) == _head_revision(_make_config(db))
+        conn = sqlite3.connect(db)
+        try:
+            # 既有数据不丢，补建表可正常读写
+            assert conn.execute("SELECT COUNT(*) FROM visitors").fetchone()[0] == 2
+            assert conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
         finally:
             conn.close()
     finally:

@@ -12,8 +12,11 @@
   | 库状态 | 动作 | 说明 |
   |--------|------|------|
   | 空库（无任何表） | `upgrade head` | 从零建齐全部表 |
-  | 遗留库（有业务表、无 `alembic_version`） | `stamp head` | 基线化当前版本，**不执行任何 DDL、不丢数据** |
+  | 遗留库（有业务表、无 `alembic_version`） | 幂等 `create_all` → `stamp head` | 先补建历史增量引入的缺失业务表，再基线化当前版本，**不丢数据** |
   | 已版本化库（有 `alembic_version`） | `upgrade head` | 应用待执行迁移 |
+- 遗留库补表原因：业务表历史上增量引入（knowledge_base 在 #3、users 在 #14 才加入），直接 stamp
+  会把缺表状态永久钉死在当前版本（后续 upgrade 为 no-op），因此 stamp 前先执行幂等 `create_all`
+  （IF NOT EXISTS 语义）补齐缺失业务表。
 - 迁移失败自动回退 `create_all`（幂等 IF NOT EXISTS），不阻断启动（仅告警日志）。
 - 独立 CLI（`app/tasks/backfill.py`）同样调用 `run_migrations()`，与 lifespan 行为一致。
 - 初始迁移（`04436fda61c5`）由 autogenerate 生成并复核：**其 DDL 产物与 ORM create_all
@@ -54,7 +57,7 @@ alembic history               # 迁移历史
 
 ## 三、架构说明（迁移机制）
 
-- `alembic.ini` — 配置入口；`script_location = migrations`；`sqlalchemy.url` 留空，
+- `alembic.ini` — 配置入口；`script_location = %(here)s/migrations`（`%(here)s` 为 ini 所在目录绝对路径，避免相对 CWD 解析）；`sqlalchemy.url` 留空，
   URL 解析优先级：`alembic -x db_url=...` 命令行参数 > ini 的 `sqlalchemy.url`（测试程序化
   `Config.set_main_option` 入口）> 应用配置 `settings.DATABASE_URL`（.env / 环境变量）。
 - `migrations/env.py` — **async 模板**（项目是 SQLAlchemy 2.0 async engine：
@@ -63,11 +66,11 @@ alembic history               # 迁移历史
   （CLI 直跑不需要 `PYTHONPATH`）。
 - `migrations/versions/` — 版本文件（`04436fda61c5_初始_schema_基线.py` 为初始基线，
   `down_revision = None`）。
-- `app/core/migrations.py` — 程序化入口 `run_migrations()`（三态分流 + 线程池执行，
-  因 env.py 内部 `asyncio.run` 不能在运行中事件循环里直接调用）。
+- `app/core/migrations.py` — 程序化入口 `run_migrations()`（三态分流：空库 upgrade / 遗留库先幂等
+  create_all 补缺表再 stamp / 版本化库 upgrade；线程池执行，因 env.py 内部 `asyncio.run` 不能在运行中事件循环里直接调用）。
 - 测试 `tests/test_migrations.py` — 空库建齐 / DDL 与 ORM 等价 / 遗留库 stamp 后
-  upgrade no-op 不丢数据 / 版本化库幂等 / `run_migrations` 三态路径（全部用临时文件库，
-  不触碰真实 digital_human.db）。
+  upgrade no-op 不丢数据 / **遗留库缺表场景（仅部分表的遗留库 stamp 前 create_all 补齐缺失表、数据不丢）** /
+  版本化库幂等 / `run_migrations` 三态路径（全部用临时文件库，不触碰真实 digital_human.db）。
 
 ## 四、部署与升级（Docker）
 

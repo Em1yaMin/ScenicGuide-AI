@@ -31,8 +31,9 @@ from app.models import Base  # noqa: E402,F401
 
 config = context.config
 
-# 有 ini 文件时应用其日志配置（程序化 Config 无 ini，跳过）
-if config.config_file_name is not None:
+# 有 ini 文件时应用其日志配置（程序化 Config 跳过：进程内迁移不得重配日志，
+# 避免 fileConfig 禁用应用既有 logger，见 app/core/migrations.py::_alembic_config）
+if config.config_file_name is not None and not config.attributes.get("programmatic"):
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
