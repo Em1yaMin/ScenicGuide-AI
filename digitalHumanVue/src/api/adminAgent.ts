@@ -53,7 +53,10 @@ export async function chatWithAdminAgent(
   return fetchWithCodeEnvelope<AdminAgentChatResponse>(API_ADMIN_AGENT_CHAT, {
     method: 'POST',
     headers: adminHeaders(),
-    body: JSON.stringify({ query, conversation_id: conversationId } satisfies AdminAgentChatPayload),
+    body: JSON.stringify({
+      query,
+      conversation_id: conversationId,
+    } satisfies AdminAgentChatPayload),
     timeoutMs: 0,
   })
 }

@@ -161,12 +161,8 @@ async function send(text?: string): Promise<void> {
       // 回答完成后解析待确认操作（供二次确认按钮渲染）。
       // 上一条用户消息为二次确认注入时，本条回执只是确认执行结果
       // （agent 常回显 operation_id，避免误解析出虚假的确认框）
-      const prevUser = [...messages.value]
-        .reverse()
-        .find((m) => m.role === 'user')
-      assistantMsg.pending = prevUser?.isConfirm
-        ? null
-        : extractPending(assistantMsg.content)
+      const prevUser = [...messages.value].reverse().find((m) => m.role === 'user')
+      assistantMsg.pending = prevUser?.isConfirm ? null : extractPending(assistantMsg.content)
       void scrollToBottom()
     },
     onError: (event) => {
@@ -177,10 +173,7 @@ async function send(text?: string): Promise<void> {
   }
 
   try {
-    await streamAdminAgentChat(
-      { query: content, conversation_id: conversationId.value },
-      handlers,
-    )
+    await streamAdminAgentChat({ query: content, conversation_id: conversationId.value }, handlers)
   } catch (e) {
     // 网络/HTTP 层错误：展示消息并引导设置 Token（401）
     const message = e instanceof Error ? e.message : '请求失败'
@@ -374,11 +367,7 @@ onMounted(() => {
             :disabled="isStreaming"
             @keydown="onKeydown"
           />
-          <button
-            class="send-btn"
-            :disabled="!input.trim() || isStreaming"
-            @click="send()"
-          >
+          <button class="send-btn" :disabled="!input.trim() || isStreaming" @click="send()">
             {{ isStreaming ? '生成中…' : '发送' }}
           </button>
         </div>
