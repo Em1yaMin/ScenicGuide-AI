@@ -10,6 +10,15 @@ onMounted(() => {
     heroVisible.value = true
   })
 })
+
+// 「浏览推荐」按钮：页内平滑滚动到下方「推荐路线」区块
+// （原 /visitor/recommend 为不存在的死路由，改为 scrollIntoView 避免跳转无响应）
+function scrollToRecommendedRoutes() {
+  const el = document.getElementById('recommended-routes')
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+}
 </script>
 
 <template>
@@ -36,9 +45,9 @@ onMounted(() => {
             开始对话
             <span class="btn-arrow">→</span>
           </RouterLink>
-          <RouterLink to="/visitor/recommend" class="btn-secondary">
+          <button type="button" class="btn-secondary" @click="scrollToRecommendedRoutes">
             浏览推荐
-          </RouterLink>
+          </button>
         </div>
       </div>
     </section>
@@ -90,7 +99,7 @@ onMounted(() => {
     </section>
 
     <!-- Recommended Routes -->
-    <section class="section">
+    <section id="recommended-routes" class="section">
       <div class="section-header">
         <h2 class="section-title">推荐路线</h2>
         <p class="section-desc">精心规划的游览体验</p>
@@ -254,6 +263,8 @@ onMounted(() => {
   color: var(--color-ink);
   font-size: var(--text-body);
   font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
   text-decoration: none;
   border: 1px solid var(--color-border);
   border-radius: 6px;
