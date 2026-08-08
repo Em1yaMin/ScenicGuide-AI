@@ -196,6 +196,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - **输入校验（schema 层先 strip）**：`content`/`user` 纯空白 422、首尾空白自动归一化（`" 1 "` → `"1"`，查询参数同规）；保证修改「先删后建」在任何删除前完成校验（防空白内容先删后失败的数据丢失与带空白 user 孤儿条目）
 - **memory_service 新增公开接口**（复用不重实现）：`memory_id_of(entry)`（对外 memory_id 单一派生规则：uuid，旧条目 `legacy:{归一化 content}`，deepagents `_entry_to_json` 同规则）、`find_memory_by_id(memory_id)`（跨用户查找，含 legacy 兼容）、`count_memories_per_user()`（单次持锁批量统计）；`_save_user_memory_sync` 透传传入 memory_id（管理端预生成 uuid 落库，既有调用方行为不变）；`_delete_user_memory_sync` 匹配改为 `_doc_matches_memory_id` 统一走 memory_id_of（原 legacy 匹配逻辑等价）
 - 测试：`tests/test_memory_admin.py`（21：鉴权 401 全端点/用户列表含 memory_count/按用户列记忆/游客空/legacy 派生 id 删除/新增校验 422/游客 400/未注册 404/空白内容 422 拒绝（含修改先删后建不丢数据）/user 空白归一化/修改部分更新/修改后旧 id 失效/跨用户删除/404/审计日志）
+- **前端（批次5 B5 前端任务）**：`digitalHumanVue/src/api/memory.ts`（API 封装：fetchMemoryUsers/fetchUserMemories/createMemory/updateMemory/deleteMemory，X-Admin-Token 读 localStorage `admin_api_token`）+ `src/types/memory.ts`（AdminUserItem/AdminMemoryItem 等）+ `src/views/admin/MemoryView.vue`（路由 `/admin/memories`，菜单「记忆管理」）：双栏布局——左栏用户列表（keyword 搜索防抖 + 分页，memory_count 徽标），右栏选中用户记忆列表（fact_type 徽标/content/时间/来源会话，编辑/删除确认）；新增/编辑共用弹窗（fact_type 下拉 + content textarea，maxlength 200 + 前端校验）；空态「该用户暂无记忆（游客/匿名用户无长期记忆）」；保存后刷新记忆列表与用户条数统计
 
 ## AI 运营分析（LangChain + OpenAI，可回退）
 
