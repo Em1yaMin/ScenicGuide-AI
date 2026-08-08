@@ -29,7 +29,8 @@ import json
 import logging
 import re
 import time
-from dataclasses import asdict, dataclass
+import uuid
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from langchain_core.documents import Document
@@ -68,6 +69,9 @@ class MemoryEntry:
 
     序列化后按 user 写入 user_memory 命名空间（每条记忆一个 Document，
     metadata 携带结构化字段，page_content 为自然语言记忆句）。
+
+    memory_id 为内部扩展字段（deepagents 记忆工具化按 id 删除用）：写入时
+    生成 uuid 存 Document metadata，不进入 to_dict（T3 契约键集合不变）。
     """
 
     user: str = ""
@@ -75,6 +79,7 @@ class MemoryEntry:
     content: str = ""
     source_conversation_id: str = ""
     timestamp: float = 0.0
+    memory_id: str = ""  # 内部扩展：Document metadata 标识（旧条目为空）
 
     def __post_init__(self) -> None:
         if self.fact_type not in FACT_TYPES:
@@ -84,7 +89,15 @@ class MemoryEntry:
             self.timestamp = time.time()
 
     def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+        # T3 契约键集合（user/fact_type/content/source_conversation_id/timestamp）
+        # 保持不变；memory_id 为内部扩展，不序列化（见类注释）
+        return {
+            "user": self.user,
+            "fact_type": self.fact_type,
+            "content": self.content,
+            "source_conversation_id": self.source_conversation_id,
+            "timestamp": self.timestamp,
+        }
 
     @staticmethod
     def from_dict(data: Dict[str, Any]) -> "MemoryEntry":
@@ -94,6 +107,7 @@ class MemoryEntry:
             content=str(data.get("content", "") or ""),
             source_conversation_id=str(data.get("source_conversation_id", "") or ""),
             timestamp=float(data.get("timestamp", 0.0) or 0.0),
+            memory_id=str(data.get("memory_id", "") or ""),
         )
 
 
@@ -136,13 +150,20 @@ def _all_entries() -> List[MemoryEntry]:
                 content=str(doc.page_content or ""),
                 source_conversation_id=str(md.get("source_conversation_id", "") or ""),
                 timestamp=float(md.get("timestamp", 0.0) or 0.0),
+                memory_id=str(md.get("memory_id", "") or ""),
             )
         )
     return entries
 
 
 def _entry_to_document(entry: MemoryEntry) -> Document:
-    """记忆条目 → 向量库 Document（metadata 携带结构化字段）。"""
+    """记忆条目 → 向量库 Document（metadata 携带结构化字段 + memory_id）。
+
+    memory_id 为内部扩展（deepagents 记忆工具化按 id 删除用）：entry 未携带
+    时生成 uuid 并回填（写入路径只调一次，id 稳定落库）。
+    """
+    if not entry.memory_id:
+        entry.memory_id = uuid.uuid4().hex
     return Document(
         page_content=entry.content,
         metadata={
@@ -150,6 +171,7 @@ def _entry_to_document(entry: MemoryEntry) -> Document:
             "fact_type": entry.fact_type,
             "source_conversation_id": entry.source_conversation_id,
             "timestamp": entry.timestamp,
+            "memory_id": entry.memory_id,
         },
     )
 
@@ -342,6 +364,73 @@ def _search_user_memory_sync(
         )
         for doc, _score in results
     ]
+
+
+async def list_user_memories(user: str) -> List[MemoryEntry]:
+    """列出指定用户的全部长期记忆条目（含 memory_id，供按 id 删除用）。
+
+    **A2 新增公开接口**（deepagents 记忆工具化 list_user_memories 工具调用）：
+    返回按写入顺序的全量条目；旧条目（升级前写入、无 memory_id）的
+    memory_id 为空串，由调用方派生兼容 id（见 delete_user_memory）。
+    游客返回空列表。
+    """
+    if is_guest_user(user):
+        return []
+    return await asyncio.get_running_loop().run_in_executor(
+        None, _list_user_memories_sync, user
+    )
+
+
+def _list_user_memories_sync(user: str) -> List[MemoryEntry]:
+    """list_user_memories 的同步实现（经 run_in_executor 在事件循环外执行）。"""
+    if is_guest_user(user):
+        return []
+    with _vector_index_lock:
+        return [e for e in _all_entries() if e.user == user]
+
+
+async def delete_user_memory(user: str, memory_id: str) -> dict:
+    """删除指定用户的单条长期记忆（按 user + memory_id 匹配，user 隔离）。
+
+    **A2 新增公开接口**（deepagents 记忆工具化 delete_user_memory 工具调用）：
+    仅能删除传入 user 自己的记忆（谓词同时校验 user 与 memory_id，跨用户
+    删除必然失败）；兼容旧条目派生 id（`legacy:{归一化 content}`，见
+    list_user_memories 说明）。游客直接返回未删除。
+
+    Returns:
+        {"deleted": int, "user": str}：deleted 为实际删除条数（0 或 1）
+    """
+    return await asyncio.get_running_loop().run_in_executor(
+        None, _delete_user_memory_sync, user, memory_id
+    )
+
+
+def _delete_user_memory_sync(user: str, memory_id: str) -> dict:
+    """delete_user_memory 的同步实现（经 run_in_executor 在事件循环外执行）。"""
+    if is_guest_user(user) or not memory_id:
+        return {"deleted": 0, "user": user}
+    # 旧条目（无 memory_id）的派生 id 匹配：legacy:{归一化 content}
+    legacy_match = None
+    if memory_id.startswith("legacy:"):
+        legacy_match = memory_id
+    store = _memory_store()
+    with _vector_index_lock:
+        deleted = store.delete_documents(
+            lambda doc: (
+                doc.metadata.get("user") == user
+                and (
+                    doc.metadata.get("memory_id") == memory_id
+                    or (
+                        legacy_match is not None
+                        and legacy_match
+                        == f"legacy:{_normalize_content(doc.page_content)}"
+                    )
+                )
+            )
+        )
+    if deleted:
+        logger.info("长期记忆删除: user=%s memory_id=%s", user, memory_id)
+    return {"deleted": deleted, "user": user}
 
 
 async def count_user_memory(user: str) -> int:

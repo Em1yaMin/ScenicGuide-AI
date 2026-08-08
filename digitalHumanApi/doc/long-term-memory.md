@@ -29,6 +29,11 @@
 （`page_content` = `content`，metadata 携带 `user`/`fact_type`/`source_conversation_id`/`timestamp`），
 按 `user` 隔离——检索与统计都限定在指定 user 的记忆子集内。
 
+**memory_id（A2 内部扩展）**：写入时生成 `uuid4().hex` 存 Document metadata（`memory_id` 键），
+供 deepagents 记忆工具化按 id 删除（`delete_user_memory`）；旧条目（升级前写入、无
+`memory_id`）由调用方派生稳定 id（`legacy:{归一化 content}`）兼容删除。`MemoryEntry`
+的 `memory_id` 字段不进入 `to_dict()`（T3 契约键集合不变，`to_dict` 不含该键）。
+
 **去重/覆盖**：同 user 同「规范化 content」（去空白/中英文标点、小写）视为同一事实，
 新写入覆盖旧条目（更新时间戳与来源会话），不无限追加；
 另设每用户条数上限 `MEMORY_MAX_PER_USER`（默认 200），超限淘汰 timestamp 最旧条目。
@@ -40,6 +45,8 @@
 | 写入 | `memory_service.save_user_memory(user: str, facts: List[MemoryEntry]) -> dict` | 按 user 写入/覆盖（同事实去重）；返回 `{"written","overwritten","total","user","skipped"}`；游客直接 `skipped=True` |
 | 检索 | `memory_service.search_user_memory(user: str, query: str, top_k: int = 3) -> List[MemoryEntry]` | 在指定 user 的记忆子集内语义检索（相似度降序）；游客/异常返回空列表 |
 | 计数 | `memory_service.count_user_memory(user: str) -> int` | 指定 user 的记忆条数（测试/管理用） |
+| 列表（A2） | `memory_service.list_user_memories(user: str) -> List[MemoryEntry]` | 指定 user 的全量记忆条目（含 `memory_id`）；游客返回空列表 |
+| 删除（A2） | `memory_service.delete_user_memory(user: str, memory_id: str) -> dict` | 按 `user + memory_id` 匹配删除单条（user 隔离，跨用户必然失败）；兼容旧条目派生 id；返回 `{"deleted", "user"}` |
 | 提取钩子 | `memory_service.extract_and_store(user, conversation_id, query, answer) -> dict` | 对话完成后台调用：LLM 提取 + 写入；游客/关闭/失败均静默降级 |
 | 提取（同步） | `memory_service.extract_facts(query, answer, llm=None) -> List[MemoryEntry]` | LLM 单次调用提取事实；可注入 llm 供测试；失败返回空列表 |
 
