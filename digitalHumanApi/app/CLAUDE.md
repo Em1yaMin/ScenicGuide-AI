@@ -15,7 +15,7 @@
 ## Lifespan Lifecycle
 
 ```
-startup:  logging.basicConfig() → Base.metadata.create_all → spawn tasks
+startup:  logging.basicConfig() → run_migrations()（Alembic，失败回退 create_all）→ spawn tasks
 runtime:  HTTP serving + background loops
 shutdown: cancel tasks → await cleanup → engine.dispose()
 ```
@@ -46,7 +46,7 @@ async def _global_exception_handler(request, exc):
 
 ## Architectural Boundaries
 - **NO 业务逻辑在 main.py** — 仅做装配（wiring）
-- `Base.metadata.create_all` 使用 `IF NOT EXISTS` 语义，可安全重复执行，无 Alembic 迁移
+- 启动建表走 Alembic 迁移（`app/core/migrations.py::run_migrations`，lifespan Phase 1；空库 upgrade / 遗留库 stamp 基线 / 版本化库 upgrade）；迁移失败才回退 `Base.metadata.create_all`（IF NOT EXISTS 幂等，不阻断启动）；权威文档见 `doc/alembic-migrations.md`
 - 后台任务在 `lifespan` 中通过 `asyncio.create_task()` 启动，`done_callback` 记录异常但不重启
 
 ## Sub-Layer Guides

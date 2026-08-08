@@ -1,7 +1,7 @@
 # ORM Models Layer
 
 ## Responsibility
-SQLAlchemy 2.0 声明式 ORM 数据模型，映射 SQLite 数据库表结构。所有模型继承 `app.core.database.Base`，通过 `Base.metadata.create_all` 在应用启动时自动建表。
+SQLAlchemy 2.0 声明式 ORM 数据模型，映射 SQLite 数据库表结构。所有模型继承 `app.core.database.Base`；建表由 Alembic 迁移负责（启动时 `app/core/migrations.py::run_migrations`，失败回退 create_all），改模型须生成迁移，见 `doc/alembic-migrations.md`。
 
 ## Dependencies
 - **SQLAlchemy 2.0+**: `Mapped[]` / `mapped_column()` 声明式映射、`AsyncSession`、`aiosqlite` 驱动
@@ -9,7 +9,7 @@ SQLAlchemy 2.0 声明式 ORM 数据模型，映射 SQLite 数据库表结构。�
 ## Consumers
 - **services/**: 服务函数通过 `select(Model).where(...)` 查询
 - **tasks/**: 后台任务直接操作 `async_session_factory()` 会话
-- **main.py**: `from app.models import Base` 用于 `create_all` 建表
+- **migrations/env.py**: `from app.models import Base` 供 autogenerate 发现全量模型；**main.py** 经 `run_migrations()` 执行迁移
 
 ## Module Structure
 ```
@@ -20,7 +20,7 @@ models/
   stat.py             # Stat — 聚合统计（独立表，无外键）
   knowledge.py        # KnowledgeBase — 知识库条目（id/title/category/content/tags）
   user.py             # User — 注册用户（username 唯一；登录用户才有长期记忆）
-  __init__.py         # 重导出 Base + 所有模型（使 create_all 发现所有表）
+  __init__.py         # 重导出 Base + 所有模型（使 autogenerate/Base.metadata 发现所有表）
 ```
 
 ## Declarative Model Pattern
@@ -72,7 +72,7 @@ class Entity(Base):
 ## Architectural Boundaries
 - **NO `commit()` in models** — 模型文件仅定义结构，不包含任何数据库操作
 - **NO 跨模型业务逻辑** — 模型之间仅通过 `relationship` 连接
-- 新增模型文件后必须在 `__init__.py` 注册，否则 `create_all` 不会建表
+- 新增模型文件后必须在 `__init__.py` 注册，否则 autogenerate 检测不到新表；随后按 `doc/alembic-migrations.md` 生成迁移
 
 <important if="you are adding a new database model to this layer">
 ## Adding a New Model
