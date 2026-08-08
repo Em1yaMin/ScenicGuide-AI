@@ -280,7 +280,7 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 - `app/core/logging_config.py` — 标准 logging 统一日志体系（无新依赖）：`configure_logging()`（main.py lifespan Phase 0 调用，替代就地 basicConfig；DEBUG 开关行为不变）+ `RequestLoggingMiddleware`（main.py 最后 add_middleware 最外层，只处理 http scope）
 - 统一格式：时间(含毫秒)/级别/logger名/消息（`%(asctime)s.%(msecs)03d [%(levelname)s] %(name)s: %(message)s`）；**uvicorn.access 已抑制**（其固定格式会原样记录 query 串含 token，与红线冲突，请求日志统一由中间件承担）
 - 请求日志：每个 HTTP 请求一条 `app.request` logger 的 key=value 行（method/path/status/duration_ms/client/ip）；**异常优先**（异常或 5xx 记 ERROR 带异常堆栈，含 SSE 流中途抛错）；健康检查/文档等噪音路径降级 DEBUG；client 从 Authorization Bearer JWT 解析（用户 id/guest-xxx），X-Admin-Token 匹配配置标记 admin，解析不到为 `-`（不报错）；path 不含 query，不读请求体，token/key/密码绝不入日志；注意既有 catch-all 处理器把路由异常转 HTTP 200，排查不能只按 status=5xx 过滤（全局异常处理器仍会 ERROR 落盘）
-- 测试：`tests/test_logging.py`（11 用例）；格式与查询方式见 `doc/logging-request-logs.md`
+- 测试：`tests/test_logging.py`（13 用例）；格式与查询方式见 `doc/logging-request-logs.md`
 
 ## Maintaining this file
 
