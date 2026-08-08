@@ -35,6 +35,11 @@ const router = createRouter({
           name: 'admin-memories',
           component: () => import('@/views/admin/MemoryView.vue'),
         },
+        {
+          path: 'agent',
+          name: 'admin-agent',
+          component: () => import('@/views/admin/AdminAgentView.vue'),
+        },
       ],
     },
     // 认证页为顶层路由：访客端与管理后台均可直达

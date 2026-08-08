@@ -14,6 +14,7 @@
 | `admin/KnowledgeView.vue` | `/admin/knowledge` | API 数据+CRUD 弹窗 | fetch(API_ADMIN_KNOWLEDGE) |
 | `admin/AnnouncementView.vue` | `/admin/announcements` | API 数据+CRUD 弹窗（X-Admin-Token） | fetch(API_ADMIN_ANNOUNCEMENTS) |
 | `admin/MemoryView.vue` | `/admin/memories` | 双栏：用户列表（搜索/分页）→ 记忆列表（增/改/删，X-Admin-Token） | src/api/memory.ts（API_ADMIN_MEMORIES） |
+| `admin/AdminAgentView.vue` | `/admin/agent` | SSE 流式对话（token 逐字渲染 + 工具步骤气泡 + 二次确认按钮，X-Admin-Token） | src/api/adminAgent.ts（API_ADMIN_AGENT_CHAT_STREAM） |
 | `LoginView.vue` | `/login`（顶层路由） | 表单+游客模式 | Pinia auth store |
 | `RegisterView.vue` | `/register`（顶层路由） | 表单校验+自动登录 | Pinia auth store |
 

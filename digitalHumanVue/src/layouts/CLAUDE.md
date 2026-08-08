@@ -24,6 +24,7 @@
         <RouterLink to="/admin/knowledge">知识库</RouterLink>
         <RouterLink to="/admin/announcements">公告管理</RouterLink>
         <RouterLink to="/admin/memories">记忆管理</RouterLink>
+        <RouterLink to="/admin/agent">管理员 Agent</RouterLink>
       </nav>
       <!-- auth 区域：useAuthStore 渲染登录态 + 登录/注册链接 + 退出（见下方 Dependencies） -->
     </aside>
