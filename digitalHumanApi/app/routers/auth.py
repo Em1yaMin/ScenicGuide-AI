@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Optional, Union
+from typing import Union
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession

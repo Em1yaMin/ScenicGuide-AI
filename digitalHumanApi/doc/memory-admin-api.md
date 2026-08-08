@@ -34,6 +34,11 @@ recall/save/list/delete（全部 user_id 隔离、游客跳过）；本模块补
 全部接口为管理端：请求头 `X-Admin-Token: <ADMIN_API_TOKEN>`；缺失/错误返回
 `401 {"detail": "未授权访问"}`（或「管理员 Token 未配置」）。
 
+**RBAC 角色分级（批次6 C3 安全加固）**：`ADMIN_TOKENS` 角色映射命中优先（如
+`token1=admin,token2=operator`），`ADMIN_API_TOKEN` 恒为 admin；**删除类操作
+（本模块 `DELETE /{memory_id}`）要求 admin 角色**，operator token 返回
+`403 {"detail": "权限不足：该操作需要 admin 角色"}`（与未授权 401 区分）。
+
 ## 一、用户列表（供管理页面选择用户）
 
 ### 列表（分页）
@@ -188,6 +193,9 @@ DELETE /api/admin/memories/{memory_id}
 `{memory_id}` 支持 uuid 与 legacy 派生 id；管理员可按 id 删除**任意用户**的
 记忆（不校验归属用户——管理员例外）。
 
+**角色要求（批次6 C3）**：本端点要求 **admin 角色**（`require_role("admin")`），
+operator 角色返回 `403`（见「鉴权方式」）。
+
 响应 `200`：
 
 ```json
@@ -199,7 +207,8 @@ DELETE /api/admin/memories/{memory_id}
 ## 六、审计
 
 删除/修改/新增记忆均记录结构化日志（`app.routers.memory_admin` logger，
-`operator=admin` 标识操作者——X-Admin-Token 认证通过即视为管理员），
+`operator=admin` 标识操作者——管理端 X-Admin-Token 认证通过即视为管理员操作，
+删除类操作还需满足 admin 角色要求，见「鉴权方式」），
 含目标 `user` / `memory_id` / 内容摘要（截断 50 字符）：
 
 ```
