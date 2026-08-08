@@ -35,7 +35,8 @@
 
 级别规则：
 
-- 5xx → ERROR（异常传播路径带 `exc_info` 堆栈 + `error=<异常类型>`；
+- 异常或 5xx → ERROR（异常传播路径带 `exc_info` 堆栈 + `error=<异常类型>`，
+  含响应头已发出（status<500，如 SSE 流中断）后中途抛错的情形；
   纯响应路径 `error=server_error`）
 - 噪音路径（`/api/v1/health`、`/docs`、`/redoc`、`/openapi.json`）→ DEBUG
 - 其余 → INFO

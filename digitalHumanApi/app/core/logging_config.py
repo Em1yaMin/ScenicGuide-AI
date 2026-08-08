@@ -100,7 +100,7 @@ class RequestLoggingMiddleware:
     """FastAPI HTTP 请求日志中间件：每个请求输出一条结构化日志。
 
     字段: method / path / status / duration_ms / client / ip
-    - 5xx 记 ERROR（异常传播路径带 exc_info 堆栈；响应路径无异常仅 ERROR 标记）
+    - 异常或 5xx 记 ERROR（异常传播路径带 exc_info 堆栈；响应路径无异常仅 ERROR 标记）
     - 高频噪音路径（健康检查/文档）降级为 DEBUG
     - 只读请求头不读请求体（SSE/流式安全），不记录任何敏感信息
     """
@@ -151,7 +151,7 @@ class RequestLoggingMiddleware:
             f"client={client} "
             f"ip={client_ip}"
         )
-        if status_code >= 500:
+        if exc_info is not None or status_code >= 500:
             if exc_info is not None:
                 self.logger.error(
                     "%s error=%s",

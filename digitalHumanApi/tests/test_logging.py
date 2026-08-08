@@ -265,6 +265,34 @@ async def test_middleware_5xx_exception_logs_error(caplog):
 
 
 @pytest.mark.asyncio
+async def test_middleware_exception_after_response_start_logs_error(caplog):
+    """响应头已发出（status<500）后中途抛错（如 SSE 流中断）：
+    仍记 ERROR + error 类型 + exc_info，不误记为成功 INFO。"""
+
+    async def sse_boom_app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send(
+            {"type": "http.response.body", "body": b"partial", "more_body": True}
+        )
+        raise RuntimeError("stream broke")
+
+    caplog.set_level(logging.ERROR, logger=REQUEST_LOGGER_NAME)
+    middleware = RequestLoggingMiddleware(sse_boom_app)
+    with pytest.raises(RuntimeError):
+        await middleware(_http_scope(path="/stream"), _noop_receive, _noop_send)
+
+    records = _request_records(caplog)
+    assert records
+    record = records[-1]
+    assert record.levelno == logging.ERROR
+    assert "method=GET" in record.message
+    assert "path=/stream" in record.message
+    assert "status=200" in record.message
+    assert "error=RuntimeError" in record.message
+    assert record.exc_info is not None
+
+
+@pytest.mark.asyncio
 async def test_middleware_5xx_response_logs_error(caplog):
     """5xx 响应路径（无异常对象）：ERROR + status=500 + error=server_error。"""
 
