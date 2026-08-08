@@ -187,6 +187,15 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - 单测：`tests/test_memory.py`（schema/按 user 隔离/覆盖去重/条数上限/游客跳过/LLM 提取容错/静默降级/chat+chat_stream 钩子调度，mock LLM 与 MockTransport，不发真实请求）、`tests/test_memory_inject.py`（注入逻辑：有记忆→首轮请求含记忆上下文/无记忆/游客/异常降级/多轮仅首轮/时效过滤/流式/端到端按 user 隔离）、`tests/test_rag.py`（delete_documents 与过滤子集检索回归）
 - **阶段2 T4 登录生效联调（收官，2026-08-06）**：真实环境全链路验证通过（key 用主项目 `digitalHumanApi/.env`，worktree 复制为 gitignored 临时配置）——登录用户注册/登录 → 带 JWT 多轮对话 → 后台提取写入 user_memory（实测 user=1 写入 5 条，来源会话/类型正确）→ 新会话首轮注入生效（回答引用用户画像「带老人小孩/自然风光」，tools=0 即作答）→ 同事实重申覆盖不膨胀（仍 5 条）；游客（无 token / guest token）短期记忆正常、无长期记忆写入与注入（新会话问「还记得我吗」明确答「没有记忆功能」）；未发现联调缺陷、无代码改动；验证矩阵与证据见 `doc/phase2-memory-verification.md`
 
+## 记忆管理 API（批次5 B5：管理端，X-Admin-Token 鉴权）
+
+船长决策：长期记忆管理需后台可手动修改/让 agent 修改；用户侧隔离已由 A2 记忆四工具实现，本模块补**管理端**能力（管理员例外：可查看/新增/修改/删除任意注册用户记忆；游客无记忆——查询空、新增 400）。
+
+- `app/routers/memory_admin.py`（前缀 `/api/admin/memories`，契约 `doc/memory-admin-api.md`）：`GET /users`（注册用户列表 id/username/nickname/**memory_count**/last_login_at，keyword/page/page_size）、`GET ?user={id}`（按用户列记忆，含 memory_id/fact_type/content/source_conversation_id/timestamp）、`POST`（新增，user 须为注册用户，游客 400/未注册 404）、`PUT /{memory_id}`（修改=**删除后重建**：保留 user/source_conversation_id，timestamp 刷新、memory_id 更新为新建 uuid，content/fact_type 部分更新至少其一）、`DELETE /{memory_id}`（跨用户按 id 删除，uuid 与 legacy 派生 id 均可）
+- **审计（日志先行）**：删除/修改/新增记 `app.routers.memory_admin` logger（`operator=admin` + 目标 user/memory_id/内容摘要截断 50 字符）；DB 审计表未引入（需 Alembic 迁移，当前频次低日志可追溯）
+- **memory_service 新增公开接口**（复用不重实现）：`memory_id_of(entry)`（对外 memory_id 单一派生规则：uuid，旧条目 `legacy:{归一化 content}`，deepagents `_entry_to_json` 同规则）、`find_memory_by_id(memory_id)`（跨用户查找，含 legacy 兼容）、`count_memories_per_user()`（单次持锁批量统计）；`_save_user_memory_sync` 透传传入 memory_id（管理端预生成 uuid 落库，既有调用方行为不变）；`_delete_user_memory_sync` 匹配改为 `_doc_matches_memory_id` 统一走 memory_id_of（原 legacy 匹配逻辑等价）
+- 测试：`tests/test_memory_admin.py`（16：鉴权 401 全端点/用户列表含 memory_count/按用户列记忆/游客空/legacy 派生 id 删除/新增校验 422/游客 400/未注册 404/修改部分更新/修改后旧 id 失效/跨用户删除/404/审计日志）
+
 ## AI 运营分析（LangChain + OpenAI，可回退）
 
 - `app/services/analytics_service.py` + `app/routers/analysis.py` — `GET /api/v1/analysis/overview`（`?days=1-365`）、`GET /trends`、`POST /run-now`
