@@ -165,10 +165,10 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 ## 数据库迁移（Alembic，批次2 地基 C1）
 
 - `alembic.ini` + `migrations/`（env.py 为 **async 模板**：项目是 SQLAlchemy 2.0 async engine（create_async_engine + aiosqlite），在线迁移经 `asyncio.run` 包装）；初始迁移 `04436fda61c5` 为全量基线（DDL 与 ORM create_all 逐字节一致，见 `tests/test_migrations.py::test_upgraded_schema_matches_orm_metadata`）
-- **启动自动迁移**：`app/core/migrations.py::run_migrations()`（main.py lifespan Phase 1 替代 create_all；独立 CLI backfill.py 同用）三态分流——空库 `upgrade head` 建齐 / **遗留库（有业务表无版本表）`stamp head` 基线化（不执行 DDL、不丢数据）** / 版本化库 `upgrade head`；失败回退 create_all（幂等）不阻断启动；Alembic 命令为同步 API 且 env.py 内部 asyncio.run，必须 `asyncio.to_thread` 执行
+- **启动自动迁移**：`app/core/migrations.py::run_migrations()`（main.py lifespan Phase 1 替代 create_all；独立 CLI backfill.py 同用）三态分流——空库 `upgrade head` 建齐 / **遗留库（有业务表无版本表）先幂等 create_all 补建缺失业务表再 `stamp head` 基线化（不丢数据）** / 版本化库 `upgrade head`；迁移失败回退 create_all（幂等）不阻断启动；Alembic 命令为同步 API 且 env.py 内部 asyncio.run，必须 `asyncio.to_thread` 执行
 - URL 解析优先级：`alembic -x db_url=...` > ini `sqlalchemy.url`（留空；测试 Config.set_main_option 覆盖）> `settings.DATABASE_URL`；env.py 已显式把 digitalHumanApi/ 加入 sys.path
 - 开发流程：改 models → `alembic revision --autogenerate -m "..."`（草稿必须 review，补 downgrade）→ `alembic upgrade head` 验证 → `pytest -q` → 合并；SQLite 改列用 `op.batch_alter_table`（已开 `render_as_batch=True`），禁止手写裸 ALTER TABLE
-- 权威文档：`doc/alembic-migrations.md`；测试：`tests/test_migrations.py`（7 用例：空库建齐/DDL 等价/遗留库 stamp 不丢数据/版本化库幂等/run_migrations 三态）
+- 权威文档：`doc/alembic-migrations.md`；测试：`tests/test_migrations.py`（8 用例：空库建齐/DDL 等价/遗留库 stamp 不丢数据/版本化库幂等/run_migrations 三态/遗留库缺表补建）
 
 # Commands
 

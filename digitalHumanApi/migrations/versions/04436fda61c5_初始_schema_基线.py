@@ -1,7 +1,7 @@
 """初始 schema 基线
 
 Revision ID: 04436fda61c5
-Revises: 
+Revises:
 Create Date: 2026-08-08 14:57:27.813015
 
 """
