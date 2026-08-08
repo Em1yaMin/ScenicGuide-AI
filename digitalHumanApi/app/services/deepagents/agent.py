@@ -36,6 +36,7 @@ ToolCallLimitMiddleware 单轮工具调用上限（默认 15，continue 优雅�
 `user` 字段，对话入口经 `{"messages": ..., "user": user}` 传入，记忆工具经
 `InjectedState("user")` 从图状态注入（见 memory_tools.py）。
 """
+import asyncio
 import logging
 import threading
 from typing import Any, AsyncIterator, Dict, List, NotRequired, Optional
@@ -376,10 +377,11 @@ async def _maybe_compact_history(
 ) -> None:
     """回答后触发：长会话历史超过阈值时压缩早期轮次为摘要（A4 调优）。
 
-    在 `_append_history` 之后调用（回答已完成，压缩不占用用户侧延迟）：
-    读取会话历史 → `compaction.maybe_compact`（内置 SummarizationMiddleware
-    引擎，阈值/保留窗口见 AGENT_COMPACT_* 配置）→ 压缩成功则写回
-    （进程内缓存 + SQLite replace_messages，重启不丢、不重复压缩）。
+    在 `_append_history` 之后调度（回答已完成，压缩不占用用户侧延迟，
+    不阻塞响应/done）：读取会话历史 → `compaction.maybe_compact`
+    （内置 SummarizationMiddleware 引擎，阈值/保留窗口见 AGENT_COMPACT_*
+    配置）→ 压缩成功则写回（进程内缓存 + SQLite replace_messages，
+    重启不丢、不重复压缩）。
 
     降级：任何异常/未达阈值静默跳过（历史保持原样，由消息上限截断兜底），
     绝不阻断对话、不影响 SSE 契约。并发安全：写回前校验快照末条消息未被
@@ -417,6 +419,41 @@ async def _maybe_compact_history(
         )
     except Exception as e:
         logger.warning("会话历史压缩失败（跳过，保持原历史）: %s", e)
+
+
+# 上下文压缩后台任务句柄集合（防 GC；done 回调消费异常，与记忆提取钩子
+# 同模式——压缩不阻塞用户可见路径，客户端断开也不丢调度）
+_compaction_tasks: "set[asyncio.Task]" = set()
+
+
+def _on_compaction_task_done(task: asyncio.Task) -> None:
+    """回收后台任务引用并消费异常（防 asyncio 未检索异常告警）。"""
+    _compaction_tasks.discard(task)
+    if task.cancelled():
+        return
+    try:
+        exc = task.exception()
+    except asyncio.CancelledError:
+        return
+    if exc is not None:
+        logger.warning("会话历史压缩后台任务失败（静默降级）: %s", exc)
+
+
+def _schedule_compaction(conversation_id: str, llm: Optional[Any] = None) -> None:
+    """回答后调度上下文压缩（尽力而为：不 await、不阻塞响应、不抛错）。
+
+    与 `_schedule_memory_extraction` 同模式：asyncio.create_task 后台执行
+    `_maybe_compact_history`（任务句柄登记 `_compaction_tasks` 防 GC、
+    done 回调消费异常）；并发写回快照校验在压缩任务内部（冲突放弃）；
+    客户端断开也不丢调度（done 前已调度）；进程退出丢压缩等价于跳过。
+    """
+    try:
+        task = asyncio.create_task(_maybe_compact_history(conversation_id, llm))
+        _compaction_tasks.add(task)
+        task.add_done_callback(_on_compaction_task_done)
+    except Exception as e:
+        # 事件循环不可用等极端情况：静默忽略（绝不阻断对话）
+        logger.warning("会话历史压缩调度失败（忽略）: %s", e)
 
 
 def _extract_answer(all_messages: List[BaseMessage]) -> str:
@@ -490,9 +527,9 @@ async def chat(
 
     # 3. 会话持久化 + 长期记忆钩子（与 chat_agent 主链路一致：先落盘后返回）
     main_chain._append_history(conversation_id, query, answer, user)
-    # A4 调优：回答后触发上下文压缩（长会话历史超过阈值时压缩早期轮次
-    # 为摘要；未达阈值/失败静默跳过，见 _maybe_compact_history）
-    await _maybe_compact_history(conversation_id, llm)
+    # A4 调优：回答后触发上下文压缩（后台任务调度，不阻塞响应；长会话
+    # 历史超过阈值时压缩早期轮次为摘要，见 _schedule_compaction）
+    _schedule_compaction(conversation_id, llm)
     main_chain._schedule_memory_extraction(user, conversation_id, query, answer)
     logger.info(
         "deepagents 对话完成: intent=%s user=%s conversation=%s tools=%d answer_len=%d",
@@ -617,9 +654,9 @@ async def chat_stream(
     #    后调度存在 GeneratorExit 跳过窗口，改为 done 前更稳妥）
     answer = "".join(answer_parts)
     main_chain._append_history(conversation_id, query, answer, user)
-    # A4 调优：回答后触发上下文压缩（与 chat() 一致；done 前完成，
-    # 客户端收到 done 即关闭连接也不丢压缩结果）
-    await _maybe_compact_history(conversation_id, llm)
+    # A4 调优：回答后触发上下文压缩（与 chat() 一致；done 前调度后台任务，
+    # 客户端收到 done 即关闭连接也不丢压缩调度，执行不阻塞流）
+    _schedule_compaction(conversation_id, llm)
     main_chain._schedule_memory_extraction(user, conversation_id, query, answer)
     rag_context, rag_sources = main_chain._extract_rag_info(
         rag_tool_messages, rag_top_k

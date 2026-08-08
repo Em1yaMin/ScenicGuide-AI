@@ -29,8 +29,11 @@ logger = logging.getLogger(__name__)
 # agent 图执行步数上限：create_deep_agent 与 create_agent 同款坑——硬编码
 # recursion_limit=9999（deepagents/graph.py 末尾 with_config），异常 LLM 反复
 # 请求工具时会循环执行近万次才报错。对话场景必须显式收紧：语义同
-# chat_agent._MAX_AGENT_STEPS=25（防死循环），A1 实测 30 全程 14 轮可用
-_MAX_AGENT_STEPS = 30
+# chat_agent._MAX_AGENT_STEPS=25（防死循环）；A4 与工具上限联动——每轮
+# 工具调用约消耗 2 个 superstep（模型+工具节点），恰好 15 次调用 + 最终
+# 作答 ≈ 31 步，34 留余量保证 ToolCallLimitMiddleware continue 优雅降级
+# 在上限边界不触发 GraphRecursionError（见 doc/deepagents-tuning.md §1）
+_MAX_AGENT_STEPS = 34
 # LLM 调用超时（秒）：A1 建议 ≥120s——opencode-go 延迟波动大，现有快速路径
 # 的 60s 在规划类长链场景偏紧（实测单轮最长 37s，留足重试/波动余量）
 _AGENT_TIMEOUT = 120

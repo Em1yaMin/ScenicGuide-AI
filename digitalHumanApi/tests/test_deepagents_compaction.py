@@ -104,6 +104,12 @@ def _small_thresholds(monkeypatch, trigger=6, keep=4):
     monkeypatch.setattr(settings, "AGENT_COMPACT_KEEP_MESSAGES", keep)
 
 
+async def _drain_compaction_tasks() -> None:
+    """等待后台压缩任务完成（压缩改为后台任务调度后，测试需显式等待结果）。"""
+    while dg_agent._compaction_tasks:
+        await asyncio.gather(*list(dg_agent._compaction_tasks))
+
+
 # ── 压缩引擎（maybe_compact） ─────────────────────────────────────────────
 
 
@@ -193,6 +199,7 @@ async def test_chat_compacts_after_threshold(monkeypatch):
     cid = r1["conversation_id"]
     for i in range(2, 7):
         await dg_agent.chat(f"问{i}", user="u1", conversation_id=cid, llm=fake_llm)
+        await _drain_compaction_tasks()
 
     with chat_agent._conversations_lock:
         history = list(chat_agent._conversations[cid])
@@ -215,6 +222,7 @@ async def test_chat_next_turn_includes_summary(monkeypatch):
     cid = r1["conversation_id"]
     await dg_agent.chat("问2", user="u1", conversation_id=cid, llm=fake_llm)
     await dg_agent.chat("问3", user="u1", conversation_id=cid, llm=fake_llm)
+    await _drain_compaction_tasks()
     await dg_agent.chat("问4", user="u1", conversation_id=cid, llm=fake_llm)
     msgs = fake.inputs["messages"]
     # 第 4 轮输入：摘要 system + 保留轮次 + 当前问题
@@ -239,6 +247,7 @@ async def test_chat_stream_compacts_and_done_unchanged(monkeypatch):
             f"问{i}", user="u1", conversation_id=cid, llm=fake_llm
         ):
             events.append(event)
+        await _drain_compaction_tasks()
     assert events[-1]["type"] == "done"
     assert events[-1]["conversation_id"] == cid
     # done 契约字段不变
@@ -263,6 +272,7 @@ async def test_compaction_persists_and_survives_restart(monkeypatch, tmp_path):
     cid = r1["conversation_id"]
     for i in range(2, 4):
         await dg_agent.chat(f"问{i}", user="u1", conversation_id=cid, llm=fake_llm)
+        await _drain_compaction_tasks()
 
     # 库中已含 system 角色摘要消息
     session = memory_store.get_store().load_session(cid)
@@ -281,6 +291,7 @@ async def test_compaction_persists_and_survives_restart(monkeypatch, tmp_path):
     fake2 = _FakeAgent()
     _patch_agent(monkeypatch, fake2)
     await dg_agent.chat("问4", user="u1", conversation_id=cid, llm=fake_llm)
+    await _drain_compaction_tasks()
     # 重启后模型输入恢复出摘要 SystemMessage（_deserialize_history 支持 system）
     msgs = fake2.inputs["messages"]
     assert msgs[0].type == "system"

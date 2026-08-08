@@ -30,9 +30,11 @@ exit_behavior="continue")])`（装配在 `_build_agent`，A1 报告 §7 确认
 - **优雅降级**：`exit_behavior="continue"`——超限工具调用被拦截并以
   错误 ToolMessage（"Tool call limit exceeded…"）回给模型，模型基于
   已有信息直接作答；不抛异常、不触发 Dify 回落、SSE 契约不变
-- **兜底联动**：装配层 `recursion_limit=30` 天然兼容——上限 15 之后
-  模型每多尝试一次被拦截的工具调用消耗 2 步（模型+工具节点），
-  剩余步数足够模型收敛作答
+- **兜底联动**：装配层 `recursion_limit=34` 与上限 15 边界匹配——每轮
+  工具调用约消耗 2 个 superstep（模型+工具节点），恰好 15 次调用 + 最终
+  作答 ≈ 31 步 < 34（A4 实测峰值 14 次 ≈ 29 步），超限后模型仍有足够
+  步数收敛作答，continue 优雅降级在边界不触发 GraphRecursionError
+  （原 30 步在恰好 15 次调用时会越界，故上调至 34）
 
 ### 定参依据（实测）
 
@@ -87,17 +89,19 @@ search_knowledge）为缓存版本：同名/同描述/同 args_schema，仅替�
 ### 实现
 
 会话存储层**回答后触发**压缩（`compaction.py`）：每轮对话完成追加历史后，
-若消息数 ≥ `AGENT_COMPACT_TRIGGER_MESSAGES`（默认 24 条 ≈ 12 轮），调用
-内置 `SummarizationMiddleware.abefore_model`（纯状态函数，阈值判定/安全
-截断/摘要生成全部复用）压缩早期轮次为摘要，保留最近
-`AGENT_COMPACT_KEEP_MESSAGES`（默认 10 条 ≈ 5 轮）完整消息，压缩结果
-写回短期记忆存储（进程内 + SQLite `replace_messages`，重启不丢）。
+由 `_schedule_compaction` 以**后台 asyncio 任务**调度（与长期记忆提取钩子
+同模式：不阻塞响应/done，done 前已调度、客户端断开也不丢；进程退出丢
+压缩等价于跳过）。任务内若消息数 ≥ `AGENT_COMPACT_TRIGGER_MESSAGES`
+（默认 24 条 ≈ 12 轮），调用内置 `SummarizationMiddleware.abefore_model`
+（纯状态函数，阈值判定/安全截断/摘要生成全部复用）压缩早期轮次为摘要，
+保留最近 `AGENT_COMPACT_KEEP_MESSAGES`（默认 10 条 ≈ 5 轮）完整消息，
+压缩结果写回短期记忆存储（进程内 + SQLite `replace_messages`，重启不丢）。
 
 **为什么不在图内挂中间件**（与"图内方案"的对比，成本考量）：
 
 | 维度 | 图内挂中间件 | 本方案（会话层回答后） |
 |------|-------------|------------------------|
-| 触发时机 | 下一轮模型调用前（增加该轮首字延迟） | 回答完成后（用户侧零感知，done 前完成） |
+| 触发时机 | 下一轮模型调用前（增加该轮首字延迟） | 回答完成后后台调度（用户侧零感知，不阻塞 done） |
 | 持久化 | 无 checkpointer 的 stateless 调用下每轮重复压缩（反而增成本） | 摘要落库，只在下一次跨阈值时再压（实测 14 轮只压 1 次） |
 | 摘要 LLM 成本 | 每轮一次 | 每 ~12 轮一次 |
 
