@@ -184,6 +184,6 @@ export const API_HOME_HIGHLIGHTS = '/api/v1/home/highlights'               // �
 
 ## 四、测试覆盖
 
-- `tests/test_announcement.py` — CRUD / 分页筛选 / 状态切换 / 访客过滤与排序 / 鉴权 401（13 用例）
-- `tests/test_home.py` — 首页活数据默认/limit/空数据/公开访问/加载容错（7 用例）
+- `tests/test_announcement.py` — CRUD / 分页筛选 / 状态切换 / 访客过滤与排序 / 鉴权 401（12 用例）
+- `tests/test_home.py` — 首页活数据默认/limit/空数据/公开访问/加载容错（6 用例）
 - `tests/test_migrations.py` — announcements 表升级建齐、downgrade 回退删表、DDL 与 ORM 逐字节一致（既有守护自动覆盖）

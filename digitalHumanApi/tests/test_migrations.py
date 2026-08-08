@@ -239,7 +239,6 @@ def test_announcements_migration_upgrade_downgrade(tmp_path):
     assert _current_revision(db) == _head_revision(cfg)
 
 
-
 # ---------- 程序化入口 run_migrations（app/core/migrations.py） ----------
 
 def _run_migrations_with_db(monkeypatch, tmp_path, setup: str) -> Path:
