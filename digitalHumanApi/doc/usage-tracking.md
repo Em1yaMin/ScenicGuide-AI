@@ -91,7 +91,7 @@ Alembic 迁移：`migrations/versions/c5f1a2b3d4e5_添加_llm_usage_表.py`
 | `USAGE_TRACKING_ENABLED` | true | 总开关；关闭后工厂不包装埋点模型，零额外开销 |
 | `USAGE_FLUSH_INTERVAL_SECONDS` | 5 | 后台批量写库周期（秒） |
 | `USAGE_QUEUE_MAX_SIZE` | 2000 | 进程内队列上限（超出兜底落库） |
-| `USAGE_STREAM_USAGE` | true | 流式请求 usage（不兼容网关可关，流式只记耗时/次数） |
+| `USAGE_STREAM_USAGE` | true | 流式请求 usage（不兼容网关可关；关闭后流式调用拿不到 usage，不产生记账记录） |
 | `MODEL_PRICES` | 空 | 单价表 `"模型:输入价,输出价"`（元/百万 tokens），多项分号分隔；订阅制可留空 |
 
 ## 5. 报表聚合 API（管理端 X-Admin-Token）
@@ -130,7 +130,8 @@ Alembic 迁移：`migrations/versions/c5f1a2b3d4e5_添加_llm_usage_表.py`
 }
 ```
 
-- `series`：按粒度分桶的趋势序列（升序，供趋势图）
+- `series`：按粒度分桶的趋势序列（升序，供趋势图）；`day` 桶标签 `YYYY-MM-DD`、
+  `month` 为 `YYYY-MM`、`week` 为 ISO 8601 周（`YYYY-Www`，如 `2026-W33`）
 - `by_model` / `by_chain`：按 total_tokens 降序（供明细表）
 - `cost`：未配置单价表或该行模型无单价时聚合值为 null
 
@@ -156,7 +157,7 @@ CSV 导出（与 details 同筛选，全量行不分页；UTF-8 BOM 兼容 Excel
 ## 6. 已知边界
 
 - 流式调用在 `USAGE_STREAM_USAGE=false` 或端点不支持 `stream_options` 时
-  无 token 明细（调用次数/耗时照记）
+  拿不到 usage chunk，不产生记账记录（无用量数据，宁缺毋滥）
 - 调用异常 / 流中断（客户端断开发生在 usage chunk 之前）不记账
 - analytics_service（运营分析，`OPENAI_*` 配置独立构造）不在埋点范围
 - 报表时间为 UTC；前端展示可本地化转换

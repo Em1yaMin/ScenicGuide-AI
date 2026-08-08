@@ -273,7 +273,7 @@ class Settings(BaseModel):
     )
     # 流式调用是否请求 usage（stream_options.include_usage）：
     # opencode-go / DeepSeek 官方均支持（实测 opencode-go 返回流式 usage）；
-    # 若部署到不兼容的网关可关闭（关闭后流式调用无 token 明细，仅记耗时/次数）
+    # 若部署到不兼容的网关可关闭（关闭后流式调用拿不到 usage，无 token 明细且不记账）
     USAGE_STREAM_USAGE: bool = (
         os.environ.get("USAGE_STREAM_USAGE", "true").lower() == "true"
     )

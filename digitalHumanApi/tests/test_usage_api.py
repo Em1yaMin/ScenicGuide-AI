@@ -171,6 +171,23 @@ async def test_overview_granularity_month(seeded_client):
 
 
 @pytest.mark.asyncio
+async def test_overview_granularity_week_iso_labels(seeded_client):
+    """周粒度桶标签为 ISO 8601 周（YYYY-Www），跨周边界正确归桶。
+
+    种子数据 8/1-8/2（周六/周日）属 ISO 2026-W31，8/3（周一）属 W32。
+    """
+    resp = await _get(
+        seeded_client, "/api/admin/usage/overview?granularity=week&start=2026-08-01&end=2026-08-04", token="admin-secret"
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["granularity"] == "week"
+    assert [s["bucket"] for s in data["series"]] == ["2026-W31", "2026-W32"]
+    assert data["series"][0]["calls"] == 6
+    assert data["series"][1]["calls"] == 1
+
+
+@pytest.mark.asyncio
 async def test_overview_invalid_granularity_422(seeded_client):
     resp = await _get(
         seeded_client, "/api/admin/usage/overview?granularity=hour", token="admin-secret"

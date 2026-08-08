@@ -24,12 +24,24 @@ from app.models.usage import LLMUsage
 
 logger = logging.getLogger(__name__)
 
-# 粒度 → SQLite strftime 桶表达式（created_at 为 "YYYY-MM-DD HH:MM:SS..."）
+# 粒度 → 桶表达式（created_at 为 "YYYY-MM-DD HH:MM:SS..."）
+# week 粒度在 Python 侧计算 ISO 周标签（SQLite strftime 不支持 %G/%V）
 _BUCKET_EXPR = {
     "day": func.strftime("%Y-%m-%d", LLMUsage.created_at),
-    "week": func.strftime("%Y-W%W", LLMUsage.created_at),
+    "week": LLMUsage.created_at,
     "month": func.strftime("%Y-%m", LLMUsage.created_at),
 }
+
+
+def _iso_week_label(dt: datetime) -> str:
+    """ISO 8601 周标签（YYYY-Www，如 2026-W33）。
+
+    与 SQLite strftime 的 %Y-W%W 不同：%W 以首个周一为第 1 周，年初产出
+    W00、跨年时 12 月末落入次年 W01 桶，标签与 ISO 周不对齐；isocalendar
+    按 ISO 8601 计算（周一为一周首日、含首个周四的周为第 1 周）。
+    """
+    iso_year, iso_week, _ = dt.isocalendar()
+    return f"{iso_year}-W{iso_week:02d}"
 
 _DEFAULT_RANGE_DAYS = 30
 _PAGE_SIZE_MAX = 100
@@ -147,7 +159,10 @@ async def get_overview(
         tokens = {"input": row.input_tokens or 0, "output": row.output_tokens or 0}
         duration = row.duration_ms or 0
         cost = row.cost
-        _add(series, row.bucket, tokens, duration, cost)
+        bucket_key = (
+            _iso_week_label(row.bucket) if granularity == "week" else row.bucket
+        )
+        _add(series, bucket_key, tokens, duration, cost)
         _add(models, row.model, tokens, duration, cost)
         _add(chains, row.chain, tokens, duration, cost)
         totals["calls"] += 1
