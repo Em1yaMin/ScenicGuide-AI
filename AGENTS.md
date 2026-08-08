@@ -84,8 +84,9 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - **公告**：`app/models/announcement.py`（announcements 表：title/content/status[published|draft]/pinned/created_at/updated_at）+ `app/schemas/announcement.py` + `app/services/announcement_service.py` + `app/routers/announcement.py`；迁移 `migrations/versions/e06ede5acb5a`（升级建表/回退删表，downgrade 已补全）
 - **管理端** `/api/admin/announcements`（X-Admin-Token 鉴权）：列表（status/keyword 筛选 + 分页）/创建（默认草稿）/部分更新 PUT /{id}/状态切换 PATCH /{id}/status/删除；**访客端** `/api/v1/announcements`（公开，仅已发布，置顶优先 + 时间倒序）
 - **鉴权依赖提取**：`app/routers/deps.py` 的 `verify_admin_token` 为公共实现（knowledge.py 同源复用，行为不变）
-- **首页活数据**：`GET /api/v1/home/highlights`（公开）——`app/routers/home.py` + `app/services/home_service.py` 每次请求实时读 `app/data/{spots,routes}.json`（默认各 3 条，spots_limit/routes_limit 可调），前端首页卡片不再写死；文件缺失/损坏降级空数组不报错
-- **契约文档**：`doc/announcement-api.md`（路径/请求响应 schema/鉴权/排序约定，前端任务对接用）
+- **首页活数据**：`GET /api/v1/home/highlights`（公开）——`app/routers/home.py` + `app/services/home_service.py` 每次请求实时读 `app/data/{spots,routes}.json`（默认各 3 条，spots_limit/routes_limit 可调），前端首页卡片不再写死（HomeView 活数据渲染 + 接口失败静态兜底）；文件缺失/损坏降级空数组不报错
+- **前端（批次4 B2 前端任务）**：管理端 `digitalHumanVue/src/views/admin/AnnouncementView.vue`（列表/新建编辑/删除/发布下架/置顶，X-Admin-Token 存 `localStorage` 的 `admin_api_token`，与知识库页一致）；首页 `HomeView.vue` 公告区（仅已发布、置顶优先、无公告时隐藏）
+- **契约文档**：`doc/announcement-api.md`（路径/请求响应 schema/鉴权/排序约定，前端已按此实现）
 - 测试：`tests/test_announcement.py`（12）+ `tests/test_home.py`（6）+ `tests/test_migrations.py` 新增 announcements 升级/回退用例；**坑：`config.py` 的 `load_dotenv(override=True)` 使 .env 优先于环境变量，临时改配置需直接改 .env 或用 pytest monkeypatch**
 
 ## 用户体系（注册/登录/JWT/游客）

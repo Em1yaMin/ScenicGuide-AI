@@ -7,11 +7,12 @@
 
 | View | Route | Pattern | Data Source |
 |------|-------|---------|-------------|
-| `HomeView.vue` | `/visitor` | 静态内容壳 | 无 |
+| `HomeView.vue` | `/visitor` | 公告区（仅已发布，置顶优先，无公告隐藏）+ 热门景点/推荐路线活数据卡片（接口失败降级静态兜底） | fetch(API_HOME_HIGHLIGHTS) + fetch(API_PUBLIC_ANNOUNCEMENTS) |
 | `ChatView.vue` | `/visitor/chat` | iframe 嵌入+容错（数字人占满整页）+ 推荐问句底部浮层（postMessage SET_INPUT 注入数字人输入框，不自动发送） | import.meta.env + Pinia store |
 | `DashboardView.vue` | `/admin` | API 数据+ECharts | fetch(API_ADMIN_DASHBOARD) |
 | `ReportView.vue` | `/admin/report` | API 数据+ECharts | fetch(API_ADMIN_REPORT) |
 | `admin/KnowledgeView.vue` | `/admin/knowledge` | API 数据+CRUD 弹窗 | fetch(API_ADMIN_KNOWLEDGE) |
+| `admin/AnnouncementView.vue` | `/admin/announcements` | API 数据+CRUD 弹窗（X-Admin-Token） | fetch(API_ADMIN_ANNOUNCEMENTS) |
 | `LoginView.vue` | `/login`（顶层路由） | 表单+游客模式 | Pinia auth store |
 | `RegisterView.vue` | `/register`（顶层路由） | 表单校验+自动登录 | Pinia auth store |
 
