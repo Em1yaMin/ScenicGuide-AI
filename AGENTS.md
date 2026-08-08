@@ -275,6 +275,13 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 - Tests use in-memory SQLite (`tests/conftest.py` fixtures), no DATABASE_URL / .env needed.
 - Gotcha: `app/core/config.py` instantiates `Settings()` at import with a validator that rejects empty Dify env vars — running pytest without `.env` or placeholder `DIFY_API_URL`/`DIFY_API_KEY` raises ImportError. CI injects dummy values (tests never call real APIs). 推荐问句（阶段3 T3）与量化评估（阶段4 首项）已脱离 Dify，不再需要 `DIFY_RECOMMEND_WORKFLOW_API_KEY`/`DIFY_WORKFLOW_API_KEY`。
 
+## 结构化日志（批次2 C2：统一格式 + 请求日志）
+
+- `app/core/logging_config.py` — 标准 logging 统一日志体系（无新依赖）：`configure_logging()`（main.py lifespan Phase 0 调用，替代就地 basicConfig；DEBUG 开关行为不变）+ `RequestLoggingMiddleware`（main.py 最后 add_middleware 最外层，只处理 http scope）
+- 统一格式：时间(含毫秒)/级别/logger名/消息（`%(asctime)s.%(msecs)03d [%(levelname)s] %(name)s: %(message)s`）
+- 请求日志：每个 HTTP 请求一条 `app.request` logger 的 key=value 行（method/path/status/duration_ms/client/ip）；5xx 记 ERROR 带异常堆栈；健康检查/文档等噪音路径降级 DEBUG；client 从 Authorization Bearer JWT 解析（用户 id/guest-xxx），X-Admin-Token 匹配配置标记 admin，解析不到为 `-`（不报错）；path 不含 query，不读请求体，token/key/密码绝不入日志
+- 测试：`tests/test_logging.py`（11 用例）；格式与查询方式见 `doc/logging-request-logs.md`
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.
