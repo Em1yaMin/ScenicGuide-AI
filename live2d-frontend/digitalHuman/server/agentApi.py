@@ -11,15 +11,17 @@ from pydantic import BaseModel
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
 from digitalHuman.utils import config
-from digitalHuman.utils import TextMessage, StepMessage
+from digitalHuman.utils import TextMessage, StepMessage, RouteMessage
 from digitalHuman.agent import AgentPool
 
 router = APIRouter()
 agentPool = AgentPool()
 
 # 步骤帧协议（前端解析见 web/app/lib/comm.ts）：
-#   帧格式：\x02{json}\x03，其中 json = {"tool": "...", "label": "..."}
+#   帧格式：\x02{json}\x03，json = {"tool": "...", "label": "..."}
 #   回答文本仍按原始文本流透出，不参与帧编码（TTS/逐字渲染依赖不变）
+# 路线帧协议（批次8 B3）：同一帧通道，json = {"type": "route",
+#   "data": {路线信封}}——前端按 type 字段区分步骤帧与路线帧
 STEP_FRAME_START = "\x02"
 STEP_FRAME_END = "\x03"
 
@@ -48,10 +50,17 @@ async def apiAgentInfer(item: AgentInferIn):
         run_stream = agent.run(input, item.streaming, **item.settings)
 
         async def stream_with_steps():
-            # 透出 agent 产出流：StepMessage 编码为步骤帧（前端渲染），
-            # 回答文本原样透出（行为不变）
+            # 透出 agent 产出流：StepMessage 编码为步骤帧、RouteMessage
+            # 编码为路线帧（type=route，批次8 B3），回答文本原样透出
+            # （行为不变）
             async for chunk in run_stream:
-                if isinstance(chunk, StepMessage):
+                if isinstance(chunk, RouteMessage):
+                    frame = json.dumps(
+                        {"type": "route", "data": chunk.data},
+                        ensure_ascii=False,
+                    )
+                    yield STEP_FRAME_START + frame + STEP_FRAME_END
+                elif isinstance(chunk, StepMessage):
                     frame = json.dumps(
                         {"tool": chunk.tool or "", "label": chunk.label or ""},
                         ensure_ascii=False,

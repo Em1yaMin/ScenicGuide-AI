@@ -37,6 +37,7 @@ ToolCallLimitMiddleware 单轮工具调用上限（默认 15，continue 优雅�
 `InjectedState("user")` 从图状态注入（见 memory_tools.py）。
 """
 import asyncio
+import json
 import logging
 import threading
 from typing import Any, AsyncIterator, Dict, List, NotRequired, Optional
@@ -78,6 +79,10 @@ from app.services.intent_classifier import classify_intent
 from app.services.usage_tracker import CHAIN_DIALOGUE, usage_context
 
 logger = logging.getLogger(__name__)
+
+# plan_route 工具名（route_data 透出：done 事件/chat 响应携带该工具结果，
+# 供 ADH 前端渲染路线卡片；无调用或解析失败时省略，不阻断对话）
+_ROUTE_TOOL_NAME = "plan_route"
 
 
 # ── 自定义图状态（user 工具注入） ─────────────────────────────────────────
@@ -482,6 +487,34 @@ def _schedule_compaction(conversation_id: str, llm: Optional[Any] = None) -> Non
         logger.warning("会话历史压缩调度失败（忽略）: %s", e)
 
 
+def _extract_route_data(all_messages: List[BaseMessage]) -> Optional[Dict[str, Any]]:
+    """提取 plan_route 工具结果（响应 route_data 字段，批次8 B3）。
+
+    从消息列表中最后一条 plan_route 的 ToolMessage 解析工具返回的 JSON
+    信封（成功 {"ok": true, "data": {mode/origin/destination/distance/
+    duration/steps}} 或失败 {"ok": false, "error": "amap_*", "message"}}），
+    原样返回解析结果；无 plan_route 调用/内容非字符串/解析失败返回 None
+    （调用方省略该字段，前端不渲染路线卡片，不阻断对话）。
+    """
+    for msg in reversed(all_messages):
+        if getattr(msg, "type", "") != "tool":
+            continue
+        if getattr(msg, "name", "") != _ROUTE_TOOL_NAME:
+            continue
+        content = getattr(msg, "content", None)
+        if not isinstance(content, str):
+            return None
+        try:
+            parsed = json.loads(content)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning("plan_route 工具结果解析失败（route_data 省略）")
+            return None
+        if not isinstance(parsed, dict):
+            return None
+        return parsed
+    return None
+
+
 def _extract_answer(all_messages: List[BaseMessage]) -> str:
     """提取最终回答（最后一条非工具 AI 消息，与 chat_agent 同逻辑）。"""
     for msg in reversed(all_messages):
@@ -510,7 +543,9 @@ async def chat(
     调度长期记忆提取钩子（与 chat_agent 主链路行为一致）。
 
     返回 {"answer", "conversation_id", "rag_context", "rag_sources",
-    "intent"}；intent 为意图分流结果（complex/simple，观测用）。
+    "intent", "route_data"}；intent 为意图分流结果（complex/simple，观测
+    用）；route_data 为 plan_route 工具结果（成功/错误信封原样透出，无
+    路线规划时为 None，见 _extract_route_data）。
 
     Args:
         query: 用户消息
@@ -552,6 +587,8 @@ async def chat(
     all_messages: List[BaseMessage] = result.get("messages", [])
     answer = _extract_answer(all_messages)
     rag_context, rag_sources = main_chain._extract_rag_info(all_messages, rag_top_k)
+    # 批次8 B3：plan_route 工具结果透出（ADH 前端渲染路线卡片）
+    route_data = _extract_route_data(all_messages)
 
     # 3. 会话持久化 + 长期记忆钩子（与 chat_agent 主链路一致：先落盘后返回）
     main_chain._append_history(conversation_id, query, answer, user)
@@ -573,6 +610,7 @@ async def chat(
         "rag_context": rag_context,
         "rag_sources": rag_sources,
         "intent": "complex" if complex_intent else "simple",
+        "route_data": route_data,
     }
 
 
@@ -602,7 +640,9 @@ async def chat_stream(
       调用工具前会先输出正文 token，工具调用消息的内联 content 必须抑制
       （A1 实测必现，否则前端渲染工具调用前的碎文本）
     - `done`：流结束事件（conversation_id 透出；rag_context/rag_sources
-      从 search_knowledge 的 ToolMessage 提取，与 chat() 契约一致）
+      从 search_knowledge 的 ToolMessage 提取，与 chat() 契约一致；
+      批次8 B3 起携带 route_data——plan_route 工具结果原样透出，供 ADH
+      前端渲染路线卡片/文字路线兜底，无规划时为 null）
 
     事件契约与现有 SSE 兼容：{"type": "step"|"token"|"done", ...}，
     done 额外携带 intent 字段（分流结果，观测用）。
@@ -644,6 +684,7 @@ async def chat_stream(
     # 与 chat_agent 相同；A1 实测模型在调用工具前会输出正文 token，必须抑制）
     suppress_tokens = False
     rag_tool_messages: List[BaseMessage] = []  # search_knowledge 的 ToolMessage
+    route_tool_messages: List[BaseMessage] = []  # plan_route 的 ToolMessage（B3）
     answer_parts: List[str] = []
 
     # 批次7 C5 token 记账：标注链路/用户上下文（图内流式模型调用自动继承；
@@ -677,8 +718,11 @@ async def chat_stream(
             elif getattr(chunk, "type", "") == "tool":
                 # 工具执行结果（deepagents messages 流模式亦产出 ToolMessage）
                 suppress_tokens = False
-                if getattr(chunk, "name", "") == _KNOWLEDGE_TOOL_NAME:
+                tool_name = getattr(chunk, "name", "")
+                if tool_name == _KNOWLEDGE_TOOL_NAME:
                     rag_tool_messages.append(chunk)
+                elif tool_name == _ROUTE_TOOL_NAME:
+                    route_tool_messages.append(chunk)
 
     # 3. 会话持久化 + 长期记忆钩子（done 前调度：客户端收到 done 即关闭
     #    连接也不丢上下文/不丢记忆提取；review F1 2026-08-08——yield done
@@ -692,6 +736,8 @@ async def chat_stream(
     rag_context, rag_sources = main_chain._extract_rag_info(
         rag_tool_messages, rag_top_k
     )
+    # 批次8 B3：plan_route 工具结果透出（done 事件携带，ADH 渲染路线卡片）
+    route_data = _extract_route_data(route_tool_messages)
     logger.info(
         "deepagents 对话完成(流式): intent=%s user=%s conversation=%s steps=%d answer_len=%d",
         "complex" if complex_intent else "simple",
@@ -706,4 +752,5 @@ async def chat_stream(
         "rag_context": rag_context,
         "rag_sources": rag_sources,
         "intent": "complex" if complex_intent else "simple",
+        "route_data": route_data,
     }

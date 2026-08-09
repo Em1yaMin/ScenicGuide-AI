@@ -9,6 +9,7 @@ import { AUDIO_SUPPORT_ALERT, AI_THINK_MESSAGE } from "@/app/lib/constants";
 import { Comm } from "@/app/lib/comm";
 import { CharacterManager } from "@/app/lib/character";
 import Markdown from 'react-markdown';
+import RouteCard, { RouteEnvelope } from "@/app/ui/home/routeCard";
 
 let mediaStream: MediaStream | null = null;
 let mediaRecorder: MediaRecorder | null = null;
@@ -95,6 +96,12 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
     const [isProcessing, setIsProcessing] = useState(false);
     // Agent 工具调用步骤（LangChainAgent 步骤帧，如"正在检索知识库…"）
     const [agentSteps, setAgentSteps] = useState<{ tool: string; label: string }[]>([]);
+    // 路线卡片数据（批次8 B3：后端 done 事件 route_data 透出，本轮的
+    // plan_route 工具结果；新一轮对话清空）
+    const [routeData, setRouteData] = useState<RouteEnvelope | null>(null);
+    // 浏览器定位可用性（需 secure context：HTTPS 或 localhost；演示环境
+    // 经局域网 IP 访问不可用则隐藏 📍 按钮）
+    const [geoSupported, setGeoSupported] = useState(false);
     const inputRef = useRef<HTMLInputElement>(null);
     const chatbotRef = useRef<HTMLDivElement>(null);
     
@@ -113,10 +120,24 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
         clearChatRecord();
     }, [agentEngine, agentSettings]);
 
+    useEffect(() => {
+        // 浏览器定位能力探测：secure context（HTTPS/localhost）才可用，
+        // 否则隐藏 📍 按钮（navigator.geolocation 在非安全上下文不可用）
+        const supported =
+            typeof navigator !== "undefined" &&
+            "geolocation" in navigator &&
+            typeof window !== "undefined" &&
+            (window.isSecureContext ||
+                window.location.hostname === "localhost" ||
+                window.location.hostname === "127.0.0.1");
+        setGeoSupported(supported);
+    }, []);
+
     const chatWithAI = (message: string) => {
         console.log("chatWithAI: ", message);
-        // 新一轮对话：清空上一轮步骤提示
+        // 新一轮对话：清空上一轮步骤提示与路线卡片
         setAgentSteps([]);
+        setRouteData(null);
         addChatRecord({ role: ChatRole.HUMAN, content: message });
         // 请求AI
         let responseText = "";
@@ -204,6 +225,10 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
                 }
                 return [...prev, step];
             });
+        }, (route: any) => {
+            // 路线帧（批次8 B3）：plan_route 工具结果，渲染路线卡片
+            console.log("route data: ", route);
+            setRouteData(route || null);
         });
     }
 
@@ -332,6 +357,28 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
         inputRef.current.value = "";
     }
 
+    // 📍 定位辅助（批次8 B3，可选）：获取浏览器位置并填入输入框
+    // （navigator.geolocation → 坐标文本，agent 可据此做路径规划起点；
+    // 非 secure context / 用户拒绝时提示，不阻断对话）
+    const locateClick = () => {
+        if (!navigator.geolocation || isProcessing) return;
+        navigator.geolocation.getCurrentPosition(
+            (pos) => {
+                const { longitude, latitude } = pos.coords;
+                if (inputRef.current) {
+                    inputRef.current.value =
+                        `我的位置：${longitude.toFixed(6)},${latitude.toFixed(6)}`;
+                    inputRef.current.focus();
+                }
+            },
+            (err) => {
+                console.error("📍 定位失败: ", err);
+                alert("定位失败：" + (err.message || "无法获取当前位置"));
+            },
+            { timeout: 10000, maximumAge: 60000 }
+        );
+    }
+
     const enterPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.key === "Enter") {
             sendClick();
@@ -425,6 +472,21 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
                         :
                         <></>
                 }
+                {
+                    // 路线卡片（批次8 B3）：本轮对话规划了路线时渲染
+                    // （地图渲染失败自动降级文字路线，见 RouteCard）
+                    routeData ?
+                        <div className="chat-message">
+                            <div className="flex items-end">
+                                <div className="flex flex-col space-y-1 text-xs max-w-xs mx-2 order-2 items-start">
+                                    <RouteCard route={routeData} />
+                                </div>
+                                <img src="/icons/ai_icon.svg" alt="" className="w-6 h-6 rounded-full order-1 self-start" />
+                            </div>
+                        </div>
+                        :
+                        <></>
+                }
             </div>
 
             <div className="px-4 pt-4 mb-2 sm:mb-0 z-10 w-full">
@@ -446,8 +508,23 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
                                     </svg>
                             }
                         </button>
+                        {
+                            // 📍 定位按钮（可选，批次8 B3）：仅 secure context
+                            // （HTTPS/localhost）下可用，否则隐藏
+                            geoSupported ?
+                                <button type="button" onClick={locateClick} disabled={isProcessing}
+                                    title="填入当前位置（供路线规划起点）"
+                                    className="inline-flex items-center justify-center rounded-full h-12 w-12 transition duration-500 ease-in-out hover:bg-gray-300 focus:outline-none text-blue-600">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="size-6">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" />
+                                    </svg>
+                                </button>
+                                :
+                                <></>
+                        }
                     </div>
-                    <input enterKeyHint="send" type="text" disabled={isProcessing} placeholder="Write your message!" ref={inputRef} onKeyDown={enterPress} className="w-full focus:outline-none focus:placeholder-gray-400 text-gray-600 placeholder-gray-600 pl-12 bg-gray-200 rounded-md py-3" />
+                    <input enterKeyHint="send" type="text" disabled={isProcessing} placeholder="Write your message!" ref={inputRef} onKeyDown={enterPress} className={clsx("w-full focus:outline-none focus:placeholder-gray-400 text-gray-600 placeholder-gray-600 bg-gray-200 rounded-md py-3", geoSupported ? "pl-24" : "pl-12")} />
                     <div className="absolute right-0 items-center inset-y-0 hidden sm:flex">
                         <button type="button" className="inline-flex items-center justify-center rounded-full h-10 w-10 transition duration-500 ease-in-out text-gray-500 hover:bg-gray-300 focus:outline-none">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="h-6 w-6 text-gray-600">

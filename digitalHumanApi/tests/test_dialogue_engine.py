@@ -62,10 +62,26 @@ async def test_default_engine_langchain(client, monkeypatch):
     assert data["rag_sources"] == [
         {"source": "s1.md", "score": 0.9, "namespace": "documents"}
     ]
+    # 批次8 B3：无路线规划时 route_data 为 null
+    assert data.get("route_data") is None
     # user 标识透传（无 token 时回退请求体 user）
     assert called["kwargs"]["user"] == "visitor"
     assert called["kwargs"]["query"] == "有什么推荐？"
     assert called["kwargs"]["use_rag"] is True
+
+
+async def test_default_engine_passes_route_data(client, monkeypatch):
+    """批次8 B3：装配层 chat() 返回 route_data 时响应原样透出。"""
+    route = {"ok": True, "data": {"mode": "walking", "distance": "1200",
+                                    "duration": "960", "steps": []}}
+
+    async def fake_chat(**kwargs):
+        return _dg_result(route_data=route)
+
+    monkeypatch.setattr(deepagents, "chat", fake_chat)
+    resp = await _chat(client, "从黄鹤楼到户部巷怎么走？")
+    assert resp.status_code == 200
+    assert resp.json()["route_data"] == route
 
 
 async def test_langchain_passes_use_rag_and_top_k(client, monkeypatch):

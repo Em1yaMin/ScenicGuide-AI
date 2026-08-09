@@ -38,6 +38,7 @@ class ChatResponse(BaseModel):
     conversation_id: str = Field(default="", description="会话 ID（LangChain 会话或 Dify 会话）")
     rag_context: str = Field(default="", description="注入的 RAG 上下文（调试用）")
     rag_sources: list = Field(default_factory=list, description="RAG 检索来源")
+    route_data: Optional[dict] = Field(default=None, description="路线规划结果（plan_route 工具信封原样透出；None=本轮未规划路线，ADH 前端据此渲染路线卡片）")
 
 
 class RagContextRequest(BaseModel):
@@ -126,6 +127,7 @@ async def chat_with_rag(
                 conversation_id=result["conversation_id"],
                 rag_context=result["rag_context"],
                 rag_sources=result["rag_sources"],
+                route_data=result.get("route_data"),
             )
         except Exception as e:
             # 故障回落：主链路任何异常（含 LLM 未配置）都不阻断对话，
@@ -210,7 +212,9 @@ def _sse(event: Dict[str, Any]) -> str:
       （正在检索知识库/查询景点/推荐路线…，LangChain 链路）
     - {"type": "token", "text": str}：最终回答增量（逐字输出）
     - {"type": "done", "conversation_id": str, "rag_context": str,
-       "rag_sources": list}：流式完成（与 ChatResponse 字段一致）
+       "rag_sources": list, "route_data": dict|null}：流式完成（与
+       ChatResponse 字段一致；route_data 为 plan_route 工具结果，
+       无路线规划时为 null，批次8 B3）
     - {"type": "error", "message": str, "fallback": bool}：链路错误；
       fallback=true 表示已切换 Dify 兜底继续输出，false 表示双链路均失败
     """

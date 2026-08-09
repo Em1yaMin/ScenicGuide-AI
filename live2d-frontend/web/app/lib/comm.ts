@@ -102,12 +102,15 @@ export class Comm {
     settings: { [key: string]: string } = {},
     callbackProcessing: (index: number, data: string) => void,
     callbackEnd: (index: number) => void,
-    callbackStep?: (step: { tool: string; label: string }) => void
+    callbackStep?: (step: { tool: string; label: string }) => void,
+    callbackRoute?: (route: any) => void
   ): Promise<void> {
     try {
       const reader = await API.agent_infer_streaming_api(data, engine, conversationId, settings);
       const decoder = new TextDecoder("utf-8");
-      // 步骤帧协议（agentApi 编码）：\x02{json}\x03，json = {tool, label}。
+      // 步骤/路线帧协议（agentApi 编码）：\x02{json}\x03。
+      // json 为步骤帧（{tool, label}）或路线帧（{type: "route", data}，
+      // 批次8 B3——后端 done 事件 route_data 原样透传）。
       // 回答文本仍按原始文本流透出；帧可能被 fetch 分块切碎，需缓冲拼接。
       const STEP_START = "\u0002";
       const STEP_END = "\u0003";
@@ -147,7 +150,13 @@ export class Comm {
           buffer = buffer.slice(end + 1);
           try {
             const stepData = JSON.parse(raw);
-            if (callbackStep && stepData && typeof stepData === "object") {
+            if (!stepData || typeof stepData !== "object") continue;
+            if (stepData.type === "route") {
+              // 路线帧：plan_route 工具结果（成功/错误信封），透给调用方渲染
+              if (callbackRoute) callbackRoute(stepData.data);
+              continue;
+            }
+            if (callbackStep) {
               callbackStep({
                 tool: stepData.tool || "",
                 label: stepData.label || stepData.tool || "",

@@ -14,6 +14,7 @@
 不依赖真实 LLM：注入假 agent（记录输入并产出构造好的消息 chunk 流）。
 """
 
+import json
 import pytest
 from langchain_core.messages import AIMessageChunk, ToolMessage
 
@@ -204,3 +205,92 @@ async def test_stream_rag_sources_from_knowledge_tool(monkeypatch):
         }
     ]
     assert "灵山胜境开放时间" in done["rag_context"]
+    # 未调用 plan_route：route_data 为 None（前端不渲染路线卡片）
+    assert done.get("route_data") is None
+
+
+async def test_stream_route_data_from_plan_route_tool(monkeypatch):
+    """plan_route 的 ToolMessage 内容 → done 事件 route_data 透出（B3）。
+
+    成功信封与错误信封均原样透出（前端据此渲染地图卡片或文字兜底）；
+    多条 plan_route 调用取最后一条。
+    """
+    ok_route = json.dumps(
+        {
+            "ok": True,
+            "data": {
+                "mode": "walking",
+                "origin": "114.306967,30.545389",
+                "destination": "114.32,30.56",
+                "distance": "1500",
+                "duration": "1200",
+                "steps": [
+                    {"instruction": "向东步行 100 米", "distance": "100",
+                     "duration": "80", "road": ""}
+                ],
+                "strategy": "",
+            },
+        },
+        ensure_ascii=False,
+    )
+    fake = _FakeStreamAgent(
+        [
+            _tool_chunk("geocode_location", "c0"),
+            _tool_result("geocode_location", "c0"),
+            _tool_chunk("plan_route", "c1"),
+            _tool_result("plan_route", "c1", ok_route),
+            _text_chunk("步行约 25 分钟。"),
+        ]
+    )
+    monkeypatch.setattr(dg_agent, "get_agent", lambda *, use_rag=True, llm=None: fake)
+    events = [e async for e in dg_agent.chat_stream("从黄鹤楼怎么走到户部巷？", user="u1")]
+    done = events[-1]
+    assert done["type"] == "done"
+    assert done["route_data"] == {
+        "ok": True,
+        "data": {
+            "mode": "walking",
+            "origin": "114.306967,30.545389",
+            "destination": "114.32,30.56",
+            "distance": "1500",
+            "duration": "1200",
+            "steps": [
+                {"instruction": "向东步行 100 米", "distance": "100",
+                 "duration": "80", "road": ""}
+            ],
+            "strategy": "",
+        },
+    }
+    # step 事件按名透出（AMAP_STEP_LABELS 合并生效）
+    steps = [e for e in events if e["type"] == "step"]
+    assert [s["tool"] for s in steps] == ["geocode_location", "plan_route"]
+    assert steps[-1]["label"] == "正在规划路线…"
+
+
+async def test_stream_route_data_error_envelope(monkeypatch):
+    """plan_route 失败（错误信封）→ done 事件 route_data 原样透出。"""
+    err = {"ok": False, "error": "amap_not_configured", "message": "高德地图服务未配置"}
+    fake = _FakeStreamAgent(
+        [
+            _tool_chunk("plan_route", "c1"),
+            _tool_result("plan_route", "c1", json.dumps(err, ensure_ascii=False)),
+            _text_chunk("抱歉，路线服务暂不可用。"),
+        ]
+    )
+    monkeypatch.setattr(dg_agent, "get_agent", lambda *, use_rag=True, llm=None: fake)
+    events = [e async for e in dg_agent.chat_stream("怎么过去？", user="u1")]
+    assert events[-1]["route_data"] == err
+
+
+async def test_stream_route_data_parse_failure_omitted(monkeypatch):
+    """plan_route 结果非合法 JSON → route_data 省略（None，不报错）。"""
+    fake = _FakeStreamAgent(
+        [
+            _tool_chunk("plan_route", "c1"),
+            _tool_result("plan_route", "c1", "{broken json"),
+            _text_chunk("路线信息。"),
+        ]
+    )
+    monkeypatch.setattr(dg_agent, "get_agent", lambda *, use_rag=True, llm=None: fake)
+    events = [e async for e in dg_agent.chat_stream("怎么过去？", user="u1")]
+    assert events[-1]["route_data"] is None
