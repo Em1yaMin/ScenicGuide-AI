@@ -8,19 +8,24 @@ import type { PublicAnnouncementListResponse } from '@/types/announcement'
 
 const heroVisible = ref(false)
 
-/** 首页卡片归一化结构（活数据与静态兜底共用渲染，保持原有卡片样式） */
+/** 首页卡片归一化结构（活数据与静态兜底共用渲染） */
 interface SpotCard {
   name: string
   tag: string
   description: string
   icon: string
+  meta: string
 }
 
 interface RouteCard {
   name: string
   description: string
   meta: string
+  reason: string
 }
+
+/** 路线序数：卷轴式中文数字（结构即信息，替代通用 01/02 编号） */
+const ROUTE_NUMERALS = ['一', '二', '三', '四', '五']
 
 /** 静态兜底数据：首页活数据接口不可用时的热门景点（原写死卡片内容） */
 const FALLBACK_SPOTS: SpotCard[] = [
@@ -29,18 +34,21 @@ const FALLBACK_SPOTS: SpotCard[] = [
     tag: '历史古迹',
     description: '天下绝景，千年诗楼，登高望远尽览江城风貌',
     icon: '🏯',
+    meta: '武昌区 · 约 2 小时',
   },
   {
     name: '东湖绿道',
     tag: '自然风光',
     description: '城中湖泊，四季皆景，骑行漫步的绝佳去处',
     icon: '🏞',
+    meta: '东湖风景区 · 约 3 小时',
   },
   {
     name: '省博物馆',
     tag: '文化博览',
     description: '曾侯乙编钟，千年楚文化的璀璨见证',
     icon: '🏛',
+    meta: '武昌区 · 约 3 小时',
   },
 ]
 
@@ -50,16 +58,19 @@ const FALLBACK_ROUTES: RouteCard[] = [
     name: '经典一日游',
     description: '黄鹤楼 → 户部巷 → 东湖绿道',
     meta: '约 6 小时 · 适合初次到访',
+    reason: '经典行程一次看遍江城精华',
   },
   {
     name: '文化深度游',
     description: '省博物馆 → 归元寺 → 古琴台',
     meta: '约 8 小时 · 适合文化爱好者',
+    reason: '让历史爱好者不虚此行',
   },
   {
     name: '亲子欢乐行',
     description: '东湖海洋世界 → 植物园 → 磨山',
     meta: '约 5 小时 · 适合家庭出游',
+    reason: '寓教于乐，孩子玩得开心',
   },
 ]
 
@@ -90,6 +101,17 @@ function spotIcon(tags: string[] | undefined): string {
   return '🏔'
 }
 
+/** 景点卡片元信息：所在地 · 建议游览时长（活数据字段真实展示） */
+function spotMeta(spot: { location?: string; duration_minutes?: number }): string {
+  const parts: string[] = []
+  if (spot.location) parts.push(spot.location)
+  if (spot.duration_minutes) {
+    const mins = spot.duration_minutes
+    parts.push(mins % 60 === 0 ? `约 ${mins / 60} 小时` : `约 ${(mins / 60).toFixed(1)} 小时`)
+  }
+  return parts.join(' · ')
+}
+
 /** 路线卡片元信息：约 X 小时 · 适合 Y */
 function routeMeta(route: HomeRoute): string {
   const parts: string[] = []
@@ -112,6 +134,7 @@ async function fetchHighlights() {
         tag: s.tags?.[0] ?? '景区景点',
         description: s.description,
         icon: spotIcon(s.tags),
+        meta: spotMeta(s),
       }))
     }
     if (data.routes?.length) {
@@ -119,6 +142,7 @@ async function fetchHighlights() {
         name: r.name,
         description: r.description,
         meta: routeMeta(r),
+        reason: r.recommend_reason,
       }))
     }
   } catch {
@@ -155,9 +179,32 @@ function scrollToRecommendedRoutes() {
 
 <template>
   <div class="home">
-    <!-- Hero Section -->
+    <!-- Hero Section：论点 = 数字人导览；右侧墨色山峦剪影 + 朱砂印章落款（签名元素） -->
     <section class="hero" :class="{ 'hero--visible': heroVisible }">
-      <div class="hero-noise" />
+      <!-- 水墨山峦剪影（三层：远雾 → 青玉淡 → 墨青；支持元素，aria-hidden） -->
+      <svg
+        class="hero-mountains"
+        viewBox="0 0 640 360"
+        preserveAspectRatio="xMidYMax slice"
+        aria-hidden="true"
+      >
+        <circle cx="486" cy="116" r="40" fill="var(--surface)" opacity="0.9" />
+        <path
+          d="M0 218 L118 142 L206 208 L296 118 L420 216 L516 158 L640 226 L640 360 L0 360 Z"
+          fill="var(--mist)"
+        />
+        <path
+          d="M0 278 L138 202 L258 268 L382 188 L502 276 L640 238 L640 360 L0 360 Z"
+          fill="var(--jade-soft)"
+          opacity="0.85"
+        />
+        <path
+          d="M0 330 L176 262 L318 318 L468 252 L640 310 L640 360 L0 360 Z"
+          fill="var(--jade)"
+          opacity="0.4"
+        />
+      </svg>
+
       <div class="hero-content">
         <p class="hero-label"><span class="hero-label-line" />AI 智慧景区服务</p>
         <h1 class="hero-title">
@@ -176,13 +223,18 @@ function scrollToRecommendedRoutes() {
           </button>
         </div>
       </div>
+
+      <!-- 签名元素：朱砂印章落款「AI 导览」（入场序列最后盖章落定） -->
+      <div class="hero-seal" role="img" aria-label="AI 导览印章">
+        <span class="hero-seal-ai">AI</span>
+        <span class="hero-seal-text">导览</span>
+      </div>
     </section>
 
     <!-- Announcements（公告区：仅在有已发布公告时显示） -->
     <section v-if="announcements.length > 0" class="announcements section">
-      <div class="announcements-decor" aria-hidden="true" />
       <div class="section-header">
-        <h2 class="section-title">景区公告</h2>
+        <h2 class="section-title"><span class="section-seal" aria-hidden="true" />景区公告</h2>
         <p class="section-desc">园区动态与温馨提示</p>
       </div>
       <div class="announcement-list">
@@ -193,7 +245,7 @@ function scrollToRecommendedRoutes() {
           :class="{ 'announcement-card--pinned': item.pinned }"
         >
           <div class="announcement-card-title">
-            <span v-if="item.pinned" class="announcement-pin">📌 置顶</span>
+            <span v-if="item.pinned" class="announcement-pin">置顶</span>
             <h3>{{ item.title }}</h3>
             <time class="announcement-date">{{ formatDate(item.created_at) }}</time>
           </div>
@@ -205,16 +257,11 @@ function scrollToRecommendedRoutes() {
     <!-- Featured Spots -->
     <section class="section">
       <div class="section-header">
-        <h2 class="section-title">热门景点</h2>
+        <h2 class="section-title"><span class="section-seal" aria-hidden="true" />热门景点</h2>
         <p class="section-desc">探索最受游客喜爱的目的地</p>
       </div>
       <div class="spots-grid">
-        <div
-          v-for="(spot, index) in spots"
-          :key="spot.name"
-          class="spot-card"
-          :class="{ 'spot-card--featured': index === 0 }"
-        >
+        <div v-for="spot in spots" :key="spot.name" class="spot-card">
           <div class="spot-card-img">
             <div class="img-placeholder">
               <span class="img-placeholder-icon">{{ spot.icon }}</span>
@@ -224,6 +271,7 @@ function scrollToRecommendedRoutes() {
             <span class="spot-card-tag">{{ spot.tag }}</span>
             <h3>{{ spot.name }}</h3>
             <p>{{ spot.description }}</p>
+            <span class="spot-meta">{{ spot.meta }}</span>
           </div>
         </div>
       </div>
@@ -232,16 +280,19 @@ function scrollToRecommendedRoutes() {
     <!-- Recommended Routes -->
     <section id="recommended-routes" class="section">
       <div class="section-header">
-        <h2 class="section-title">推荐路线</h2>
+        <h2 class="section-title"><span class="section-seal" aria-hidden="true" />推荐路线</h2>
         <p class="section-desc">精心规划的游览体验</p>
       </div>
       <div class="routes-list">
         <div v-for="(route, index) in routes" :key="route.name" class="route-card">
-          <div class="route-index">{{ String(index + 1).padStart(2, '0') }}</div>
+          <div class="route-index" aria-hidden="true">{{ ROUTE_NUMERALS[index] ?? index + 1 }}</div>
           <div class="route-content">
-            <h3>{{ route.name }}</h3>
-            <p>{{ route.description }}</p>
-            <span class="route-meta">{{ route.meta }}</span>
+            <div class="route-title-row">
+              <h3>{{ route.name }}</h3>
+              <span class="route-meta">{{ route.meta }}</span>
+            </div>
+            <p class="route-desc">{{ route.description }}</p>
+            <p v-if="route.reason" class="route-reason">「{{ route.reason }}」</p>
           </div>
         </div>
       </div>
@@ -260,27 +311,57 @@ function scrollToRecommendedRoutes() {
   overflow: hidden;
 }
 
-.hero-noise {
+/* 水墨山峦剪影：右下角三层山脊（远雾 → 青玉淡 → 墨青），hero 入场时淡入 */
+.hero-mountains {
   position: absolute;
-  inset: 0;
-  opacity: 0.03;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  right: 0;
+  bottom: 0;
+  width: min(52vw, 640px);
+  height: 100%;
+  max-height: 560px;
   pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--duration-slow) var(--ease-out) 150ms;
+}
+
+.hero--visible .hero-mountains {
+  opacity: 1;
 }
 
 .hero-content {
   position: relative;
+  z-index: 1;
   max-width: 800px;
-  opacity: 0;
-  transform: translateY(24px);
-  transition:
-    opacity 0.8s var(--ease-out),
-    transform 0.8s var(--ease-out);
 }
 
-.hero--visible .hero-content {
+/* 入场序列：小标 → 题字 → 副文 → 题跋 → 动作，逐段浮现（唯一动效编排） */
+.hero-content > * {
+  opacity: 0;
+  transform: translateY(16px);
+  transition:
+    opacity 0.7s var(--ease-out),
+    transform 0.7s var(--ease-out);
+}
+
+.hero--visible .hero-content > * {
   opacity: 1;
   transform: translateY(0);
+}
+
+.hero--visible .hero-label {
+  transition-delay: 0ms;
+}
+.hero--visible .hero-title {
+  transition-delay: 80ms;
+}
+.hero--visible .hero-subtitle {
+  transition-delay: 160ms;
+}
+.hero--visible .hero-quote {
+  transition-delay: 240ms;
+}
+.hero--visible .hero-actions {
+  transition-delay: 320ms;
 }
 
 .hero-label {
@@ -288,9 +369,9 @@ function scrollToRecommendedRoutes() {
   align-items: center;
   gap: var(--space-sm);
   font-family: var(--font-mono);
-  font-size: var(--text-small);
-  color: var(--color-accent);
-  letter-spacing: 0.15em;
+  font-size: var(--text-caption);
+  color: var(--jade);
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   margin-bottom: var(--space-xl);
 }
@@ -299,39 +380,39 @@ function scrollToRecommendedRoutes() {
   display: inline-block;
   width: 24px;
   height: 1px;
-  background: var(--color-accent);
+  background: var(--jade);
 }
 
 .hero-title {
   font-family: var(--font-display);
   font-size: var(--text-hero);
-  line-height: 1.15;
-  color: var(--color-ink);
-  margin-bottom: var(--space-lg);
   font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.15;
+  color: var(--ink);
+  margin-bottom: var(--space-lg);
 }
 
 .hero-accent {
-  color: var(--color-accent);
+  color: var(--jade);
 }
 
 .hero-subtitle {
   font-size: var(--text-subtitle);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   line-height: 1.6;
   max-width: 28em;
   margin-bottom: var(--space-xl);
 }
 
+/* 题跋引用：朱砂竖签，卷轴旁注气质 */
 .hero-quote {
   font-family: var(--font-display);
   font-size: var(--text-title);
-  font-style: italic;
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   margin: 0 0 var(--space-xl);
   padding-left: var(--space-md);
-  border-left: 2px solid var(--color-accent);
-  opacity: 0.6;
+  border-left: 2px solid var(--cinnabar);
 }
 
 .hero-actions {
@@ -340,25 +421,25 @@ function scrollToRecommendedRoutes() {
   flex-wrap: wrap;
 }
 
+/* ── 按钮（青玉主 / 描边次，全站通用形态） ── */
 .btn-primary {
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
   padding: var(--space-md) var(--space-xl);
-  background: var(--color-ink);
-  color: var(--color-paper);
+  background: var(--jade);
+  color: var(--surface);
   font-size: var(--text-body);
   font-weight: 500;
   text-decoration: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   transition:
     background var(--duration-fast) var(--ease-out),
     transform var(--duration-fast) var(--ease-out);
 }
 
 .btn-primary:hover {
-  background: var(--color-accent);
-  transform: translateY(-1px);
+  background: var(--jade-strong);
   text-decoration: none;
 }
 
@@ -375,46 +456,107 @@ function scrollToRecommendedRoutes() {
   align-items: center;
   padding: var(--space-md) var(--space-xl);
   background: transparent;
-  color: var(--color-ink);
+  color: var(--ink);
   font-size: var(--text-body);
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
   text-decoration: none;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border: 1px solid var(--mist-strong);
+  border-radius: var(--radius-sm);
   transition:
     border-color var(--duration-fast) var(--ease-out),
     color var(--duration-fast) var(--ease-out);
 }
 
 .btn-secondary:hover {
-  border-color: var(--color-ink);
+  border-color: var(--ink);
   text-decoration: none;
 }
 
-/* ── Announcements ── */
-.announcements {
-  position: relative;
-  overflow: hidden;
-}
-
-/* 渐变点缀：柔和光晕铺底，衬托毛玻璃卡片 */
-.announcements-decor {
+/* ── 签名元素：朱砂印章落款 ── */
+.hero-seal {
   position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(640px 240px at 6% 0%, var(--color-accent-light), transparent 70%),
-    radial-gradient(520px 220px at 94% 100%, var(--color-accent-light), transparent 70%);
+  right: var(--space-2xl);
+  bottom: var(--space-2xl);
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 52px;
+  height: 52px;
+  background: var(--cinnabar);
+  color: var(--surface);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  transform: rotate(-2deg);
+  opacity: 0;
+  scale: 1.35;
+  transition:
+    opacity 0.4s var(--ease-stamp),
+    scale 0.5s var(--ease-stamp) 0.06s;
 }
 
-.announcements .section-header {
-  position: relative;
+.hero--visible .hero-seal {
+  opacity: 1;
+  scale: 1;
 }
 
+.hero-seal-ai {
+  font-family: var(--font-mono);
+  font-size: var(--text-tiny);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.hero-seal-text {
+  font-family: var(--font-display);
+  font-size: var(--text-caption);
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  margin-left: 0.2em; /* 平衡字距视觉居中 */
+}
+
+/* ── Section 题跋（朱砂方点为印，标题为题字） ── */
+.section {
+  padding: var(--space-section) var(--space-2xl);
+}
+
+.section-header {
+  margin-bottom: var(--space-xl);
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-family: var(--font-display);
+  font-size: var(--text-display);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  margin: 0 0 var(--space-xs);
+}
+
+.section-seal {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  background: var(--cinnabar);
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.section-desc {
+  font-size: var(--text-body);
+  color: var(--slate);
+  margin: 0;
+}
+
+/* ── Announcements（题签卡片） ── */
 .announcement-list {
-  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
@@ -423,36 +565,34 @@ function scrollToRecommendedRoutes() {
 .announcement-card {
   position: relative;
   padding: var(--space-lg) var(--space-xl);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.75);
-  box-shadow: 0 8px 24px rgba(26, 26, 26, 0.06);
-  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 1px solid var(--mist);
+  box-shadow: var(--shadow-card);
   transition:
-    transform var(--duration-normal) var(--ease-out),
-    box-shadow var(--duration-normal) var(--ease-out);
+    border-color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
 }
 
-/* 左侧渐变描边点缀 */
+/* 青玉侧签：题签的"签" */
 .announcement-card::before {
   content: '';
   position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
+  left: -1px;
+  top: 16px;
+  bottom: 16px;
   width: 3px;
-  background: linear-gradient(180deg, var(--color-accent), rgba(196, 92, 38, 0.15));
+  border-radius: 0 2px 2px 0;
+  background: var(--jade);
 }
 
 .announcement-card--pinned::before {
-  background: linear-gradient(180deg, var(--color-accent), #e8a87c);
+  background: var(--cinnabar);
 }
 
 .announcement-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 32px rgba(26, 26, 26, 0.1);
+  border-color: var(--mist-strong);
+  box-shadow: var(--shadow-pop);
 }
 
 .announcement-card-title {
@@ -466,32 +606,34 @@ function scrollToRecommendedRoutes() {
 .announcement-card-title h3 {
   font-family: var(--font-display);
   font-size: var(--text-subtitle);
-  color: var(--color-ink);
+  font-weight: 700;
+  color: var(--ink);
   margin: 0;
 }
 
+/* 置顶 = 朱砂迷你印 */
 .announcement-pin {
-  font-size: var(--text-caption);
+  font-size: var(--text-tiny);
   font-weight: 500;
-  color: var(--color-accent);
-  background: var(--color-accent-light);
-  padding: 2px 10px;
-  border-radius: 12px;
+  color: var(--surface);
+  background: var(--cinnabar);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
   flex-shrink: 0;
+  letter-spacing: 0.08em;
 }
 
 .announcement-date {
   margin-left: auto;
   font-size: var(--text-caption);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   font-family: var(--font-mono);
-  opacity: 0.8;
 }
 
 .announcement-content {
   margin: 0;
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   line-height: 1.7;
   white-space: pre-line;
   display: -webkit-box;
@@ -500,57 +642,28 @@ function scrollToRecommendedRoutes() {
   overflow: hidden;
 }
 
-/* ── Section shared ── */
-.section {
-  padding: var(--space-2xl) var(--space-2xl);
-}
-
-.section-header {
-  margin-bottom: var(--space-xl);
-}
-
-.section-title {
-  font-family: var(--font-display);
-  font-size: var(--text-display);
-  color: var(--color-ink);
-  margin: 0 0 var(--space-xs);
-}
-
-.section-desc {
-  font-size: var(--text-body);
-  color: var(--color-ink-secondary);
-  margin: 0;
-}
-
-/* ── Spots Grid ── */
+/* ── Spots Grid（等宽意象卡） ── */
 .spots-grid {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: var(--space-lg);
 }
 
 .spot-card {
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-md);
   overflow: hidden;
-  background: transparent;
-  transition:
-    border-color var(--duration-normal) var(--ease-out),
-    transform var(--duration-normal) var(--ease-out);
+  background: var(--surface);
+  transition: border-color var(--duration-fast) var(--ease-out);
 }
 
 .spot-card:hover {
-  border-color: var(--color-ink-secondary);
-  transform: translateY(-2px);
-}
-
-.spot-card--featured {
-  grid-row: span 1;
+  border-color: var(--mist-strong);
 }
 
 .spot-card-img {
-  aspect-ratio: 16/9;
-  background: var(--color-overlay);
+  aspect-ratio: 16/8;
+  background: var(--overlay);
   overflow: hidden;
 }
 
@@ -560,22 +673,22 @@ function scrollToRecommendedRoutes() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--color-accent-light);
+  background: var(--jade-soft);
 }
 
 .img-placeholder-icon {
-  font-size: 2.5rem;
-  opacity: 0.5;
+  font-size: 2.75rem;
+  opacity: 0.75;
 }
 
 .spot-card-body {
-  padding: var(--space-md) var(--space-lg);
+  padding: var(--space-md) var(--space-lg) var(--space-lg);
 }
 
 .spot-card-tag {
   display: inline-block;
   font-size: var(--text-caption);
-  color: var(--color-accent);
+  color: var(--jade);
   font-weight: 500;
   margin-bottom: var(--space-xs);
 }
@@ -583,63 +696,92 @@ function scrollToRecommendedRoutes() {
 .spot-card-body h3 {
   font-family: var(--font-display);
   font-size: var(--text-subtitle);
+  font-weight: 700;
   margin: 0 0 var(--space-xs);
-  color: var(--color-ink);
+  color: var(--ink);
 }
 
 .spot-card-body p {
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
-  margin: 0;
-  line-height: 1.5;
+  color: var(--slate);
+  margin: 0 0 var(--space-sm);
+  line-height: 1.6;
 }
 
-/* ── Routes List ── */
+/* 数据行：所在地 · 建议时长（mono，数据即排版） */
+.spot-meta {
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  color: var(--slate);
+}
+
+/* ── Routes List（卷轴式） ── */
 .routes-list {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  border-top: 1px solid var(--color-border);
-  border-bottom: 1px solid var(--color-border);
+  border-top: 1px solid var(--mist);
 }
 
 .route-card {
   display: flex;
-  align-items: center;
   gap: var(--space-xl);
   padding: var(--space-lg) 0;
+  border-bottom: 1px solid var(--mist);
   transition: background var(--duration-fast) var(--ease-out);
 }
 
 .route-card:hover {
-  background: var(--color-overlay);
+  background: var(--overlay);
 }
 
 .route-index {
-  font-family: var(--font-mono);
+  font-family: var(--font-display);
   font-size: var(--text-title);
-  color: var(--color-border);
-  min-width: 3em;
+  font-weight: 700;
+  color: var(--jade);
+  min-width: 2.5em;
   text-align: right;
+  flex-shrink: 0;
+}
+
+.route-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.route-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-md);
+  flex-wrap: wrap;
 }
 
 .route-content h3 {
   font-family: var(--font-display);
   font-size: var(--text-subtitle);
-  margin: 0 0 var(--space-xs);
-  color: var(--color-ink);
-}
-
-.route-content p {
-  font-size: var(--text-body);
-  color: var(--color-ink-secondary);
-  margin: 0 0 var(--space-xs);
+  font-weight: 700;
+  margin: 0;
+  color: var(--ink);
 }
 
 .route-meta {
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  color: var(--slate);
+}
+
+.route-desc {
+  font-size: var(--text-body);
+  color: var(--slate);
+  margin: var(--space-xs) 0 0;
+}
+
+/* 推荐理由：题跋式引注 */
+.route-reason {
+  font-family: var(--font-display);
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
-  opacity: 0.7;
+  color: var(--slate);
+  margin: var(--space-xs) 0 0;
 }
 
 /* ── Responsive ── */
@@ -647,15 +789,25 @@ function scrollToRecommendedRoutes() {
   .spots-grid {
     grid-template-columns: 1fr 1fr;
   }
-  .spot-card--featured {
-    grid-row: auto;
-  }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 720px) {
   .hero {
-    padding: var(--space-xl) var(--space-lg);
+    padding: var(--space-xl) var(--space-lg) 160px;
     min-height: auto;
+  }
+
+  /* 山峦收缩为底部细条（弱化，不挡内容） */
+  .hero-mountains {
+    width: 100%;
+    height: 130px;
+    max-height: none;
+    opacity: 0.55 !important;
+  }
+
+  /* 印章仅在宽屏展示（窄屏下印章悬空无山峦依托） */
+  .hero-seal {
+    display: none;
   }
 
   .hero-title {
@@ -667,17 +819,16 @@ function scrollToRecommendedRoutes() {
   }
 
   .section {
-    padding: var(--space-xl) var(--space-lg);
+    padding: var(--space-section) var(--space-lg);
   }
 
   .route-card {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: var(--space-sm);
+    gap: var(--space-md);
   }
 
   .route-index {
     text-align: left;
+    min-width: 1.5em;
   }
 }
 </style>

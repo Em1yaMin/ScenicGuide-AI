@@ -15,10 +15,10 @@ function withRedirect(path: string) {
   <div class="visitor-layout">
     <header class="visitor-header">
       <RouterLink to="/visitor" class="brand">
-        <span class="brand-icon">⛰</span>
+        <span class="brand-icon" aria-hidden="true">⛰</span>
         <span class="brand-text">景区导览 AI 数字人</span>
       </RouterLink>
-      <nav>
+      <nav aria-label="主导航">
         <RouterLink to="/visitor">首页</RouterLink>
         <RouterLink to="/visitor/chat">数字人</RouterLink>
       </nav>
@@ -45,6 +45,7 @@ function withRedirect(path: string) {
 
     <footer class="visitor-footer">
       <div class="footer-inner">
+        <span class="footer-seal" aria-hidden="true">导</span>
         <span class="footer-brand">景区导览 AI 数字人</span>
         <span class="footer-divider">·</span>
         <span class="footer-copy">© 2026 智慧导览系统</span>
@@ -58,8 +59,8 @@ function withRedirect(path: string) {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  color: var(--color-ink);
-  background: var(--color-paper);
+  color: var(--ink);
+  background: var(--paper);
 }
 
 .visitor-header {
@@ -67,10 +68,10 @@ function withRedirect(path: string) {
   align-items: baseline;
   justify-content: space-between;
   padding: var(--space-lg) var(--space-2xl);
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--mist);
   position: sticky;
   top: 0;
-  background: var(--color-paper);
+  background: var(--paper);
   z-index: 10;
 }
 
@@ -78,7 +79,7 @@ function withRedirect(path: string) {
   display: flex;
   align-items: baseline;
   gap: var(--space-xs);
-  color: var(--color-ink);
+  color: var(--ink);
   text-decoration: none;
 }
 
@@ -90,7 +91,9 @@ function withRedirect(path: string) {
 .brand-text {
   font-family: var(--font-display);
   font-size: var(--text-title);
-  color: var(--color-ink);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink);
 }
 
 nav {
@@ -100,18 +103,22 @@ nav {
 
 nav a {
   font-size: var(--text-body);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   text-decoration: none;
-  transition: color var(--duration-fast) var(--ease-out);
-  padding-bottom: 2px;
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+  padding: 2px 0 6px;
+  border-bottom: 2px solid transparent;
 }
 
 nav a:hover {
-  color: var(--color-ink);
+  color: var(--ink);
 }
 
 nav a.router-link-active {
-  color: var(--color-accent);
+  color: var(--jade);
+  border-bottom-color: var(--jade);
 }
 
 .visitor-main {
@@ -130,26 +137,26 @@ nav a.router-link-active {
 
 .auth-user {
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
 }
 
 .auth-link {
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   text-decoration: none;
   transition: color var(--duration-fast) var(--ease-out);
 }
 
 .auth-link:hover {
-  color: var(--color-accent);
+  color: var(--jade);
 }
 
 .auth-btn {
   padding: 2px var(--space-sm);
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border: 1px solid var(--mist-strong);
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   font-size: var(--text-caption);
   cursor: pointer;
   transition:
@@ -158,12 +165,12 @@ nav a.router-link-active {
 }
 
 .auth-btn:hover {
-  color: var(--color-accent);
-  border-color: var(--color-accent);
+  color: var(--jade);
+  border-color: var(--jade);
 }
 
 .visitor-footer {
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid var(--mist);
   padding: var(--space-lg) var(--space-2xl);
   margin-top: var(--space-3xl);
 }
@@ -173,15 +180,31 @@ nav a.router-link-active {
   align-items: center;
   gap: var(--space-sm);
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
+}
+
+/* 页脚微缩印章：签名元素「导」的母题回响 */
+.footer-seal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  background: var(--cinnabar);
+  color: var(--surface);
+  font-family: var(--font-display);
+  font-size: var(--text-tiny);
+  font-weight: 700;
+  border-radius: 3px;
 }
 
 .footer-brand {
   font-family: var(--font-display);
+  font-weight: 700;
 }
 
 .footer-divider {
-  color: var(--color-border);
+  color: var(--mist-strong);
 }
 
 /* Page transition */

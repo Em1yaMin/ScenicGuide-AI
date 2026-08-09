@@ -128,17 +128,18 @@ async function enterAsGuest() {
   align-items: center;
   justify-content: center;
   padding: var(--space-lg);
-  color: var(--color-ink);
-  background: var(--color-paper);
+  color: var(--ink);
+  background: var(--paper);
 }
 
 .auth-card {
   width: 100%;
   max-width: 400px;
   padding: var(--space-xl);
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  background: var(--color-paper);
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
 }
 
 .auth-brand {
@@ -156,19 +157,22 @@ async function enterAsGuest() {
 .brand-text {
   font-family: var(--font-display);
   font-size: var(--text-title);
-  color: var(--color-ink);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink);
 }
 
 .auth-title {
   font-family: var(--font-display);
   font-size: var(--text-display);
+  font-weight: 700;
   margin: 0 0 var(--space-xs);
-  color: var(--color-ink);
+  color: var(--ink);
 }
 
 .auth-desc {
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   margin: 0 0 var(--space-xl);
 }
 
@@ -179,28 +183,30 @@ async function enterAsGuest() {
 .form-row label {
   display: block;
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   margin-bottom: var(--space-xs);
 }
 
 .form-row input {
   width: 100%;
   padding: var(--space-sm) var(--space-md);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-sm);
   font-size: var(--text-body);
-  background: var(--color-paper);
-  color: var(--color-ink);
+  background: var(--surface);
+  color: var(--ink);
   box-sizing: border-box;
+  transition: border-color var(--duration-fast) var(--ease-out);
 }
 
 .form-row input:focus {
   outline: none;
-  border-color: var(--color-ink-secondary);
+  border-color: var(--jade);
+  box-shadow: 0 0 0 3px var(--jade-soft);
 }
 
 .form-error {
-  color: var(--color-accent);
+  color: var(--cinnabar);
   font-size: var(--text-small);
   margin: 0 0 var(--space-md);
 }
@@ -210,7 +216,7 @@ async function enterAsGuest() {
   width: 100%;
   padding: var(--space-sm) var(--space-lg);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: var(--text-body);
   font-weight: 500;
@@ -220,12 +226,12 @@ async function enterAsGuest() {
 }
 
 .btn-primary {
-  background: var(--color-ink);
-  color: var(--color-paper);
+  background: var(--jade);
+  color: var(--surface);
 }
 
 .btn-primary:hover {
-  background: var(--color-accent);
+  background: var(--jade-strong);
 }
 
 .btn-primary:disabled,
@@ -236,12 +242,13 @@ async function enterAsGuest() {
 
 .btn-secondary {
   background: transparent;
-  color: var(--color-ink);
-  border: 1px solid var(--color-border);
+  color: var(--ink);
+  border: 1px solid var(--mist);
 }
 
 .btn-secondary:hover {
-  background: var(--color-overlay);
+  background: var(--overlay);
+  border-color: var(--mist-strong);
 }
 
 .auth-divider {
@@ -249,7 +256,7 @@ async function enterAsGuest() {
   align-items: center;
   gap: var(--space-md);
   margin: var(--space-lg) 0;
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   font-size: var(--text-caption);
 }
 
@@ -258,18 +265,18 @@ async function enterAsGuest() {
   content: '';
   flex: 1;
   height: 1px;
-  background: var(--color-border);
+  background: var(--mist);
 }
 
 .auth-switch {
   text-align: center;
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   margin: var(--space-lg) 0 0;
 }
 
 .auth-switch a {
-  color: var(--color-accent);
+  color: var(--jade);
   text-decoration: none;
 }
 
