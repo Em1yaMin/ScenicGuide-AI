@@ -186,19 +186,20 @@ function onQuestionClick(text: string) {
         </template>
 
         <!-- 推荐问句浮层（叠加在数字人区域底部，不遮挡主体过多） -->
-        <div class="questions-overlay">
-          <button
-            v-if="!questionsVisible"
-            class="questions-reopen"
-            type="button"
-            @click="questionsVisible = true"
-          >
-            💬 推荐问题
-          </button>
+        <div class="questions-overlay" role="region" aria-label="推荐问句">
+          <Transition name="questions-pop" mode="out-in">
+            <button
+              v-if="!questionsVisible"
+              class="questions-reopen"
+              type="button"
+              aria-label="展开推荐问句"
+              @click="questionsVisible = true"
+            >
+              💬 推荐问题
+            </button>
 
-          <template v-else>
             <!-- 加载中 -->
-            <div v-if="questionsLoading" class="questions-bar">
+            <div v-else-if="questionsLoading" class="questions-bar">
               <span class="loading-spinner loading-spinner--sm" />
               <span>推荐问句加载中…</span>
             </div>
@@ -221,6 +222,7 @@ function onQuestionClick(text: string) {
                 class="questions-toggle"
                 type="button"
                 title="收起"
+                aria-label="收起推荐问句"
                 @click="questionsVisible = false"
               >
                 ✕
@@ -234,12 +236,13 @@ function onQuestionClick(text: string) {
                 class="questions-toggle"
                 type="button"
                 title="关闭"
+                aria-label="关闭推荐问句"
                 @click="questionsVisible = false"
               >
                 ✕
               </button>
             </div>
-          </template>
+          </Transition>
         </div>
       </div>
 
@@ -271,10 +274,11 @@ function onQuestionClick(text: string) {
 .human-frame {
   flex: 1;
   position: relative;
-  border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-lg);
   overflow: hidden;
-  background: var(--color-overlay);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
 }
 
 .digital-human-frame {
@@ -293,12 +297,12 @@ function onQuestionClick(text: string) {
   align-items: center;
   justify-content: center;
   gap: var(--space-md);
-  color: var(--color-ink-secondary);
-  background: var(--color-paper);
+  color: var(--slate);
+  background: var(--paper);
 }
 
 .loading-overlay {
-  background: var(--color-paper);
+  background: var(--paper);
   z-index: 5;
 }
 
@@ -309,7 +313,7 @@ function onQuestionClick(text: string) {
 
 .placeholder-panel p {
   font-size: var(--text-body);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   margin: 0;
   text-align: center;
 }
@@ -317,8 +321,8 @@ function onQuestionClick(text: string) {
 .loading-spinner {
   width: 28px;
   height: 28px;
-  border: 2px solid var(--color-border);
-  border-top-color: var(--color-accent);
+  border: 2px solid var(--mist);
+  border-top-color: var(--jade);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
 }
@@ -337,10 +341,10 @@ function onQuestionClick(text: string) {
 
 .retry-btn {
   padding: var(--space-sm) var(--space-lg);
-  background: var(--color-ink);
-  color: var(--color-paper);
+  background: var(--jade);
+  color: var(--surface);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: var(--text-small);
   font-weight: 500;
@@ -348,7 +352,7 @@ function onQuestionClick(text: string) {
 }
 
 .retry-btn:hover {
-  background: var(--color-accent);
+  background: var(--jade-strong);
 }
 
 .retry-note {
@@ -364,7 +368,7 @@ function onQuestionClick(text: string) {
   padding: var(--space-sm) var(--space-md);
   margin-top: var(--space-sm);
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
 }
 
 .status-dot {
@@ -375,16 +379,16 @@ function onQuestionClick(text: string) {
 }
 
 .status-dot--live {
-  background: #6b9e6d;
-  box-shadow: 0 0 0 3px rgba(107, 158, 109, 0.15);
+  background: var(--jade);
+  box-shadow: 0 0 0 3px var(--jade-soft);
 }
 
 .status-text {
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
 }
 
-/* ── 推荐问句浮层（底部居中，半透明毛玻璃，可折叠） ── */
+/* ── 推荐问句浮层（底部居中，素白底，可折叠） ── */
 .questions-overlay {
   position: absolute;
   left: 50%;
@@ -399,19 +403,30 @@ function onQuestionClick(text: string) {
   align-items: center;
   gap: var(--space-sm);
   padding: var(--space-sm) var(--space-md);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: blur(8px);
-  border: 1px solid var(--color-border);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  border: 1px solid var(--mist);
+  box-shadow: var(--shadow-pop);
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
 }
 
 .questions-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
   flex-shrink: 0;
   font-size: var(--text-caption);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
+}
+
+/* 标签前的朱砂小点：与首页题跋点同源 */
+.questions-label::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  background: var(--cinnabar);
+  border-radius: 2px;
 }
 
 .questions-scroll {
@@ -430,11 +445,11 @@ function onQuestionClick(text: string) {
 .question-chip {
   flex-shrink: 0;
   padding: 6px 14px;
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  background: var(--color-paper);
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-full);
+  background: var(--paper);
   font-size: var(--text-caption);
-  color: var(--color-ink);
+  color: var(--ink);
   cursor: pointer;
   user-select: none;
   transition:
@@ -443,8 +458,8 @@ function onQuestionClick(text: string) {
 }
 
 .question-chip:hover {
-  border-color: var(--color-accent);
-  background: var(--color-accent-light);
+  border-color: var(--jade);
+  background: var(--jade-soft);
 }
 
 .questions-toggle {
@@ -457,15 +472,15 @@ function onQuestionClick(text: string) {
   border: none;
   border-radius: 50%;
   background: transparent;
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   font-size: var(--text-caption);
   cursor: pointer;
   transition: background var(--duration-fast) var(--ease-out);
 }
 
 .questions-toggle:hover {
-  background: var(--color-accent-light);
-  color: var(--color-accent);
+  background: var(--jade-soft);
+  color: var(--jade);
 }
 
 .questions-bar--empty {
@@ -478,13 +493,12 @@ function onQuestionClick(text: string) {
   align-items: center;
   gap: var(--space-xs);
   padding: var(--space-sm) var(--space-md);
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(8px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
   font-size: var(--text-small);
-  color: var(--color-ink);
+  color: var(--ink);
   cursor: pointer;
   transition:
     border-color var(--duration-fast) var(--ease-out),
@@ -492,8 +506,22 @@ function onQuestionClick(text: string) {
 }
 
 .questions-reopen:hover {
-  border-color: var(--color-accent);
-  background: var(--color-accent-light);
+  border-color: var(--jade);
+  background: var(--jade-soft);
+}
+
+/* 浮层开合：300ms 淡入上滑（唯一浮层动效，见 doc/redesign-v1.md §5） */
+.questions-pop-enter-active,
+.questions-pop-leave-active {
+  transition:
+    opacity var(--duration-normal) var(--ease-out),
+    transform var(--duration-normal) var(--ease-out);
+}
+
+.questions-pop-enter-from,
+.questions-pop-leave-to {
+  opacity: 0;
+  transform: translateY(8px);
 }
 
 /* ── Responsive ── */

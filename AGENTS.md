@@ -383,8 +383,9 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 ## 前端工程化（批次8 C8：TS strict/ESLint/组件规范，已就绪）
 
 - **现状已达标**（C8 核对结论，避免重复改造）：TS 严格模式已开（`tsconfig.app.json` 继承 `@vue/tsconfig`，`strict: true` + `noUncheckedIndexedAccess`），type-check 已入 build（`npm run build` = `vue-tsc --build` + vite build 并行）；ESLint 已配置（`eslint.config.ts`：vue flat/essential + `vueTsConfigs.recommended` + oxlint + prettier），`npm run lint`（eslint+oxlint 均带 `--fix`）存量 0 error；CI frontend job 已含 lint 步骤
-- **权威规范文档**：`doc/frontend-conventions.md`（命名/组件组织/scoped css + CSS 变量三层样式/Pinia setup store + localStorage 持久化/`fetchWithCodeEnvelope` API 封装模式——统一超时 15s + FastAPI detail 三形态解析 + 端点常量集中于 `api/index.ts` 禁止组件硬编码 URL/三态数据获取/CI 门禁）；与 `digitalHumanVue/src/CLAUDE.md` 子层指南互补
+- **权威规范文档**：`doc/frontend-conventions.md`（命名/组件组织/scoped css + CSS token 体系（design-tokens 权威源 + variables 别名层）/Pinia setup store + localStorage 持久化/`fetchWithCodeEnvelope` API 封装模式——统一超时 15s + FastAPI detail 三形态解析 + 端点常量集中于 `api/index.ts` 禁止组件硬编码 URL/三态数据获取/CI 门禁）；与 `digitalHumanVue/src/CLAUDE.md` 子层指南互补
 - **技术栈锁定**（禁止新重依赖）：Vue 3.5 + TS 6 strict + Vite 8 + Pinia 3 + vue-router 5 + vue-echarts；**不用** axios（原生 fetch）、Sass/Tailwind（scoped css）、第三方 mock 库（E2E 用 Playwright `page.route`）
+- **访客端视觉重设计 V1（2026-08-09）**：设计体系 token 权威源 `src/styles/design-tokens.css`（墨/宣纸/青玉/朱砂/山岚/黛 命名色板 + 字阶/圆角/阴影/动效，水源山水卷轴 × 数字人主题，签名元素=朱砂印章）；`variables.css` 降级为旧 `--color-*` 兼容别名层（存量组件零改动换肤）；权威设计文档 `doc/redesign-v1.md`（改 token 需同步）；访客端页面（Home/Chat/Login/Register/VisitorLayout）已迁移到新 token，新增页面必须用新 token 名；阶段 2（管理后台重设计）再逐页迁移并删别名层
 
 ## 测试质量门（批次7 C6：覆盖率门禁 + 前端 E2E）
 

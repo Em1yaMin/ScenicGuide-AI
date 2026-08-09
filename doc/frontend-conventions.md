@@ -40,16 +40,17 @@ src/
 - **页面组件（views/）** 管理数据获取与状态；**通用组件（components/）** 只做展示、props 驱动；**布局（layouts/）** 不直接 fetch，只消费 auth store 渲染导航/登录态
 - 新增领域能力时：`types/` 定义契约 → `api/` 封装请求 → view/store 消费（见文末「新增 API」速查）
 
-## 样式方案（三层 CSS + scoped）
+## 样式方案（CSS token 体系 + scoped）
 
 ```
-styles/variables.css  — :root { --color-*, --space-*, --text-*, --font-*, --duration-* } 令牌
-styles/base.css       — CSS reset + 排版基准
-assets/main.css       — #app { min-height: 100vh } 入口
+styles/design-tokens.css — 设计体系 token 权威源（--ink/--paper/--jade/--cinnabar/--mist/--slate/--surface + 间距/圆角/阴影/动效/字阶；token 决策见 doc/redesign-v1.md）
+styles/variables.css     — 旧 --color-* 名兼容别名层（映射到 design-tokens.css；管理后台等存量组件零改动换肤，阶段 2 迁移完成后删除）
+styles/base.css          — CSS reset + 排版基准（含全局 :focus-visible 描边 + prefers-reduced-motion 降级）
+assets/main.css          — 入口：依次 @import design-tokens.css → variables.css → base.css；#app { min-height: 100vh }
 ```
 
 - 所有组件 `<style scoped>` + `var(--*)` 令牌，**禁止** Sass/Tailwind/全局样式污染
-- 跨组件样式协调一律走 CSS 变量（variables.css），不写无 scoped 的全局选择器（重置类除外）
+- 跨组件样式协调一律走 CSS 变量（权威源 design-tokens.css；存量组件经 variables.css 别名映射），不写无 scoped 的全局选择器（重置类除外）
 - 类名 `kebab-case`；需要覆盖子组件样式时用 `:deep()` 并在注释说明原因（少用）
 
 ## 状态管理（Pinia）

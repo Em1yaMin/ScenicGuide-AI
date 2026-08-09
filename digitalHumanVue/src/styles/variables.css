@@ -1,42 +1,17 @@
+/**
+ * 兼容别名层（V1 重设计）
+ * ─────────────────────────────────────────────
+ * 旧版 --color-* 变量名 → 新版设计体系 token（design-tokens.css）的映射。
+ * 存量组件（管理后台等尚未迁移的页面）零改动即随新体系换肤；
+ * 阶段 2（管理后台重设计）逐页迁移到新 token 名后可逐步删除本文件。
+ * 权威 token 源：design-tokens.css + doc/redesign-v1.md §2。
+ */
 :root {
-  /* Colors */
-  --color-paper: #F7F5F0;
-  --color-ink: #1A1A1A;
-  --color-ink-secondary: #5C5C5C;
-  --color-accent: #C45C26;
-  --color-accent-light: #F4E9E0;
-  --color-border: #E5E2DB;
-  --color-overlay: rgba(26, 26, 26, 0.04);
-
-  /* Spacing */
-  --space-xs: 0.5rem;
-  --space-sm: 0.75rem;
-  --space-md: 1rem;
-  --space-lg: 1.5rem;
-  --space-xl: 2.5rem;
-  --space-2xl: 4rem;
-  --space-3xl: 6rem;
-
-  /* Motion */
-  --duration-fast: 150ms;
-  --duration-normal: 300ms;
-  --duration-slow: 600ms;
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-
-  /* Typography */
-  --font-display: "Noto Serif SC", "Source Han Serif SC", "STSong", "IBM Plex Serif", "Newsreader", Georgia, serif;
-  --font-body: "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", "Inter", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", "Fira Code", monospace;
-
-  --text-hero: clamp(2.5rem, 6vw, 5rem);
-  --text-display: clamp(2rem, 4vw, 3.5rem);
-  --text-title: 1.75rem;
-  --text-subtitle: 1.25rem;
-  --text-body: 1rem;
-  --text-small: 0.875rem;
-  --text-caption: 0.75rem;
-
-  --line-height-tight: 1.2;
-  --line-height-body: 1.7;
+  --color-ink: var(--ink);
+  --color-ink-secondary: var(--slate);
+  --color-paper: var(--paper);
+  --color-accent: var(--jade);
+  --color-accent-light: var(--jade-soft);
+  --color-border: var(--mist);
+  --color-overlay: var(--overlay);
 }

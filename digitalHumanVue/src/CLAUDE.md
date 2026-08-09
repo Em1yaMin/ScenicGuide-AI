@@ -7,16 +7,17 @@ Vue 3 + TypeScript + Vite 8 SPA 入口层。`main.ts` 负责应用引导（Pinia
 ```
 main.ts → createApp(App) → .use(createPinia()) → .use(router) → .mount('#app')
   │
-  └── import './assets/main.css'  (导入 styles/variables.css + styles/base.css)
+  └── import './assets/main.css'  (导入 styles/design-tokens.css + styles/variables.css + styles/base.css)
 ```
 
-## Design System (三层 CSS)
+## Design System (CSS token 体系)
 ```
-styles/variables.css  — :root { --color-*, --space-*, --text-*, --font-*, --duration-* }
-styles/base.css       — CSS reset + 排版基准
-assets/main.css       — #app { min-height: 100vh } 入口
+styles/design-tokens.css — 设计体系 token 权威源（--ink/--paper/--jade/--cinnabar/--mist/--slate/--surface + 间距/圆角/阴影/动效/字阶）
+styles/variables.css     — 旧 --color-* 兼容别名层（映射到 design-tokens.css，存量组件零改动换肤）
+styles/base.css          — CSS reset + 排版基准
+assets/main.css          — #app { min-height: 100vh } 入口（依次 import design-tokens → variables → base）
 ```
-所有组件使用 `<style scoped>` + `var(--*)` 令牌，**不使用** Sass/Tailwind。
+所有组件使用 `<style scoped>` + `var(--*)` 令牌，**不使用** Sass/Tailwind。权威约定见 [`doc/frontend-conventions.md`](../../doc/frontend-conventions.md)「样式方案」与 [`doc/redesign-v1.md`](../../doc/redesign-v1.md)（token 权威文档，改 token 需同步）。
 
 ## API Client Pattern
 

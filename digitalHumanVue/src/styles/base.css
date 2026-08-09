@@ -12,8 +12,8 @@ html {
 
 body {
   min-height: 100vh;
-  color: var(--color-ink);
-  background: var(--color-paper);
+  color: var(--ink);
+  background: var(--paper);
   font-family: var(--font-body);
   font-size: var(--text-body);
   line-height: var(--line-height-body);
@@ -28,11 +28,11 @@ h3,
 h4 {
   font-family: var(--font-display);
   line-height: var(--line-height-tight);
-  color: var(--color-ink);
+  color: var(--ink);
 }
 
 a {
-  color: var(--color-accent);
+  color: var(--jade);
   text-decoration: none;
 }
 
@@ -43,4 +43,22 @@ a:hover {
 img {
   max-width: 100%;
   height: auto;
+}
+
+/* ── 键盘可达性：全站统一焦点描边 ── */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ── 动效降级：尊重系统减弱动效设置 ── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -1,0 +1,79 @@
+/**
+ * 设计体系 Token（第一阶段 V1，权威源）
+ * ─────────────────────────────────────────────
+ * 主题：智慧景区 AI 导览——水墨山水卷轴 × 数字人导览。
+ * 权威设计文档：doc/redesign-v1.md（所有颜色/字体/动效决定源自该文档）。
+ *
+ * 命名约定：
+ *   --ink/--paper/--jade/--cinnabar/--mist/--slate/--surface  命名色板
+ *   --space-*    间距     --radius-*   圆角      --shadow-*   阴影
+ *   --duration-* / --ease-*  动效     --font-*   字体角色      --text-*   字阶
+ *
+ * 兼容层：src/styles/variables.css 将旧 --color-* 名映射到本文件，
+ * 存量组件（管理后台等）零改动换肤；阶段 2 再逐页迁移到新名。
+ */
+:root {
+  /* ── 色板（见 doc/redesign-v1.md §2.1） ── */
+  --ink: #1e2a26; /* 墨：主文字/标题（青墨，非纯黑） */
+  --paper: #f7f8f6; /* 宣纸：页面底色（冷调近白，避开暖米色） */
+  --jade: #2f6b5b; /* 青玉：主强调（动作/链接/激活） */
+  --jade-strong: #245447; /* 青玉深：hover/按下 */
+  --jade-soft: #e3ede8; /* 青玉淡：浅底/悬停底 */
+  --cinnabar: #c1412f; /* 朱砂：次强调（印章/置顶/错误），全页限量 ≤3 处 */
+  --cinnabar-soft: #f9e8e5; /* 朱砂淡：错误浅底 */
+  --mist: #e4e9e5; /* 山岚：分隔线/边框 */
+  --mist-strong: #c8d2cc; /* 山岚深：hover 边框 */
+  --slate: #5c6b63; /* 黛：次级正文（≥4.5:1） */
+  --surface: #ffffff; /* 素白：卡片/浮层底 */
+  --overlay: rgba(30, 42, 38, 0.04); /* 墨 4%：hover 底 */
+  --focus: #2f6b5b; /* 键盘焦点描边（= 青玉） */
+
+  /* ── 间距（沿用既有刻度 + 新增区块节奏） ── */
+  --space-xs: 0.5rem;
+  --space-sm: 0.75rem;
+  --space-md: 1rem;
+  --space-lg: 1.5rem;
+  --space-xl: 2.5rem;
+  --space-2xl: 4rem;
+  --space-3xl: 6rem;
+  --space-section: clamp(3.5rem, 8vw, 6rem); /* 区块纵向节奏 */
+
+  /* ── 圆角 ── */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-full: 999px;
+
+  /* ── 阴影（轻柔，无大光晕） ── */
+  --shadow-card: 0 1px 2px rgba(30, 42, 38, 0.04), 0 4px 12px rgba(30, 42, 38, 0.05);
+  --shadow-pop: 0 8px 24px rgba(30, 42, 38, 0.1);
+
+  /* ── 动效 ── */
+  --duration-fast: 150ms;
+  --duration-normal: 300ms;
+  --duration-slow: 600ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-stamp: cubic-bezier(0.34, 1.56, 0.64, 1); /* 印章落定：轻微回弹 */
+
+  /* ── 字体角色（CDN 均带系统兑底） ── */
+  --font-display:
+    'Noto Serif SC', 'Source Han Serif SC', 'STSong', 'IBM Plex Serif', 'Newsreader', Georgia, serif; /* 题字 */
+  --font-body:
+    'Noto Sans SC', 'Source Han Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Inter', system-ui,
+    sans-serif; /* 正文 */
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace; /* 数据 */
+
+  /* ── 字阶 ── */
+  --text-hero: clamp(2.5rem, 6vw, 4.25rem);
+  --text-display: clamp(1.75rem, 3.5vw, 2.5rem);
+  --text-title: 1.5rem;
+  --text-subtitle: 1.125rem;
+  --text-body: 1rem;
+  --text-small: 0.875rem;
+  --text-caption: 0.75rem;
+  --text-tiny: 0.6875rem; /* 印章/角标 */
+
+  --line-height-tight: 1.2;
+  --line-height-body: 1.7;
+}
