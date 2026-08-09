@@ -8,8 +8,11 @@
 
 - `AMAP_WEB_KEY`（后端，Web 服务 key）：`digitalHumanApi/.env` / 部署环境 /
   docker-compose 透传；**不入库**（仓库内 `.env.example` 仅占位符）。
-- 与前端地图渲染的 JS API key（`VITE_AMAP_JS_KEY` + `VITE_AMAP_SECURITY_CODE`）
-  是两套独立凭据，互不通用。
+- 与前端地图渲染的 JS API key（`NEXT_PUBLIC_AMAP_JS_KEY` +
+  `NEXT_PUBLIC_AMAP_SECURITY_CODE`，ADH `live2d-frontend/web/.env`，gitignored
+  **不入库**；任务约定名为 `VITE_AMAP_JS_KEY`/`VITE_AMAP_SECURITY_CODE`，
+  Next.js 客户端仅注入 `NEXT_PUBLIC_` 前缀变量故改名，代码 `getAmapKeys`
+  对两套命名均兜底读取）是两套独立凭据，互不通用。
 - 未配置 key：工具返回 `amap_not_configured` 错误码，**不阻断对话**。
 
 ## 服务层（`app/services/amap/`）
@@ -113,6 +116,24 @@
   search_spots 等步骤事件一致透出（ADH 前端零改动）。
 - 错误码可见性：工具把 `{"ok": false, "error": ..., "message": ...}` 透出
   给模型，模型如实转达（如"定位服务暂时不可用/未找到该位置"），不编造。
+
+## 对话链路透出（route_data，批次8 B3）
+
+plan_route 工具结果除透出给模型外，还经对话接口透出给 ADH 前端渲染路线卡片：
+
+- **非流式**：`POST /api/v1/dialogue/chat` 响应 `ChatResponse.route_data`
+  （dialogue.py）；**流式**：SSE `done` 事件携带 `route_data` 字段，两处一致。
+- 透出内容为 plan_route 工具返回的 JSON 信封**原样**（成功
+  `{"ok": true, "data": {...}}` 或失败 `{"ok": false, "error": "amap_*",
+  "message": ...}`）；本轮无 plan_route 调用或工具结果解析失败时为 `null`
+  （ADH 侧仅识别 dict 透出，前端不渲染路线卡片，不阻断对话）。
+- **ADH 链路**：`langchainAgent.py` 在 done 事件提取 route_data → 透出
+  `RouteMessage` → `agentApi.py` 编码路线帧 `{"type": "route", "data": ...}`
+  → `web/app/lib/comm.ts` `callbackRoute` → `chatbot.tsx` 渲染 `routeCard.tsx`
+  （AMap 地图起点/终点 Marker + 路径 Polyline + 距离/时长摘要 + 步骤列表）。
+- **前端降级**：高德 JS key 未配置/脚本加载失败（网络、域名白名单）/坐标非法
+  时自动降级文字路线（步骤列表 + 距离时长照常展示），不阻断对话；失败信封
+  （amap_* 错误码）如实展示错误提示。
 
 ## 冒烟
 

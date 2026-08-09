@@ -19,6 +19,7 @@ A2 试点时装配层不管理会话；A3 起为对话主链路，本文件验�
 """
 
 import asyncio
+import json
 import time
 
 import pytest
@@ -48,10 +49,13 @@ def _pin_session_and_memory(monkeypatch):
 class _FakeAgent:
     """非流式假 agent：记录输入/config，返回固定消息列表。"""
 
-    def __init__(self, answer="这是最终回答"):
+    def __init__(self, answer="这是最终回答", result_messages=None):
         self.inputs = None
         self.config = None
-        self.result_messages = [AIMessage(content=answer)]
+        if result_messages is not None:
+            self.result_messages = list(result_messages)
+        else:
+            self.result_messages = [AIMessage(content=answer)]
 
     async def ainvoke(self, inputs, config=None):
         self.inputs = inputs
@@ -113,6 +117,55 @@ async def test_chat_generates_and_persists_conversation_id(monkeypatch):
     assert session is not None
     assert len(session["messages"]) == 2  # human + ai
     assert session["user"] == "u1"
+    # 未规划路线：route_data 为 None
+    assert result.get("route_data") is None
+
+
+async def test_chat_route_data_from_plan_route_tool(monkeypatch):
+    """非流式 chat：plan_route ToolMessage → 响应 route_data 透出（B3）。"""
+    from langchain_core.messages import ToolMessage
+
+    ok_route = {
+        "ok": True,
+        "data": {
+            "mode": "driving",
+            "origin": "114.306967,30.545389",
+            "destination": "114.32,30.56",
+            "distance": "5200",
+            "duration": "900",
+            "steps": [{"instruction": "沿大道直行", "distance": "5200",
+                        "duration": "900", "road": "大道"}],
+            "strategy": "",
+        },
+    }
+    fake = _FakeAgent(
+        result_messages=[
+            ToolMessage(
+                content=json.dumps(ok_route, ensure_ascii=False),
+                tool_call_id="c1",
+                name="plan_route",
+            ),
+            AIMessage(content="驾车约 15 分钟。"),
+        ]
+    )
+    _patch_agent(monkeypatch, fake)
+    result = await dg_agent.chat("怎么去灵山？", user="u1")
+    assert result["route_data"] == ok_route
+    # 错误信封同样原样透出
+    err = {"ok": False, "error": "amap_unavailable", "message": "服务不可用"}
+    fake2 = _FakeAgent(
+        result_messages=[
+            ToolMessage(
+                content=json.dumps(err, ensure_ascii=False),
+                tool_call_id="c2",
+                name="plan_route",
+            ),
+            AIMessage(content="抱歉。"),
+        ]
+    )
+    _patch_agent(monkeypatch, fake2)
+    result2 = await dg_agent.chat("怎么去？", user="u1")
+    assert result2["route_data"] == err
 
 
 async def test_chat_multi_turn_history_assembled(monkeypatch):

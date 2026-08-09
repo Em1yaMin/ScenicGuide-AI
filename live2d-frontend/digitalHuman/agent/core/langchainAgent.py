@@ -12,7 +12,7 @@ import json
 from typing import Union
 from digitalHuman.utils import httpxAsyncClient
 from digitalHuman.utils import logger
-from digitalHuman.utils import AudioMessage, TextMessage, StepMessage
+from digitalHuman.utils import AudioMessage, TextMessage, StepMessage, RouteMessage
 
 __all__ = ["LangChainAgent"]
 
@@ -24,7 +24,8 @@ DATA_PATTERN = re.compile(r'data:\s*({.*})')
 # 后端流式事件类型（契约见服务端 app/routers/dialogue.py 的 _sse，阶段1 T3）：
 #   {"type": "step", "tool", "label"}   工具调用步骤（透出为 StepMessage）
 #   {"type": "token", "text"}           回答增量
-#   {"type": "done", "conversation_id", ...}  流式完成（会话 ID 在此事件）
+#   {"type": "done", "conversation_id", "route_data", ...}  流式完成
+#     （会话 ID 在此事件；route_data 为 plan_route 工具结果，批次8 B3）
 #   {"type": "error", "message", "fallback"}  链路错误（fallback=true 已切换 Dify）
 # 兼容旧契约（Dify 风格）：{"event": "message", "answer": ...}
 EVENT_TOKEN = "token"         # 回答增量（text 字段）
@@ -50,6 +51,10 @@ class LangChainAgent(BaseAgent):
       StepMessage（tool/label）混入 run() 产出流，由 agentApi 编码为步骤帧
       供前端渲染；回答文本仍按原始字符串产出（ThinkFilter 过滤后），
       TTS/逐字渲染行为不变
+    - 路线透出（批次8 B3，2026-08-09）：done 事件携带 route_data
+      （plan_route 工具结果信封，见后端 doc/amap-gps-api.md），透出为
+      RouteMessage 混入产出流，由 agentApi 编码为路线帧供前端渲染
+      地图卡片/文字路线兜底；回答文本流不受影响
     - 兼容旧形态 {"event": "message", "answer": "..."}（Dify 风格）
     - 非流式响应为标准 ChatResponse JSON（answer/conversation_id）
     """
@@ -119,7 +124,12 @@ class LangChainAgent(BaseAgent):
                             )
                             continue
                         if event_type == EVENT_DONE:
-                            # 流式完成：会话 ID 随 done 事件透出，供多轮对话续接
+                            # 流式完成：会话 ID 随 done 事件透出，供多轮对话续接；
+                            # 批次8 B3：done 事件携带 route_data（plan_route 工具
+                            # 结果信封），透出 RouteMessage 供前端渲染路线卡片
+                            route_data = event.get("route_data")
+                            if isinstance(route_data, dict):
+                                yield RouteMessage(data=route_data)
                             break
                         if event_type == EVENT_STEP:
                             # 工具调用步骤：透出 StepMessage 给调用方

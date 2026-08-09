@@ -48,3 +48,20 @@ class StepMessage(BaseMessage):
     """
     tool: Optional[str] = None
     label: Optional[str] = None
+
+
+class RouteMessage(BaseMessage):
+    """
+    路线数据消息（批次8 B3：GPS/高德，对话中路线展示）。
+
+    由 LangChainAgent 在流式对话 done 事件中提取 plan_route 工具结果
+    透出给调用方（agentApi 编码为路线帧供前端渲染地图卡片/文字路线兜底），
+    不参与回答文本流，不影响 TTS/逐字渲染。
+
+    `data` 为后端 done 事件 route_data 字段原样透传（契约见后端
+    doc/amap-gps-api.md）：
+    - 成功信封 {"ok": true, "data": {"mode", "origin", "destination",
+      "distance", "duration", "steps": [...]}}
+    - 失败信封 {"ok": false, "error": "amap_*", "message": "..."}
+    """
+    data: Optional[dict] = None

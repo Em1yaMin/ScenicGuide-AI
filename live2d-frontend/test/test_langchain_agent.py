@@ -16,7 +16,7 @@ from httpx import AsyncClient
 
 from digitalHuman.agent.core import langchainAgent as langchainAgent_mod
 from digitalHuman.agent.core.langchainAgent import LangChainAgent
-from digitalHuman.utils import TextMessage, StepMessage
+from digitalHuman.utils import TextMessage, StepMessage, RouteMessage
 from digitalHuman.utils.configParser import CONFIG_ROOT_PATH, parseConfig
 
 ENGINE = "LangChainAgent"
@@ -290,6 +290,58 @@ class Test_LangChainAgent_Engine:
         assert [s.tool for s in steps] == ["search_knowledge", "recommend_routes"]
         assert [s.label for s in steps] == ["正在检索知识库…", "正在为您规划路线…"]
         assert "".join(texts) == "为您找到以下景点"
+
+    @pytest.mark.asyncio(scope="session")
+    async def test_route_message_surfaced(self, fake_client, agent):
+        """路线透出：done 事件携带 route_data → 产出 RouteMessage（批次8 B3）。
+
+        plan_route 工具结果（成功/错误信封）原样透传；无 route_data 时
+        不产出 RouteMessage；文本流不受影响。
+        """
+        ok_route = {
+            "ok": True,
+            "data": {
+                "mode": "walking",
+                "origin": "114.306967,30.545389",
+                "destination": "114.32,30.56",
+                "distance": "1500",
+                "duration": "1200",
+                "steps": [{"instruction": "向东步行 100 米", "distance": "100",
+                            "duration": "80", "road": ""}],
+                "strategy": "",
+            },
+        }
+        fake_client.response = FakeResponse(lines=sse_lines(
+            {"type": "step", "tool": "plan_route", "label": "正在规划路线…"},
+            {"type": "token", "text": "步行约 25 分钟"},
+            {"type": "done", "conversation_id": "cid-route", "rag_context": "",
+             "rag_sources": [], "route_data": ok_route},
+        ))
+        outputs = [o async for o in agent.run(TextMessage(data="怎么走过去"), True, **settings())]
+        routes = [o for o in outputs if isinstance(o, RouteMessage)]
+        texts = [o for o in outputs if isinstance(o, str)]
+        assert len(routes) == 1
+        assert routes[0].data == ok_route
+        assert "".join(texts) == "步行约 25 分钟"
+
+        # 错误信封原样透传
+        err = {"ok": False, "error": "amap_not_configured", "message": "高德地图服务未配置"}
+        fake_client.response = FakeResponse(lines=sse_lines(
+            {"type": "done", "conversation_id": "cid-err", "rag_context": "",
+             "rag_sources": [], "route_data": err},
+        ))
+        outputs = [o async for o in agent.run(TextMessage(data="怎么过去"), True, **settings())]
+        routes = [o for o in outputs if isinstance(o, RouteMessage)]
+        assert len(routes) == 1 and routes[0].data == err
+
+        # 无 route_data（普通对话）：不产出 RouteMessage
+        fake_client.response = FakeResponse(lines=sse_lines(
+            {"type": "token", "text": "好的"},
+            {"type": "done", "conversation_id": "cid-plain", "rag_context": "",
+             "rag_sources": []},
+        ))
+        outputs = [o async for o in agent.run(TextMessage(data="你好"), True, **settings())]
+        assert not any(isinstance(o, RouteMessage) for o in outputs)
 
     @pytest.mark.asyncio(scope="session")
     async def test_new_contract_conversation_id_from_done(self, fake_client, agent):

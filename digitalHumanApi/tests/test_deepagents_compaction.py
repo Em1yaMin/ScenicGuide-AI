@@ -250,10 +250,12 @@ async def test_chat_stream_compacts_and_done_unchanged(monkeypatch):
         await _drain_compaction_tasks()
     assert events[-1]["type"] == "done"
     assert events[-1]["conversation_id"] == cid
-    # done 契约字段不变
+    # done 契约字段（批次8 B3 起含 route_data；未规划路线时为 None）
     assert set(events[-1].keys()) == {
-        "type", "conversation_id", "rag_context", "rag_sources", "intent",
+        "type", "conversation_id", "rag_context", "rag_sources",
+        "intent", "route_data",
     }
+    assert events[-1]["route_data"] is None
     with chat_agent._conversations_lock:
         history = list(chat_agent._conversations[cid])
     assert history[0].type == "system"

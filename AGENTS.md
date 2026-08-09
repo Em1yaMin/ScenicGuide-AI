@@ -138,9 +138,9 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 船长决策：浏览器定位为辅（前端任务）；离线/异常直接报错误码不做离线兜底；坐标全部来自高德 API（结构化零幻觉）。权威契约 `doc/amap-gps-api.md`（错误码/信封/工具用法）。
 
 - `app/services/amap/` — 高德 Web 服务封装（httpx，零新依赖）：`geocode(address, city=None)`（地址 → ≤5 候选含省/市/区县，**多候选消歧=候选列表 + city 参数组合**，实测"黄鹤楼"跨城市同名）、`route(origin, destination, mode)`（walking/driving/transit；transit 走 integrated 接口，**自动 regeo 推导 city/cityd**，transits 归一化为统一 steps 含公交合成指令「乘坐{线路}（上车站 → 下车站）」）、`regeo`（内部辅助不对 agent 暴露）；`AmapClient(api_key=None, _transport=)` 测试注入 MockTransport（embedding 同模式）；模块级 `geocode/route` 单例供工具调用（key 每次调用实时读 `settings.AMAP_WEB_KEY`，monkeypatch 即模拟无 key）；**统一错误信封** `{ok, error, message}`：amap_not_configured（无 key，不阻断对话）/amap_unavailable（网络/HTTP/业务错误 status≠1/解析失败；httpx 0.28 的 HTTPStatusError 与 RequestError 平级须用超类 HTTPError 捕获）/amap_no_result/amap_invalid_param/amap_route_failed
-- `app/services/deepagents/amap_tools.py` — 对话两工具：`geocode_location(description, city)` / `plan_route(origin, destination, mode)`（origin/destination 必须是 geocode 候选的 location 坐标，**工具描述引导先 geocode 后 plan_route**）；信封 JSON 原样透出（意外异常防御性包装 amap_unavailable），模型如实转达不编造；`AMAP_STEP_LABELS`（正在定位…/正在规划路线…）合并进装配层 `_STEP_LABELS`，SSE step 事件透出（ADH 前端零改动）
+- `app/services/deepagents/amap_tools.py` — 对话两工具：`geocode_location(description, city)` / `plan_route(origin, destination, mode)`（origin/destination 必须是 geocode 候选的 location 坐标，**工具描述引导先 geocode 后 plan_route**）；信封 JSON 原样透出（意外异常防御性包装 amap_unavailable），模型如实转达不编造；`AMAP_STEP_LABELS`（正在定位…/正在规划路线…）合并进装配层 `_STEP_LABELS`，SSE step 事件透出（ADH 前端零改动）；**B3 起对话响应（ChatResponse）与流式 done 事件透出 `route_data`**（plan_route 信封原样透出、无规划为 null，ADH 渲染路线卡片/文字兜底，契约见 doc/amap-gps-api.md）
 - **装配**：deepagents 用户侧 `_select_tools` 始终装配（use_rag 无关）；**管理员 agent（ADMIN_TOOLS）不装**；不参与工具结果缓存（实时外部数据）；系统提示词新增 GPS 使用原则
-- 配置：`AMAP_WEB_KEY`（config.py + 根目录/digitalHumanApi 两个 .env.example + docker-compose 透传）；与前端 JS API key（VITE_AMAP_JS_KEY）两套独立凭据
+- 配置：`AMAP_WEB_KEY`（config.py + 根目录/digitalHumanApi 两个 .env.example + docker-compose 透传）；与前端 JS API key（NEXT_PUBLIC_AMAP_JS_KEY/NEXT_PUBLIC_AMAP_SECURITY_CODE，ADH web/.env，任务约定 VITE_AMAP_* 为兼容别名）两套独立凭据
 - 冒烟：`python -m scripts.smoke_amap [起点] [终点] [mode]`（真实 key 在部署 .env；无 key 输出 amap_not_configured 等价验证错误码契约）；测试 `tests/test_amap_client.py`（28）+ `tests/test_amap_tools.py`（13：工具行为/装配用户侧有管理员无/不缓存/SSE 标签与流式透出/system prompt 引导）；harness 测试装配断言集合已同步（含 GPS 两工具）
 
 ## Dify 依赖面（阶段4 收官：退场依据见 doc/dify-dependency-audit.md）
@@ -341,13 +341,15 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 - `configs/engines/asr/tencentAPI.yaml`、`configs/engines/tts/qwenTTS.yaml`（新建，默认 TTS）、`configs/engines/tts/minimaxTTS.yaml`、`configs/agents/difyAgent.yaml`、`configs/agents/langchainAgent.yaml`（新建）— 引擎凭证/参数
 - `digitalHuman/engine/tts/qwenTTS.py`（新建，2026-08-07 Qwen/DashScope TTS 引擎，注册名 QwenAPI）+ `digitalHuman/engine/tts/minimaxTTS.py`（新建）+ `digitalHuman/engine/tts/__init__.py` — TTS 引擎及注册
 - `digitalHuman/engine/asr/tencentASR.py` — 已移除 `req.AppId` 行
-- `digitalHuman/agent/core/langchainAgent.py`（新建，2026-08-06 联调修正 SSE 契约；2026-08-07 步骤透出）— LangChain 引擎：调本后端 `/api/v1/dialogue/chat`，SSE 解析 **`type` 字段**（`token`（text 增量，经 `ThinkFilter` 过滤后产出）/`step`（**透出为 `StepMessage`（tool/label）混入 run() 产出流**，供 agentApi 编码步骤帧、前端渲染，文本流不变）/`done`（携带 conversation_id，作流结束）/`error`（`fallback=true` 时仅告警不中断、继续消费 Dify 兜底输出；`fallback=false` 抛错）），兼容旧 `event: message/answer` 形态；非流式解析 ChatResponse JSON（answer/conversation_id），见代码头注释
-- `digitalHuman/utils/protocol.py` — 新增 `StepMessage`（tool/label 字段，与 TextMessage/AudioMessage 同体系）
-- `digitalHuman/server/agentApi.py` — `/v0/infer` 将产出流中的 `StepMessage` 编码为步骤帧（`\x02{json}\x03`，json 含 tool/label）透出给前端；回答文本原样透出
+- `digitalHuman/agent/core/langchainAgent.py`（新建，2026-08-06 联调修正 SSE 契约；2026-08-07 步骤透出；2026-08-09 路线透出）— LangChain 引擎：调本后端 `/api/v1/dialogue/chat`，SSE 解析 **`type` 字段**（`token`（text 增量，经 `ThinkFilter` 过滤后产出）/`step`（**透出为 `StepMessage`（tool/label）混入 run() 产出流**，供 agentApi 编码步骤帧、前端渲染，文本流不变）/`done`（携带 conversation_id 作流结束；**2026-08-09 B3 起携带 route_data（plan_route 工具结果信封）透出为 `RouteMessage`**）/`error`（`fallback=true` 时仅告警不中断、继续消费 Dify 兜底输出；`fallback=false` 抛错）），兼容旧 `event: message/answer` 形态；非流式解析 ChatResponse JSON（answer/conversation_id），见代码头注释
+- `digitalHuman/utils/protocol.py` — 新增 `StepMessage`（tool/label 字段，与 TextMessage/AudioMessage 同体系）+ `RouteMessage`（data=路线信封，B3）
+- `digitalHuman/server/agentApi.py` — `/v0/infer` 将产出流中的 `StepMessage` 编码为步骤帧（`\x02{json}\x03`，json 含 tool/label）、`RouteMessage` 编码为**路线帧**（`{"type": "route", "data": ...}`，B3）透出给前端；回答文本原样透出
 - `digitalHuman/agent/core/difyAgent.py` — 新增 `ThinkFilter`，流式过滤 `<think>` 标签
 - `digitalHuman/server/asrApi.py` — DEBUG 音频保存到 `debug_audio/`
-- `web/app/lib/comm.ts` — `streamingChat` 新增步骤帧解析（缓冲拼接 `\x02{json}\x03` 帧，兼容 fetch 分块切碎）与 `callbackStep` 回调；文本流/索引语义不变（TTS 断句与音频队列依赖）
-- `web/app/ui/home/chatbot.tsx` — 录音改用原生 `MediaRecorder` + 客户端 webm→WAV（16kHz 重采样）；**工具调用步骤可视化（2026-08-07）**：`agentSteps` state 接收 `callbackStep`（连续重复步骤去重、按序追加），消息区底部 AI 侧渲染小字步骤气泡（🔍 标签 + 脉冲圆点），新一轮对话清空；不进入 responseText，不影响逐字渲染/TTS
+- `web/app/lib/comm.ts` — `streamingChat` 新增步骤帧解析（缓冲拼接 `\x02{json}\x03` 帧，兼容 fetch 分块切碎）与 `callbackStep` 回调；**B3 路线帧**（json 含 `type: "route"`）解析与 `callbackRoute` 回调；文本流/索引语义不变（TTS 断句与音频队列依赖）
+- `web/app/lib/amap.ts`（新建，2026-08-09 B3）— 高德 JS API 按需加载器：首次需要地图时注入 script（`webapi.amap.com/maps?v=2.0`，key + `window._AMapSecurityConfig`），幂等 Promise、失败可重试；`formatDistance`/`formatDuration`/`parseLocation` 工具函数
+- `web/app/ui/home/routeCard.tsx`（新建，2026-08-09 B3）— 路线卡片：成功信封渲染 AMap 地图（起点/终点 Marker + 路径 Polyline + 距离/时长摘要 + 步骤列表）；**地图加载失败（网络/白名单/key 未配置）或坐标非法自动降级文字路线**（步骤列表 + 距离时长照常展示，不阻断对话）；失败信封（amap_* 错误码）如实展示
+- `web/app/ui/home/chatbot.tsx` — 录音改用原生 `MediaRecorder` + 客户端 webm→WAV（16kHz 重采样）；**工具调用步骤可视化（2026-08-07）**：`agentSteps` state 接收 `callbackStep`（连续重复步骤去重、按序追加），消息区底部 AI 侧渲染小字步骤气泡（🔍 标签 + 脉冲圆点），新一轮对话清空；不进入 responseText，不影响逐字渲染/TTS；**路线卡片（2026-08-09 B3）**：`routeData` state 接收 `callbackRoute`，AI 侧渲染 RouteCard（新一轮清空）；**📍 定位按钮（可选）**：`navigator.geolocation` 填入坐标文本，仅 secure context（HTTPS/localhost）显示（`geoSupported` 探测，局域网 IP 演示环境自动隐藏）
 - `scripts/smoke_langchain_agent.py`（新建）— LangChainAgent 链路冒烟（需本后端已启动，`PYTHONPATH=. ./venv/bin/python scripts/smoke_langchain_agent.py`）
 
 ### ASR 已知问题
@@ -364,6 +366,7 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 - **Agent think 过滤**: `difyAgent.py`/`langchainAgent.py` 的 `ThinkFilter` 实时过滤 `<think>...</think>`，TTS 不会读思考内容
 - **LangChainAgent 依赖本后端**: 默认引擎 `langchainAgent.yaml` 的 `LLM_API_URL` 指向主后端 8000，主后端未启动时对话不可用（可临时切回 DifyAgent 直连 Dify）；引擎切换在数字人前端设置页
 - **工具调用步骤可视化（2026-08-07）**: 主后端 SSE step 事件 → ADH `langchainAgent.py` 透出 `StepMessage` → `agentApi.py` 编码 `\x02{json}\x03` 步骤帧 → `comm.ts` 解析 → `chatbot.tsx` 消息区渲染（🔍 步骤小气泡按序追加）；真实环境实测（真实主后端 + 真实 LLM）触发规划类对话产出 6 个步骤帧（plan→search_knowledge→search_spots→filter_by_tags→recommend_routes→summarize），文本流不受影响；步骤帧协议见 `agentApi.py` 与 `comm.ts` 注释
+- **路线卡片（2026-08-09 B3）**: 主后端 done 事件 `route_data`（plan_route 工具结果信封，契约见主仓库 doc/amap-gps-api.md）→ ADH 透出 `RouteMessage` → 路线帧（`{"type":"route","data":...}`）→ `comm.ts` callbackRoute → `chatbot.tsx` 渲染 RouteCard；高德 JS key 环境变量按 Next.js 约定命名 `NEXT_PUBLIC_AMAP_JS_KEY`/`NEXT_PUBLIC_AMAP_SECURITY_CODE`（对应任务约定的 VITE_AMAP_* 名，写入 web/.env 不入库）；**无 key/加载失败/失败信封均不崩**——降级文字路线或错误提示；联调已验证（Playwright 冒烟：步骤气泡+路线卡片+文字兜底+AMap 脚本按需注入，无 key 不发起外网请求）
 - **重启后端**: 改 yaml 或 Python 代码后必须重启后端；前端代码由 Next HMR 自动热更
 </important>
 
