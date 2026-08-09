@@ -1,5 +1,5 @@
 /**
- * 设计体系 Token（第一阶段 V1，权威源）
+ * 设计体系 Token（权威源）
  * ─────────────────────────────────────────────
  * 主题：智慧景区 AI 导览——水墨山水卷轴 × 数字人导览。
  * 权威设计文档：doc/redesign-v1.md（所有颜色/字体/动效决定源自该文档）。
@@ -9,8 +9,8 @@
  *   --space-*    间距     --radius-*   圆角      --shadow-*   阴影
  *   --duration-* / --ease-*  动效     --font-*   字体角色      --text-*   字阶
  *
- * 兼容层：src/styles/variables.css 将旧 --color-* 名映射到本文件，
- * 存量组件（管理后台等）零改动换肤；阶段 2 再逐页迁移到新名。
+ * 兼容层：src/styles/variables.css 将旧 --color-* 名映射到本文件。
+ * 阶段 2（管理后台）已全部迁移到新名，兼容层保留不删（船长决策）。
  */
 :root {
   /* ── 色板（见 doc/redesign-v1.md §2.1） ── */
@@ -20,6 +20,7 @@
   --jade-strong: #245447; /* 青玉深：hover/按下 */
   --jade-soft: #e3ede8; /* 青玉淡：浅底/悬停底 */
   --cinnabar: #c1412f; /* 朱砂：次强调（印章/置顶/错误），全页限量 ≤3 处 */
+  --cinnabar-strong: #973325; /* 朱砂深：danger hover/按下（与 --jade-strong 同派生规律） */
   --cinnabar-soft: #f9e8e5; /* 朱砂淡：错误浅底 */
   --mist: #e4e9e5; /* 山岚：分隔线/边框 */
   --mist-strong: #c8d2cc; /* 山岚深：hover 边框 */
@@ -47,6 +48,17 @@
   /* ── 阴影（轻柔，无大光晕） ── */
   --shadow-card: 0 1px 2px rgba(30, 42, 38, 0.04), 0 4px 12px rgba(30, 42, 38, 0.05);
   --shadow-pop: 0 8px 24px rgba(30, 42, 38, 0.1);
+
+  /* ── 数字人嵌入容器（--embed-*，第二阶段的容器规范） ──
+   * 数字人 iframe 外壳统一用本组 token（访客对话页 ChatView）；
+   * 管理后台不嵌入数字人，本组 token 仅供需要嵌入的场景引用。 */
+  --embed-radius: var(--radius-lg); /* 外壳圆角（融入页面最大圆角档） */
+  --embed-border: 1px solid var(--mist); /* 外壳描边 */
+  --embed-bg: var(--surface); /* 外壳底色（加载期/空白期衬底） */
+  --embed-shadow: var(--shadow-card); /* 外壳阴影（轻柔，不抢主体） */
+  --embed-pad: var(--space-lg); /* 外壳内边距（内容不足满幅时的呼吸间距） */
+  --embed-min-width: 320px; /* 外壳最小宽度（窄屏兜底） */
+  --embed-min-height: 480px; /* 外壳最小高度（内容不足时不塌陷） */
 
   /* ── 动效 ── */
   --duration-fast: 150ms;

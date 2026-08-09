@@ -89,15 +89,17 @@ const sentimentTrend = computed(() => {
 })
 
 // ── Chart Options ──
+// 图表主题色对齐设计体系色板（doc/redesign-v1.md §2.1）：
+// 正面=青玉 / 负面=朱砂 / 中性=山岚深 / 强调=青玉 / 边框=山岚
 const BRAND_COLORS = {
-  positive: '#6B9E6D',
-  negative: '#C45C26',
-  neutral: '#D4C5B9',
-  accent: '#C45C26',
-  ink: '#1A1A1A',
-  inkSecondary: '#5C5C5C',
-  paper: '#F7F5F0',
-  border: '#E5E2DB',
+  positive: '#2F6B5B', // jade
+  negative: '#C1412F', // cinnabar
+  neutral: '#C8D2CC', // mist-strong
+  accent: '#2F6B5B', // jade
+  ink: '#1E2A26', // ink
+  inkSecondary: '#5C6B63', // slate
+  paper: '#F7F8F6', // paper
+  border: '#E4E9E5', // mist
 }
 
 const chartTextStyle = {
@@ -165,7 +167,8 @@ const satisfactionOption = computed(() => {
     .sort(([a], [b]) => Number(b) - Number(a))
     .map(([score, count]) => ({ name: `${score}分`, value: count }))
 
-  const warmPalette = ['#C45C26', '#D4855A', '#E0A88A', '#EAC9B5', '#F4E9E0']
+  // 满意度 1-5 分：低分朱砂 → 高分青玉 的渐变段（与色板同源）
+  const satisfactionPalette = ['#2F6B5B', '#5E8A7B', '#9CB3A8', '#C89C8E', '#C1412F']
 
   return {
     tooltip: { trigger: 'item' as const, textStyle: { fontSize: 13 } },
@@ -192,7 +195,7 @@ const satisfactionOption = computed(() => {
         },
         data: chartData.map((d, i) => ({
           ...d,
-          itemStyle: { color: warmPalette[i % warmPalette.length] },
+          itemStyle: { color: satisfactionPalette[i % satisfactionPalette.length] },
         })),
       },
     ],
@@ -318,8 +321,8 @@ const aiSatisfactionTrendOption = computed(() => {
             x2: 0,
             y2: 1,
             colorStops: [
-              { offset: 0, color: 'rgba(196, 92, 38, 0.15)' },
-              { offset: 1, color: 'rgba(196, 92, 38, 0.02)' },
+              { offset: 0, color: 'rgba(47, 107, 91, 0.15)' },
+              { offset: 1, color: 'rgba(47, 107, 91, 0.02)' },
             ],
           },
         },
@@ -624,6 +627,8 @@ const hasAIData = computed(
 </template>
 
 <style scoped>
+/* 第二阶段视觉打磨：样式全部迁移到设计体系 token（doc/redesign-v1.md §2），
+ * 卡片素白底 + 轻柔阴影 + 青玉强调（数据工具风，对比访客端沉浸叙事风）。 */
 .dashboard {
   padding: var(--space-xl) var(--space-2xl);
   max-width: 1400px;
@@ -642,21 +647,22 @@ const hasAIData = computed(
   font-family: var(--font-display);
   font-size: var(--text-display);
   margin: 0 0 var(--space-xs);
-  color: var(--color-ink);
+  color: var(--ink);
 }
 
 .header-desc {
   font-size: var(--text-body);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   margin: 0;
 }
 
+/* 主操作按钮：primary=jade（管理端按钮规范） */
 .refresh-btn {
   padding: var(--space-sm) var(--space-lg);
-  background: var(--color-ink);
-  color: var(--color-paper);
+  background: var(--jade);
+  color: var(--surface);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: var(--text-small);
   font-weight: 500;
@@ -665,7 +671,7 @@ const hasAIData = computed(
 }
 
 .refresh-btn:hover {
-  background: var(--color-accent);
+  background: var(--jade-strong);
 }
 
 .refresh-btn:disabled {
@@ -679,7 +685,7 @@ const hasAIData = computed(
   align-items: center;
   justify-content: center;
   padding: var(--space-3xl);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   gap: var(--space-md);
 }
 
@@ -693,15 +699,16 @@ const hasAIData = computed(
 
 .kpi-card {
   padding: var(--space-lg) var(--space-xl);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: transparent;
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
 }
 
 .kpi-label {
   display: block;
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   margin-bottom: var(--space-sm);
 }
 
@@ -710,13 +717,13 @@ const hasAIData = computed(
   font-family: var(--font-mono);
   font-size: var(--text-display);
   font-weight: 600;
-  color: var(--color-ink);
+  color: var(--ink);
   line-height: 1.2;
 }
 
 .kpi-unit {
   font-size: var(--text-title);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   font-weight: 400;
 }
 
@@ -726,11 +733,11 @@ const hasAIData = computed(
   gap: var(--space-xs);
   margin-top: var(--space-sm);
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
 }
 
 .kpi-direction {
-  color: var(--color-accent);
+  color: var(--jade);
   font-weight: 600;
 }
 
@@ -742,18 +749,20 @@ const hasAIData = computed(
 }
 
 .chart-card {
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-md);
   padding: var(--space-lg);
   min-height: 380px;
   display: flex;
   flex-direction: column;
-  background: transparent;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
   transition: border-color var(--duration-normal) var(--ease-out);
 }
 
+/* 卡片 hover 只换边框（doc/redesign-v1.md §6.3：不做位移/浮起） */
 .chart-card:hover {
-  border-color: var(--color-ink-secondary);
+  border-color: var(--mist-strong);
 }
 
 .chart-header {
@@ -764,14 +773,15 @@ const hasAIData = computed(
   font-family: var(--font-display);
   font-size: var(--text-subtitle);
   margin: 0 0 var(--space-xs);
-  color: var(--color-ink);
+  color: var(--ink);
 }
 
+/* 题跋式注释：与访客端 section 题跋点同源 */
 .chart-annotation {
   font-family: var(--font-display);
   font-size: var(--text-small);
   font-style: italic;
-  color: var(--color-accent);
+  color: var(--jade);
   margin: 0;
   opacity: 0.8;
 }
@@ -785,7 +795,7 @@ const hasAIData = computed(
 .ai-section {
   margin-top: var(--space-2xl);
   padding-top: var(--space-xl);
-  border-top: 2px solid var(--color-border);
+  border-top: 2px solid var(--mist);
 }
 
 .ai-section-header {
@@ -800,12 +810,12 @@ const hasAIData = computed(
   font-family: var(--font-display);
   font-size: var(--text-title);
   margin: 0 0 var(--space-xs);
-  color: var(--color-ink);
+  color: var(--ink);
 }
 
 .ai-section-desc {
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   margin: 0;
 }
 
@@ -817,36 +827,39 @@ const hasAIData = computed(
 
 .ai-days-select {
   padding: var(--space-sm) var(--space-md);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-paper);
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
   font-size: var(--text-small);
-  color: var(--color-ink);
+  color: var(--ink);
   cursor: pointer;
   outline: none;
+  transition: border-color var(--duration-fast) var(--ease-out);
 }
 
 .ai-days-select:focus {
-  border-color: var(--color-accent);
+  border-color: var(--jade);
+  box-shadow: 0 0 0 3px var(--jade-soft);
 }
 
+/* 错误横幅：朱砂淡底（错误语义=朱砂，见色板角色） */
 .ai-error-banner {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: var(--space-md) var(--space-lg);
   margin-bottom: var(--space-lg);
-  background: rgba(196, 92, 38, 0.08);
-  border: 1px solid rgba(196, 92, 38, 0.2);
-  border-radius: 8px;
+  background: var(--cinnabar-soft);
+  border: 1px solid rgba(193, 65, 47, 0.25);
+  border-radius: var(--radius-md);
   font-size: var(--text-small);
-  color: var(--color-accent);
+  color: var(--cinnabar);
 }
 
 .text-btn {
   background: none;
   border: none;
-  color: var(--color-accent);
+  color: var(--jade);
   cursor: pointer;
   font-size: var(--text-small);
   font-weight: 500;
@@ -859,9 +872,11 @@ const hasAIData = computed(
   gap: var(--space-lg);
   padding: var(--space-xl);
   margin-bottom: var(--space-xl);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: linear-gradient(135deg, rgba(107, 158, 109, 0.04), rgba(196, 92, 38, 0.04));
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(135deg, rgba(47, 107, 91, 0.04), rgba(193, 65, 47, 0.03)), var(--surface);
+  box-shadow: var(--shadow-card);
 }
 
 .ai-summary-icon {
@@ -873,28 +888,28 @@ const hasAIData = computed(
   font-family: var(--font-display);
   font-size: var(--text-subtitle);
   margin: 0 0 var(--space-sm);
-  color: var(--color-ink);
+  color: var(--ink);
 }
 
 .ai-summary-body {
   font-size: var(--text-body);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   line-height: 1.6;
   margin: 0 0 var(--space-sm);
 }
 
 .ai-summary-direction {
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   margin: 0;
 }
 
 .trend-up {
-  color: #6b9e6d;
+  color: var(--jade);
 }
 
 .trend-down {
-  color: #c45c26;
+  color: var(--cinnabar);
 }
 
 /* ── AI 列表卡片 ── */
@@ -915,16 +930,16 @@ const hasAIData = computed(
   align-items: flex-start;
   gap: var(--space-md);
   padding: var(--space-sm) var(--space-md);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   transition: background var(--duration-fast) var(--ease-out);
 }
 
 .ai-list-item:hover {
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--overlay);
 }
 
 .ai-list-item.unanswered {
-  border-left: 3px solid rgba(196, 92, 38, 0.3);
+  border-left: 3px solid rgba(193, 65, 47, 0.3);
 }
 
 .ai-list-rank {
@@ -934,21 +949,21 @@ const hasAIData = computed(
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: var(--color-border);
+  background: var(--mist);
   font-size: var(--text-small);
   font-weight: 600;
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   flex-shrink: 0;
 }
 
 .ai-list-rank.top3 {
-  background: var(--color-accent);
-  color: var(--color-paper);
+  background: var(--jade);
+  color: var(--surface);
 }
 
 .ai-list-rank.warn {
-  background: rgba(196, 92, 38, 0.15);
-  color: var(--color-accent);
+  background: var(--cinnabar-soft);
+  color: var(--cinnabar);
 }
 
 .ai-list-content {
@@ -960,7 +975,7 @@ const hasAIData = computed(
 
 .ai-list-question {
   font-size: var(--text-body);
-  color: var(--color-ink);
+  color: var(--ink);
   line-height: 1.4;
 }
 
@@ -972,27 +987,27 @@ const hasAIData = computed(
 }
 
 .ai-list-count {
-  color: var(--color-ink-secondary);
+  color: var(--slate);
 }
 
 .ai-list-category {
   padding: 1px 8px;
-  background: rgba(107, 158, 109, 0.12);
-  color: #6b9e6d;
+  background: var(--jade-soft);
+  color: var(--jade);
   border-radius: 10px;
   font-size: 11px;
 }
 
 .ai-list-reason {
   font-size: var(--text-small);
-  color: var(--color-accent);
+  color: var(--cinnabar);
   font-style: italic;
 }
 
 .ai-list-empty {
   padding: var(--space-xl);
   text-align: center;
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   font-size: var(--text-small);
 }
 
@@ -1000,8 +1015,10 @@ const hasAIData = computed(
 .ai-suggestions-card {
   margin-top: var(--space-xl);
   padding: var(--space-xl);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
 }
 
 .suggestions-list {
@@ -1016,9 +1033,9 @@ const hasAIData = computed(
   align-items: flex-start;
   gap: var(--space-md);
   padding: var(--space-md);
-  background: rgba(107, 158, 109, 0.04);
-  border-radius: 6px;
-  border-left: 3px solid #6b9e6d;
+  background: rgba(47, 107, 91, 0.05);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--jade);
 }
 
 .suggestion-num {
@@ -1028,8 +1045,8 @@ const hasAIData = computed(
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: #6b9e6d;
-  color: var(--color-paper);
+  background: var(--jade);
+  color: var(--surface);
   font-size: var(--text-small);
   font-weight: 600;
   flex-shrink: 0;
@@ -1037,7 +1054,7 @@ const hasAIData = computed(
 
 .suggestion-text {
   font-size: var(--text-body);
-  color: var(--color-ink);
+  color: var(--ink);
   line-height: 1.5;
   padding-top: 2px;
 }
@@ -1045,7 +1062,7 @@ const hasAIData = computed(
 .ai-empty {
   padding: var(--space-3xl);
   text-align: center;
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   font-size: var(--text-body);
 }
 

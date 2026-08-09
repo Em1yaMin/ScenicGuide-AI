@@ -13,7 +13,7 @@ main.ts → createApp(App) → .use(createPinia()) → .use(router) → .mount('
 ## Design System (CSS token 体系)
 ```
 styles/design-tokens.css — 设计体系 token 权威源（--ink/--paper/--jade/--cinnabar/--mist/--slate/--surface + 间距/圆角/阴影/动效/字阶）
-styles/variables.css     — 旧 --color-* 兼容别名层（映射到 design-tokens.css，存量组件零改动换肤）
+styles/variables.css     — 旧 --color-* 兼容别名层（映射到 design-tokens.css；已无存量依赖，保留兼容）
 styles/base.css          — CSS reset + 排版基准
 assets/main.css          — #app { min-height: 100vh } 入口（依次 import design-tokens → variables → base）
 ```

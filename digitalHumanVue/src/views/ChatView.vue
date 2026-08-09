@@ -271,14 +271,17 @@ function onQuestionClick(text: string) {
   min-height: 0;
 }
 
+/* 数字人嵌入容器：统一遵循设计体系 --embed-* token（见 doc/redesign-v1.md §2.5） */
 .human-frame {
   flex: 1;
   position: relative;
-  border: 1px solid var(--mist);
-  border-radius: var(--radius-lg);
+  min-width: var(--embed-min-width);
+  min-height: var(--embed-min-height);
+  border: var(--embed-border);
+  border-radius: var(--embed-radius);
   overflow: hidden;
-  background: var(--surface);
-  box-shadow: var(--shadow-card);
+  background: var(--embed-bg);
+  box-shadow: var(--embed-shadow);
 }
 
 .digital-human-frame {

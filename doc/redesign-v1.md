@@ -1,8 +1,10 @@
-# 访客端视觉重设计 · 第一阶段（V1）设计计划
+# 视觉重设计 · 设计计划（V1：访客端第一阶段 + 管理后台第二阶段）
 
 > 船长 2026-08-09 触发。范围：设计体系 token + 首页 + 对话页 + 登录/注册对齐。
 > 第二阶段（管理后台重设计）将复用本 token 体系。
 > 本文件为权威设计文档：所有颜色/字体/动效决定必须源自本节，后续阶段改 token 需同步本节。
+>
+> 第二阶段（2026-08-09 触发）补充：管理后台视觉打磨（AdminLayout + 7 管理页），风格同体系但更紧凑高效（数据工具风）；新增 `--embed-*` 嵌入容器 token 与 `--cinnabar-strong`（§2.1/§2.5），管理端按钮规范 primary=jade / danger=cinnabar，ECharts 主题对齐 jade/cinnabar 色板。
 
 ## 1. Ground it in the subject
 
@@ -30,7 +32,7 @@
 | `--jade-soft` | 青玉淡 | `#E3EDE8` | 标签浅底/hover 底 | — |
 | `--surface` | 素白 | `#FFFFFF` | 卡片/浮层底 | — |
 
-其余派生 token（见 `src/styles/design-tokens.css`）：`--jade-strong`（hover/按下）、`--cinnabar-soft`（错误浅底）、`--mist-strong`（hover 边框）、`--overlay`（hover 底）、`--focus`（键盘焦点描边 = 青玉）。
+其余派生 token（见 `src/styles/design-tokens.css`）：`--jade-strong`（hover/按下）、`--cinnabar-strong`（danger hover/按下，与 `--jade-strong` 同派生规律）、`--cinnabar-soft`（错误浅底）、`--mist-strong`（hover 边框）、`--overlay`（hover 底）、`--focus`（键盘焦点描边 = 青玉）。
 
 色相逻辑：墨绿青玉为骨（山水），宣纸为底（卷轴），朱砂只作印（落款）。**全页朱砂出现 ≤ 3 处**：hero 印章、置顶徽标、section 题跋点。
 
@@ -54,6 +56,22 @@
 - 圆角：`--radius-sm: 6px` · `--radius-md: 10px` · `--radius-lg: 16px` · `--radius-full: 999px`（收敛旧的 4/6/8/10/12 混用）。
 - 阴影：`--shadow-card: 0 1px 2px rgba(30,42,38,.04), 0 4px 12px rgba(30,42,38,.05)` · `--shadow-pop: 0 8px 24px rgba(30,42,38,.10)`（轻柔，无大光晕）。
 - 动效：沿用 `--duration-fast/normal/slow` + `--ease-out`；新增 `--ease-stamp: cubic-bezier(0.34, 1.56, 0.64, 1)`（印章落定的轻微回弹）。`prefers-reduced-motion` 全局降级。
+
+### 2.5 数字人嵌入容器（第二阶段，船长讨论确定）
+
+任何需要嵌入数字人（iframe 外壳）的场景统一使用 `--embed-*` token（访客对话页 ChatView 已按此核对）：
+
+| Token | 取值 | 角色 |
+|---|---|---|
+| `--embed-radius` | `var(--radius-lg)` | 外壳圆角（融入页面最大圆角档） |
+| `--embed-border` | `1px solid var(--mist)` | 外壳描边 |
+| `--embed-bg` | `var(--surface)` | 外壳底色（加载/空白期衬底） |
+| `--embed-shadow` | `var(--shadow-card)` | 外壳阴影（轻柔，不抢主体） |
+| `--embed-pad` | `var(--space-lg)` | 外壳内边距 |
+| `--embed-min-width` | `320px` | 外壳最小宽度 |
+| `--embed-min-height` | `480px` | 外壳最小高度（不塌陷） |
+
+**管理后台不嵌入数字人**（功能性优先，无 iframe）。
 
 ## 3. 布局概念（ASCII 线框）
 
@@ -144,11 +162,11 @@
 - 键盘：全局 `:focus-visible` 青玉 2px 外描边（`--focus` token）。
 - `prefers-reduced-motion` 媒体查询降级。
 
-## 8. 兼容策略（供阶段 2 复用）
+## 8. 兼容策略（阶段 2 已完成）
 
 - 新建 `src/styles/design-tokens.css` = 唯一权威 token 源（新命名：`--ink/--paper/--jade/--cinnabar/--mist/--slate/--surface/--radius-*/--shadow-*/--space-section/--ease-stamp`）。
-- `src/styles/variables.css` 降级为**兼容别名层**：旧 `--color-*` 名全部 `var(--新名)` 映射（管理后台等存量组件零改动即随新体系换肤；阶段 2 再逐页迁移到新名）。
-- 页面级组件迁移到新 token 名。
+- `src/styles/variables.css` 降级为**兼容别名层**：旧 `--color-*` 名全部 `var(--新名)` 映射。阶段 2（AdminLayout + 7 管理页）已全部迁移到新名，`--color-*` 无存量依赖；兼容层**保留不删**（船长决策，仍由 main.css 引入）。
+- 新增页面必须用新 token 名（迁移已完成，不再新增旧名引用）。
 
 ## 9. 验收对照
 

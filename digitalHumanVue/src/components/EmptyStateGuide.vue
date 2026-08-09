@@ -22,17 +22,22 @@ defineProps<{
   align-items: center;
   justify-content: center;
   padding: var(--space-3xl);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   gap: var(--space-md);
 }
 
 .guide-btn {
   display: inline-block;
   padding: var(--space-xs) var(--space-md);
-  background: var(--color-accent);
-  color: #fff;
-  border-radius: 4px;
+  background: var(--jade);
+  color: var(--surface);
+  border-radius: var(--radius-sm);
   text-decoration: none;
   font-size: var(--text-small);
+  transition: background var(--duration-fast) var(--ease-out);
+}
+
+.guide-btn:hover {
+  background: var(--jade-strong);
 }
 </style>
