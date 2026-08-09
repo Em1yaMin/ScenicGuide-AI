@@ -1,5 +1,7 @@
 # 阶段3 全链路联调验证（phase3-e2e-verification）
 
+> **历史文档**：本文为阶段3（2026-08-06）验证报告，描述当时实现状态（双模式对话已由 deepagents 装配层主链路取代，但规划路径偶发空响应的经验仍适用）。最新实现以根目录 `AGENTS.md`（项目记忆）与 `README.md` 为准。
+
 > 日期：2026-08-06 ｜ 阶段3 收官：双模式 / 推荐问句本地化 / 分析链路本地化 / 记忆系统 / 双轨回落
 > 环境：worktree 自建 `.env`（复制主项目 `digitalHumanApi/.env`，gitignored 不入库），uvicorn `127.0.0.1:8000`
 > 真实调用：opencode-go 端点（`LLM_*`/`OPENAI_*` 同 key，deepseek-v4-flash）+ Dify 服务器；配额精炼（每链路 1-2 次调用）

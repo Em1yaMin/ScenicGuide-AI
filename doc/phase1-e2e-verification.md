@@ -1,5 +1,7 @@
 # 阶段1 双轨联调验证记录（phase1-e2e-verification）
 
+> **历史文档**：本文为阶段1（2026-08-06）验证报告，描述当时实现状态（对话主链路、Embedding 均已有演进——主链路现为 deepagents 装配层、Embedding 已支持 Qwen/DashScope）。最新实现以根目录 `AGENTS.md`（项目记忆）与 `README.md` 为准。
+
 > 日期：2026-08-06 ｜ 阶段1 收官任务：双轨联调验证（LangChain 新链路 vs Dify 回落）+ 问题修复 + 文档完善
 > 对应任务：阶段1 最后一项「联调收尾」（T1~T4 已合并：#20/#21/#22/#23）
 
