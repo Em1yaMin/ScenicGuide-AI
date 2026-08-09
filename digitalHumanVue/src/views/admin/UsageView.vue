@@ -714,12 +714,12 @@ onMounted(() => {
 }
 
 .primary-btn {
-  background: var(--ink);
+  background: var(--jade);
   color: var(--surface);
 }
 
 .primary-btn:hover {
-  background: var(--jade);
+  background: var(--jade-strong);
 }
 
 .primary-btn:disabled {
@@ -1234,7 +1234,8 @@ onMounted(() => {
 
 .form-row input:focus {
   outline: none;
-  border-color: var(--slate);
+  border-color: var(--jade);
+  box-shadow: 0 0 0 3px var(--jade-soft);
 }
 
 .form-hint {

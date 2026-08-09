@@ -61,9 +61,17 @@ const topConcern = computed(() => {
   return (data.value?.concern_ranking ?? [])[0] ?? null
 })
 
+const SENTIMENT_COLORS: Record<string, string> = {
+  positive: '#2F6B5B',
+  negative: '#C1412F',
+  neutral: '#C8D2CC',
+}
+
+function sentimentColor(label: string): string {
+  return SENTIMENT_COLORS[label.toLowerCase()] ?? '#9CB3A8'
+}
+
 const sentimentPieOption = computed(() => {
-  // 情感色板对齐设计体系（doc/redesign-v1.md §2.1）：青玉/山岚深/黛 同源
-  const sentimentPalette = ['#2F6B5B', '#5E8A7B', '#9CB3A8', '#C89C8E', '#C1412F']
   return {
     tooltip: { trigger: 'item' as const, textStyle: { fontSize: 13 } },
     series: [{
@@ -87,10 +95,10 @@ const sentimentPieOption = computed(() => {
       labelLine: {
         lineStyle: { color: '#E4E9E5' },
       },
-      data: (data.value?.sentiment_stats ?? []).map((item, i) => ({
+      data: (data.value?.sentiment_stats ?? []).map((item) => ({
         name: item.label,
         value: item.count,
-        itemStyle: { color: sentimentPalette[i % sentimentPalette.length] },
+        itemStyle: { color: sentimentColor(item.label) },
       })),
     }],
   }
@@ -155,7 +163,7 @@ const sentimentPieOption = computed(() => {
               :key="idx"
               class="summary-item"
             >
-              <span class="summary-dot" :class="`summary-dot--${idx}`" />
+              <span class="summary-dot" :style="{ background: sentimentColor(item.label) }" />
               <span class="summary-label">{{ item.label }}</span>
               <span class="summary-count">{{ item.count }}</span>
             </div>
@@ -343,12 +351,6 @@ const sentimentPieOption = computed(() => {
   border-radius: 50%;
   flex-shrink: 0;
 }
-
-.summary-dot--0 { background: #2F6B5B; }
-.summary-dot--1 { background: #5E8A7B; }
-.summary-dot--2 { background: #9CB3A8; }
-.summary-dot--3 { background: #C89C8E; }
-.summary-dot--4 { background: #C1412F; }
 
 .summary-label {
   flex: 1;
