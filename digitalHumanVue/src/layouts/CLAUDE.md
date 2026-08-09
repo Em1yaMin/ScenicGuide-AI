@@ -72,8 +72,8 @@ CSS: `display: flex; flex-direction: column`、`border-bottom` 分隔线
 
 ```css
 nav a.router-link-exact-active {
-  color: var(--color-accent);
-  /* Admin: 额外加 background: var(--color-accent-light) */
+  color: var(--jade);
+  /* Admin: 额外加 background: var(--jade-soft) */
 }
 ```
 

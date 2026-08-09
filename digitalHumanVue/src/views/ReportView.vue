@@ -26,12 +26,12 @@ interface ReportData {
 
 const { data, isLoading, error, execute: fetchReport } = useApi<ReportData>(API_ADMIN_REPORT)
 
-const hasData = computed(() =>
-  data.value !== null && (
-    (data.value?.sentiment_stats?.length ?? 0) > 0 ||
-    (data.value?.concern_ranking?.length ?? 0) > 0 ||
-    (data.value?.suggestions?.length ?? 0) > 0
-  )
+const hasData = computed(
+  () =>
+    data.value !== null &&
+    ((data.value?.sentiment_stats?.length ?? 0) > 0 ||
+      (data.value?.concern_ranking?.length ?? 0) > 0 ||
+      (data.value?.suggestions?.length ?? 0) > 0),
 )
 
 onMounted(() => {
@@ -74,33 +74,35 @@ function sentimentColor(label: string): string {
 const sentimentPieOption = computed(() => {
   return {
     tooltip: { trigger: 'item' as const, textStyle: { fontSize: 13 } },
-    series: [{
-      type: 'pie' as const,
-      radius: ['50%', '72%'],
-      center: ['40%', '50%'],
-      avoidLabelOverlap: false,
-      itemStyle: {
-        borderRadius: 2,
-        borderColor: '#F7F8F6',
-        borderWidth: 2,
+    series: [
+      {
+        type: 'pie' as const,
+        radius: ['50%', '72%'],
+        center: ['40%', '50%'],
+        avoidLabelOverlap: false,
+        itemStyle: {
+          borderRadius: 2,
+          borderColor: '#F7F8F6',
+          borderWidth: 2,
+        },
+        label: {
+          show: true,
+          position: 'right' as const,
+          fontFamily: '"Noto Sans SC", sans-serif',
+          fontSize: 13,
+          color: '#5C6B63',
+          formatter: '{b}\n{d}%',
+        },
+        labelLine: {
+          lineStyle: { color: '#E4E9E5' },
+        },
+        data: (data.value?.sentiment_stats ?? []).map((item) => ({
+          name: item.label,
+          value: item.count,
+          itemStyle: { color: sentimentColor(item.label) },
+        })),
       },
-      label: {
-        show: true,
-        position: 'right' as const,
-        fontFamily: '"Noto Sans SC", sans-serif',
-        fontSize: 13,
-        color: '#5C6B63',
-        formatter: '{b}\n{d}%',
-      },
-      labelLine: {
-        lineStyle: { color: '#E4E9E5' },
-      },
-      data: (data.value?.sentiment_stats ?? []).map((item) => ({
-        name: item.label,
-        value: item.count,
-        itemStyle: { color: sentimentColor(item.label) },
-      })),
-    }],
+    ],
   }
 })
 </script>
@@ -113,11 +115,7 @@ const sentimentPieOption = computed(() => {
         <h1>游客感受度报告</h1>
         <p class="header-date">{{ today }}</p>
       </div>
-      <button
-        class="refresh-btn"
-        @click="fetchReport"
-        :disabled="isLoading"
-      >
+      <button class="refresh-btn" @click="fetchReport" :disabled="isLoading">
         {{ isLoading ? '加载中…' : '刷新数据' }}
       </button>
     </div>
@@ -158,11 +156,7 @@ const sentimentPieOption = computed(() => {
             />
           </div>
           <div class="sentiment-summary">
-            <div
-              v-for="(item, idx) in data?.sentiment_stats"
-              :key="idx"
-              class="summary-item"
-            >
+            <div v-for="(item, idx) in data?.sentiment_stats" :key="idx" class="summary-item">
               <span class="summary-dot" :style="{ background: sentimentColor(item.label) }" />
               <span class="summary-label">{{ item.label }}</span>
               <span class="summary-count">{{ item.count }}</span>
@@ -175,11 +169,7 @@ const sentimentPieOption = computed(() => {
       <section class="report-section">
         <h2 class="section-title">游客关注点排名</h2>
         <div v-if="data?.concern_ranking?.length" class="ranking-list">
-          <div
-            v-for="(item, idx) in data.concern_ranking"
-            :key="idx"
-            class="ranking-item"
-          >
+          <div v-for="(item, idx) in data.concern_ranking" :key="idx" class="ranking-item">
             <div class="ranking-left">
               <span class="ranking-num">{{ String(idx + 1).padStart(2, '0') }}</span>
               <span class="ranking-name">{{ item.concern }}</span>

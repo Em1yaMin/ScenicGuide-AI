@@ -875,8 +875,7 @@ const hasAIData = computed(
   border: 1px solid var(--mist);
   border-radius: var(--radius-md);
   background:
-    linear-gradient(135deg, rgba(47, 107, 91, 0.04), rgba(193, 65, 47, 0.03)),
-    var(--surface);
+    linear-gradient(135deg, rgba(47, 107, 91, 0.04), rgba(193, 65, 47, 0.03)), var(--surface);
   box-shadow: var(--shadow-card);
 }
 

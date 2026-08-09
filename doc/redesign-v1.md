@@ -1,4 +1,4 @@
-# 访客端视觉重设计 · 第一阶段（V1）设计计划
+# 视觉重设计 · 设计计划（V1：访客端第一阶段 + 管理后台第二阶段）
 
 > 船长 2026-08-09 触发。范围：设计体系 token + 首页 + 对话页 + 登录/注册对齐。
 > 第二阶段（管理后台重设计）将复用本 token 体系。
@@ -162,11 +162,11 @@
 - 键盘：全局 `:focus-visible` 青玉 2px 外描边（`--focus` token）。
 - `prefers-reduced-motion` 媒体查询降级。
 
-## 8. 兼容策略（供阶段 2 复用）
+## 8. 兼容策略（阶段 2 已完成）
 
 - 新建 `src/styles/design-tokens.css` = 唯一权威 token 源（新命名：`--ink/--paper/--jade/--cinnabar/--mist/--slate/--surface/--radius-*/--shadow-*/--space-section/--ease-stamp`）。
-- `src/styles/variables.css` 降级为**兼容别名层**：旧 `--color-*` 名全部 `var(--新名)` 映射（管理后台等存量组件零改动即随新体系换肤；阶段 2 再逐页迁移到新名）。
-- 页面级组件迁移到新 token 名。
+- `src/styles/variables.css` 降级为**兼容别名层**：旧 `--color-*` 名全部 `var(--新名)` 映射。阶段 2（AdminLayout + 7 管理页）已全部迁移到新名，`--color-*` 无存量依赖；兼容层**保留不删**（船长决策，仍由 main.css 引入）。
+- 新增页面必须用新 token 名（迁移已完成，不再新增旧名引用）。
 
 ## 9. 验收对照
 

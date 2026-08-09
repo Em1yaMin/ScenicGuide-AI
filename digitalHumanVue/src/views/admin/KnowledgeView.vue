@@ -155,20 +155,20 @@ async function saveForm() {
     category: form.value.category,
     content: form.value.content.trim(),
     tags: form.value.tags
-      ? form.value.tags.split(',').map((t) => t.trim()).filter(Boolean)
+      ? form.value.tags
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean)
       : [],
   }
 
   try {
     if (editingItem.value) {
-      await fetchWithCodeEnvelope<KnowledgeItem>(
-        `${API_ADMIN_KNOWLEDGE}/${editingItem.value.id}`,
-        {
-          method: 'PUT',
-          headers: getHeaders(),
-          body: JSON.stringify(payload),
-        },
-      )
+      await fetchWithCodeEnvelope<KnowledgeItem>(`${API_ADMIN_KNOWLEDGE}/${editingItem.value.id}`, {
+        method: 'PUT',
+        headers: getHeaders(),
+        body: JSON.stringify(payload),
+      })
     } else {
       await fetchWithCodeEnvelope<KnowledgeItem>(API_ADMIN_KNOWLEDGE, {
         method: 'POST',
@@ -282,15 +282,9 @@ onMounted(() => {
         <p class="header-desc">管理景区讲解词、FAQ 与景点资料</p>
       </div>
       <div class="header-actions">
-        <button class="secondary-btn" @click="openToken">
-          Token 设置
-        </button>
-        <button class="secondary-btn" @click="showImport = true">
-          批量导入
-        </button>
-        <button class="primary-btn" @click="openCreate">
-          + 新建条目
-        </button>
+        <button class="secondary-btn" @click="openToken">Token 设置</button>
+        <button class="secondary-btn" @click="showImport = true">批量导入</button>
+        <button class="primary-btn" @click="openCreate">+ 新建条目</button>
       </div>
     </div>
 
@@ -300,12 +294,7 @@ onMounted(() => {
         <option value="">全部分类</option>
         <option v-for="cat in CATEGORIES" :key="cat" :value="cat">{{ cat }}</option>
       </select>
-      <input
-        v-model="keyword"
-        class="filter-input"
-        type="text"
-        placeholder="搜索标题或内容…"
-      />
+      <input v-model="keyword" class="filter-input" type="text" placeholder="搜索标题或内容…" />
     </div>
 
     <!-- Import Result -->
@@ -361,19 +350,9 @@ onMounted(() => {
 
       <!-- Pagination -->
       <div v-if="totalPages > 1" class="pagination">
-        <button
-          class="page-btn"
-          :disabled="page === 1"
-          @click="goPage(page - 1)"
-        >
-          上一页
-        </button>
+        <button class="page-btn" :disabled="page === 1" @click="goPage(page - 1)">上一页</button>
         <span class="page-info">第 {{ page }} / {{ totalPages }} 页，共 {{ total }} 条</span>
-        <button
-          class="page-btn"
-          :disabled="page === totalPages"
-          @click="goPage(page + 1)"
-        >
+        <button class="page-btn" :disabled="page === totalPages" @click="goPage(page + 1)">
           下一页
         </button>
       </div>
@@ -424,11 +403,7 @@ onMounted(() => {
                 v-model="form.content"
                 placeholder="支持 Markdown 语法"
               />
-              <div
-                v-else
-                class="markdown-preview"
-                v-html="renderedPreview"
-              />
+              <div v-else class="markdown-preview" v-html="renderedPreview" />
             </div>
             <p v-if="editorError" class="form-error">{{ editorError }}</p>
           </div>
@@ -485,7 +460,11 @@ onMounted(() => {
           <div class="modal-body">
             <div class="form-row">
               <label>X-Admin-Token</label>
-              <input v-model="tokenInput" type="password" :placeholder="adminToken ? '已设置' : '请输入 Token'" />
+              <input
+                v-model="tokenInput"
+                type="password"
+                :placeholder="adminToken ? '已设置' : '请输入 Token'"
+              />
               <p class="form-hint">Token 保存在浏览器本地，用于调用管理接口。</p>
             </div>
           </div>
@@ -506,7 +485,9 @@ onMounted(() => {
             <button class="icon-btn" @click="showDelete = false">✕</button>
           </div>
           <div class="modal-body">
-            <p>确定要删除 <strong>{{ deletingItem?.title }}</strong> 吗？删除后无法恢复。</p>
+            <p>
+              确定要删除 <strong>{{ deletingItem?.title }}</strong> 吗？删除后无法恢复。
+            </p>
           </div>
           <div class="modal-footer">
             <button class="secondary-btn" @click="showDelete = false">取消</button>
