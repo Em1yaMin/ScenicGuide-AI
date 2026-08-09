@@ -8,6 +8,7 @@ services:
     volumes:
       - ./digitalHumanApi:/app
     environment:
+      - APP_ENV=${APP_ENV:-dev}
       - DEBUG=false
       - DATABASE_URL=sqlite+aiosqlite:///./digital_human.db
       - CORS_ORIGINS=
