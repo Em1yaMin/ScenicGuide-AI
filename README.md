@@ -115,7 +115,7 @@
 
 | 层 | 技术 |
 |----|------|
-| 后端 | Python 3.10+ · FastAPI · SQLAlchemy 2.0 (async) · SQLite (aiosqlite) · Alembic · Pydantic v2 · httpx |
+| 后端 | Python 3.11+ · FastAPI · SQLAlchemy 2.0 (async) · SQLite (aiosqlite) · Alembic · Pydantic v2 · httpx |
 | Agent 层 | langchain 1.x · langgraph · **deepagents 0.7.5**（装配层：HarnessProfile + 内置工具排除 + 中间件）· ToolCallLimit/Summarization 中间件 |
 | 向量/RAG | numpy 矩阵余弦相似度 · 本地 JSON 持久化（无外部向量库）· Embedding 工厂（Minimax 原生 / Qwen-DashScope OpenAI 兼容 / TF-IDF 降级） |
 | 前端 | Vue 3.5 · TypeScript (strict) · Vite 8 · Pinia 3 · vue-router 5 · vue-echarts (ECharts) · marked + DOMPurify |
@@ -192,7 +192,7 @@
 
 | 依赖 | 版本要求 | 用途 |
 |------|---------|------|
-| Python | 主后端 ≥ 3.10（numpy≥1.26）；**ADH 要求 ≤ 3.11**（numpy 1.24.4 预编译包上限，3.12 需源码编译易失败） | 后端 / 数字人后端 |
+| Python | 主后端 ≥ 3.11（deepagents==0.7.5 要求）；**ADH 要求 ≤ 3.11**（numpy 1.24.4 预编译包上限，3.12 需源码编译易失败） | 后端 / 数字人后端 |
 | Node.js | ^22.18.0 \|\| ≥ 24.12.0 | Vue 前端 + ADH Next.js 前端 |
 | ffmpeg / ffprobe | 系统包（`sudo apt install ffmpeg`） | ADH TTS 链路 MP3→WAV 必需（缺失时 TTS 静默失败） |
 | sqlite3 CLI | 可选 | 仅备份脚本 `backup_db.sh` 需要 |
@@ -252,6 +252,7 @@ virtualenv -p python3.10 venv && ./venv/bin/pip install -r requirements.txt   # 
 
 # ④ ADH 数字人前端（:3000）—— 勿用 pnpm dev（触发依赖检查失败）
 cd live2d-frontend/web
+npm install --legacy-peer-deps   # 首次运行安装依赖（nextui peer 冲突需 legacy 模式）
 node node_modules/next/dist/bin/next dev -p 3000
 ```
 
