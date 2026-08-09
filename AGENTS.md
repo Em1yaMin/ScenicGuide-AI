@@ -261,6 +261,12 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - 开发流程：改 models → `alembic revision --autogenerate -m "..."`（草稿必须 review，补 downgrade）→ `alembic upgrade head` 验证 → `pytest -q` → 合并；SQLite 改列用 `op.batch_alter_table`（已开 `render_as_batch=True`），禁止手写裸 ALTER TABLE
 - 权威文档：`doc/alembic-migrations.md`；测试：`tests/test_migrations.py`（9 用例：空库建齐/DDL 等价/遗留库 stamp 不丢数据/版本化库幂等/run_migrations 三态/遗留库缺表补建/公告表升级回退）
 
+## 多环境配置 + 数据库备份（批次8 C7）
+
+- **多环境三档（dev/staging/prod）**：config.py 新增 `APP_ENV` 字段（默认 dev，非法值启动即报错 `_validate_app_env`），启动日志与 `GET /api/v1/health`（HealthResponse.app_env）透出；`.env.example` 按功能分区（核心/对话 LLM/Embedding/运营分析/Dify/高德/记忆/用量/安全/SSH）并给每个变量标注【适用：dev/staging/prod/全部】；权威文档 `doc/deployment-environments.md`（三档差异表：DEBUG/CORS 白名单/限流/JWT_SECRET/凭据必填项 + 切换指引）；docker-compose.yml 已透传 `APP_ENV`（根目录 .env.example 同步）；测试 `tests/test_env_config.py`（默认值/三档合法/非法拒绝/健康检查透出）
+- **数据库备份**：`digitalHumanApi/scripts/backup_db.sh`（bash + sqlite3 CLI `.backup` 在线安全备份——快照语义不中断业务，区别于裸 cp 可能拷到写一半的库；时间戳命名 `<库>_backup_YYYYmmdd_HHMMSS.db` + 同秒冲突自动 -2/-3 后缀 + 保留最近 N 份默认 7 + 备份后自动校验 integrity_check 与表数量，失败删备份退出非零；位置参数 > 环境变量 > 默认值；shellcheck 干净）；权威文档 `doc/database-backup.md`（.backup vs 文件复制对比、恢复验证步骤：拷贝备份→integrity_check→表计数→抽查数据；Docker volume 路径：`./digitalHumanApi:/app` 下备份脚本/目录路径即容器内路径 `/app/...`，可宿主机直接调度）；测试 `tests/test_backup_script.py`（5 用例：建库→备份→恢复验证/保留份数清理/缺失库/非法 KEEP/无临时文件残留；未装 sqlite3 CLI 自动 skip）
+- 新增配置变量需同步三处：digitalHumanApi/.env.example + 根目录 .env.example + docker-compose.yml environment 透传（见 AGENTS.md「环境配置」坑位）
+
 # Commands
 
 | 命令 | 位置 | 用途 |

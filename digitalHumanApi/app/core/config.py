@@ -58,6 +58,10 @@ def _parse_admin_tokens(value: Optional[str]) -> dict:
 
 
 class Settings(BaseModel):
+    # 运行环境标识（批次8 C7 多环境配置）：dev=本机开发 / staging=VM 联调演示 /
+    # prod=正式部署。供日志/健康检查透出，方便运维区分当前环境；非法值启动即
+    # 报错（防误配）。三档环境的完整差异与切换指引见 doc/deployment-environments.md
+    APP_ENV: str = os.environ.get("APP_ENV", "dev").strip().lower()
     APP_NAME: str = os.environ.get("APP_NAME", "景区导览AI数字人")
     DEBUG: bool = os.environ.get("DEBUG", "false").lower() == "true"
 
@@ -290,6 +294,20 @@ class Settings(BaseModel):
     # "deepseek-v4-flash:1.0,2.0;deepseek-chat:1.0,2.0"（单位：元）
     MODEL_PRICES: str = os.environ.get("MODEL_PRICES", "")
 
+
+    @model_validator(mode="after")
+    def _validate_app_env(self) -> "Settings":
+        """校验 APP_ENV 取值（批次8 C7）：仅允许 dev/staging/prod 三档。
+
+        非法值（如 production/大写/笔误）启动即报错，防「以为在 prod 实际是
+        dev」的误配导致行为差异不可察觉。
+        """
+        if self.APP_ENV not in ("dev", "staging", "prod"):
+            raise ValueError(
+                f"APP_ENV 非法值 {self.APP_ENV!r}（仅允许 dev/staging/prod，"
+                "见 doc/deployment-environments.md）"
+            )
+        return self
 
     @model_validator(mode="after")
     def _validate_cors_config(self) -> "Settings":

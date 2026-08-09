@@ -59,6 +59,8 @@ async def lifespan(app: FastAPI):
 
     # Phase 0: 统一日志配置（结构化格式，见 app/core/logging_config.py）——在任务启动前完成
     configure_logging()
+    # 启动环境标识（批次8 C7 多环境配置）：便于运维从日志确认当前环境档位
+    logger.info("运行环境: APP_ENV=%s DEBUG=%s", settings.APP_ENV, settings.DEBUG)
 
     # Phase 1: 数据库迁移（Alembic，见 app/core/migrations.py 与 doc/alembic-migrations.md）
     # 平滑过渡：空库 upgrade 建齐 / 遗留库（无版本表）自动 stamp 基线 / 版本化库 upgrade
@@ -148,7 +150,8 @@ app.include_router(usage.router)
 
 @app.get("/api/v1/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
-    return HealthResponse(status="ok")
+    # app_env 透出（批次8 C7）：健康检查可区分 dev/staging/prod 环境
+    return HealthResponse(status="ok", app_env=settings.APP_ENV)
 
 
 @app.exception_handler(Exception)
