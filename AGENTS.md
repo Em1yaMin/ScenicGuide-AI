@@ -378,7 +378,13 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 
 ## CI (GitHub Actions)
 
-- Workflow: `.github/workflows/ci.yml` — 三个并行 job：backend `pytest`（Python 3.12，**带覆盖率门禁**，见下）+ frontend `npm run build`（Node 22）+ frontend E2E（Playwright 冒烟），on push to master / PR。
+- Workflow: `.github/workflows/ci.yml` — 三个并行 job：backend `pytest`（Python 3.12，**带覆盖率门禁**，见下）+ frontend（Node 22：`npm ci` → `npm run lint` → `npm run build`，C8 起含 lint）+ frontend E2E（Playwright 冒烟），on push to master / PR。
+
+## 前端工程化（批次8 C8：TS strict/ESLint/组件规范，已就绪）
+
+- **现状已达标**（C8 核对结论，避免重复改造）：TS 严格模式已开（`tsconfig.app.json` 继承 `@vue/tsconfig`，`strict: true` + `noUncheckedIndexedAccess`），type-check 已入 build（`npm run build` = `vue-tsc --build` + vite build 并行）；ESLint 已配置（`eslint.config.ts`：vue flat/essential + `vueTsConfigs.recommended` + oxlint + prettier），`npm run lint`（eslint+oxlint 均带 `--fix`）存量 0 error；CI frontend job 已含 lint 步骤
+- **权威规范文档**：`doc/frontend-conventions.md`（命名/组件组织/scoped css + CSS 变量三层样式/Pinia setup store + localStorage 持久化/`fetchWithCodeEnvelope` API 封装模式——统一超时 15s + FastAPI detail 三形态解析 + 端点常量集中于 `api/index.ts` 禁止组件硬编码 URL/三态数据获取/CI 门禁）；与 `digitalHumanVue/src/CLAUDE.md` 子层指南互补
+- **技术栈锁定**（禁止新重依赖）：Vue 3.5 + TS 6 strict + Vite 8 + Pinia 3 + vue-router 5 + vue-echarts；**不用** axios（原生 fetch）、Sass/Tailwind（scoped css）、第三方 mock 库（E2E 用 Playwright `page.route`）
 
 ## 测试质量门（批次7 C6：覆盖率门禁 + 前端 E2E）
 
