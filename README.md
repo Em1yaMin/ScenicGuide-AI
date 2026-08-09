@@ -1,597 +1,428 @@
 # 景区导览 AI 数字人系统
 
-景区导览 AI 数字人系统 — Python FastAPI 后端 + Vue 3 前端单体应用，通过 Docker Compose 部署。后端集成 Dify AI 平台提供对话双轨回落与对话/评估数据抓取（**阶段4 收官后 Dify 依赖面已收敛**：推荐问句、分析链路与量化评估均已本地化，仅对话回落与历史数据接口保留，见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md)；**模拟 Dify 不可达的全链路自检通过**，见 [`doc/phase4-e2e-verification.md`](doc/phase4-e2e-verification.md)），前端提供访客端（数字人对话）和管理后台（数据大屏 + 报告）。
+> 第十五届中国软件杯 A5 赛题 · 景区导览服务 AI 数字人
 
-## 技术栈
+一套开箱即用的**景区智能导览数字人系统**：以 Live2D 数字人为交互载体，集成自然语言对话、语音识别（ASR）、语音合成（TTS）、个性化路线推荐、长短期记忆、本地 RAG 知识库、GPS 路径规划（高德）、运营数据分析与管理员 AI Agent，配套访客端网页与数据大屏管理后台。
+
+**核心亮点**：
+- **纯本地对话主链路**：deepagents 装配层（langgraph + langchain 1.x），Dify 仅作演示兜底（双轨回落）
+- **AI 记忆系统**：短期会话记忆（SQLite 落盘）+ 长期用户画像（向量库提取/检索/工具化四工具），登录用户个性化回答
+- **本地 RAG 知识库**：Qwen Embedding 向量化 + 向量落盘复用，无外部向量库依赖，管理后台 CRUD 自动同步索引
+- **管理员 AI Agent**：后台自然语言运维——知识库/公告/记忆/统计，删除类操作两阶段二次确认 + 审计日志
+- **可观测、可运营**：token 成本仪表盘、AI 运营分析、本地 LLM 量化评估、多环境部署与数据库备份
+
+---
+
+## 目录
+
+- [功能清单](#功能清单)
+- [架构总览](#架构总览)
+- [目录结构](#目录结构)
+- [快速启动](#快速启动)
+- [部署](#部署)
+- [核心能力详解](#核心能力详解)
+- [API 概览](#api-概览)
+- [文档索引](#文档索引)
+- [测试与质量门](#测试与质量门)
+- [常见问题](#常见问题)
+
+## 功能清单
+
+### 对话与推荐（访客端）
+
+| 能力 | 说明 |
+|------|------|
+| **AI 数字人对话** | Live2D 数字人（ADH）内置对话界面，支持语音输入（腾讯云 ASR）+ 语音输出（Qwen TTS），SSE 流式逐字回答 + 工具调用步骤可视化 |
+| **deepagents 主链路** | 对话主链路为 deepagents 装配层（A3 起）：LangGraph 状态图 + 结构化本地工具（景点/路线直查、知识检索、规则推荐、记忆四工具、GPS 两工具），零幻觉原则 |
+| **意图分类双模式挂载** | 轻量规则分类器：简单问答零开销直答；复杂任务（规划/行程/预算）注入 prompt 级规划指令，回答结构化分节 |
+| **Dify 双轨回落** | 主链路任何异常自动回落 Dify Chat Agent（演示兜底不翻车）；`DIALOGUE_ENGINE=dify` 可强制走 Dify |
+| **个性化路线推荐** | 纯本地规则引擎 + 工具调用：输入偏好描述（"带老人小孩、喜欢拍照"）推理推荐路线，不依赖外部 API |
+| **推荐问句** | 首页数字人引导区动态问句：聚合 7 天运营数据由本地 LLM 生成，每 5 分钟后台刷新（已脱离 Dify） |
+| **GPS/高德路线规划** | "描述位置 → 地理编码 → 路径规划 → 地图展示"：`geocode_location`/`plan_route` 工具 + 对话内路线卡片（AMap 地图/文字兜底） |
+| **SSE 流式契约** | `step`（工具步骤）/`token`（逐字回答）/`done`（会话 ID + RAG 来源 + 路线数据）/`error`（回落标记）事件，ADH 前端零适配消费 |
+
+### 记忆系统
+
+| 能力 | 说明 |
+|------|------|
+| **短期会话记忆** | 多轮上下文 SQLite 落盘 + 进程内 TTL 缓存，重启后同会话续聊不丢；TTL 滑动窗口（默认 7 天）自动清理 |
+| **长期用户记忆** | 对话后后台 LLM 提取用户事实/偏好/习惯写入向量库（按 user 隔离）；新会话轻量摘要注入 + 记忆工具按需检索 |
+| **记忆工具化四工具** | `recall_user_memory`/`save_user_memory`/`list_user_memories`/`delete_user_memory`，经 LangGraph state 注入当前用户，模型无法操作他人记忆 |
+| **管理端记忆管理** | 后台查看/新增/修改/删除任意注册用户记忆（X-Admin-Token 鉴权，删除类要求 admin 角色） |
+| **游客隔离** | 游客（匿名/guest token）享短期记忆，不写不读长期记忆 |
+
+### 知识库与内容运营
+
+| 能力 | 说明 |
+|------|------|
+| **本地 RAG 知识库** | 三命名空间（knowledge/documents/user_memory）向量存储，统一检索入口（对话/后台/推荐 Agent 共用）；embedding 未配置时自动降级本地 TF-IDF |
+| **Qwen Embedding** | DashScope compatible-mode（`qwen3.7-text-embedding` 1024 维）；兼容旧 Minimax 原生格式（`EMBEDDING_API_STYLE` 切换） |
+| **向量落盘复用** | 文档侧 sidecar 缓存向量（绑定 embedding 配置），启动跳过全量重算；embedding 配置变更自动失效重建 |
+| **知识库管理后台** | 讲解词/FAQ/资料 CRUD + 批量导入（JSON/Markdown）；变更后自动重建向量索引，后台检索即时可见 |
+| **公告模块** | 公告发布/下架/置顶 + 访客端展示（仅已发布、置顶优先）；首个真实 Alembic 迁移 |
+| **首页活数据** | 热门景点/推荐路线卡片实时读取本地数据源，接口失败静态兜底 |
+
+### 管理与可观测
+
+| 能力 | 说明 |
+|------|------|
+| **管理员 AI Agent** | 后台自然语言运维：知识库/用户记忆/公告/运营统计/RAG 重建索引/首页数据；删除类两阶段二次确认（TTL 过期自动失效）+ 写操作审计日志；SSE 事件契约与用户侧一致 |
+| **AI 运营分析** | 数据大屏 + 报告：情感趋势/满意度/热点关注/景点热度；LLM 分析失败自动回退纯 DB 统计（`llm_analysis` 降级标记） |
+| **本地量化评估** | 对话内容本地 LLM 量化评估（情感/满意度/关注点/涉及景点/改进建议）写入 Evaluation 表，驱动管理后台数据（已脱离 Dify Workflow） |
+| **token 成本仪表盘** | 统一埋点（对话/推荐/评估/压缩/管理 agent 全链路）+ 批量写库 + 报表 API（趋势/维度聚合/明细/CSV 导出）+ 前端成本仪表盘页（ECharts 双轴图） |
+| **用户认证** | 注册/登录/游客三种身份，JWT + bcrypt；对话接口自动识别 Bearer token 标记用户 |
+| **安全加固** | 认证端点限流（防爆破，429 + Retry-After）、CORS 白名单（默认覆盖演示环境）、管理端 RBAC（admin/operator 角色分级） |
+| **多环境 + 备份** | dev/staging/prod 三档配置（`APP_ENV` 健康检查透出）；SQLite 在线备份脚本（`.backup` 快照 + 完整性校验 + 保留 N 份） |
+
+### 工程与性能
+
+| 能力 | 说明 |
+|------|------|
+| **A4 成本/速度调优** | 工具调用上限（15 次防病态循环）+ 工具结果归一化缓存（LRU + TTL 分级 + 索引重建即时失效）+ 长会话上下文压缩（回答后触发，历史 ≥24 条压缩早期轮次） |
+| **数据库迁移** | Alembic（async 模板），启动自动迁移三态分流（空库建齐/遗留库幂等补建 + 基线化/版本化库升级），开发流程 autogenerate |
+| **结构化日志** | 统一日志格式 + 每请求一条日志（方法/路径/状态/耗时/用户），token/密码绝不入日志 |
+| **前端工程化** | Vue 3 + TS strict + ESLint + 统一组件规范（scoped css + 集中式 API 封装） |
+
+## 架构总览
+
+### 四服务结构
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  digitalHumanVue (Vue 3, :5173)                                 │
+│  访客端（首页/对话页）  +  管理后台（数据大屏/报告/知识库/公告/   │
+│  记忆管理/管理员Agent/成本仪表盘）                                │
+└───────────────┬─────────────────────────────────────────────────┘
+                │ fetch(/api/*) → Vite proxy
+┌───────────────▼─────────────────────────────────────────────────┐
+│  digitalHumanApi (FastAPI, :8000)                               │
+│  对话主链路(deepagents) · 记忆 · RAG · 推荐 · 公告 · 分析 ·      │
+│  用量统计 · 管理员Agent · 认证/安全 · Alembic/SQLite             │
+└───────┬──────────────────────────┬──────────────────────────────┘
+        │ SSE /api/v1/dialogue/chat │ 双轨回落(异常时)
+┌───────▼───────────────┐   ┌───────▼───────────────┐
+│ live2d-frontend (ADH) │   │ Dify AI 平台（仅两类保留 │
+│ 后端 :8001 + 前端 :3000│   │ 依赖：对话回落 + 历史    │
+│ Live2D 数字人          │   │ 数据接口）              │
+└────────────────────────┘   └────────────────────────┘
+```
+
+- **访客端**：首页（公告 + 热门景点 + 推荐问句）+ 数字人对话页（iframe 嵌入 ADH，内置完整对话/语音功能）
+- **管理后台**：数据大屏、分析报告、知识库管理、公告管理、记忆管理、管理员 Agent、成本仪表盘
+- **ADH 本地数字人**：基于 awesome-digital-human-live2d 定制，引擎化架构（Registry + Factory + Pool），LangChainAgent 默认引擎直连本后端对话接口
+
+### 技术栈
 
 | 层 | 技术 |
 |----|------|
-| 后端 | Python 3.9+ · FastAPI · SQLAlchemy 2.0 (async) · SQLite (aiosqlite) · httpx · LangChain |
-| 前端 | Vue 3 · TypeScript · Vite 8 · Pinia · Vue Router · ECharts |
-| 部署 | Docker Compose · Nginx |
-| 外部服务 | Dify AI 平台（Chat Agent 对话双轨回落 + 历史数据接口；量化评估已本地 LLM 化）、LangChain 系 agent（对话主链路 = deepagents 装配层，A3 起）+ OpenAI（AI 运营分析）、对话 LLM（opencode-go DeepSeek，见 `doc/llm-adapter-smoke-test.md`）、高德 Web 服务（GPS 地理编码/路径规划，`AMAP_WEB_KEY`，见 [`doc/amap-gps-api.md`](doc/amap-gps-api.md)）、本地 Live2D 数字人（live2d-frontend） |
+| 后端 | Python 3.10+ · FastAPI · SQLAlchemy 2.0 (async) · SQLite (aiosqlite) · Alembic · Pydantic v2 · httpx |
+| Agent 层 | langchain 1.x · langgraph · **deepagents 0.7.5**（装配层：HarnessProfile + 内置工具排除 + 中间件）· ToolCallLimit/Summarization 中间件 |
+| 向量/RAG | numpy 矩阵余弦相似度 · 本地 JSON 持久化（无外部向量库）· Embedding 工厂（Minimax 原生 / Qwen-DashScope OpenAI 兼容 / TF-IDF 降级） |
+| 前端 | Vue 3.5 · TypeScript (strict) · Vite 8 · Pinia 3 · vue-router 5 · vue-echarts (ECharts) · marked + DOMPurify |
+| 数字人 | ADH（Python FastAPI + Next.js 14）：腾讯云 ASR · Qwen TTS（DashScope WebSocket）· LangChainAgent（默认，走本后端） |
+| 外部服务 | opencode-go（对话/分析/评估 LLM 主端点，`deepseek-v4-flash`）· Dify（仅对话回落 + 历史数据抓取）· 高德 Web 服务（GPS）· DashScope（Embedding/TTS） |
+| 部署 | Docker Compose（api + web/nginx）· Nginx 反代 · 备份脚本（sqlite3 `.backup`） |
 
-## 本地数字人依赖
+### 数据流
 
-本项目数字人对话功能由 [awesome-digital-human-live2d](https://github.com/Kedreamix/awesome-digital-human-live2d) 提供，
-源码位于 `live2d-frontend/`（已纳入本仓库版本控制）。
-
-| 服务 | 端口 | 说明 |
-|------|------|------|
-| ADH 后端 | 8001 | FastAPI（ASR/TTS/Agent 引擎注册与调用，默认 8000，因业务 FastAPI 占用改为 8001） |
-| ADH 前端 | 3000 | Next.js（Live2D 数字人渲染 + 对话界面） |
-
-**引擎配置**:
-- **ASR**: 腾讯云实时语音识别 (TencentAPI)
-- **TTS**: QwenAPI（阿里云百炼 DashScope，`qwen-audio-3.0-tts-flash` + `qwen-audio-3.0-tts-flash-longtongxuxian`（龙彤旭弦）音色，2026-08-07 从 MiniMax 迁移）；MiniMaxAPI 保留可切换
-- **Agent**: LangChainAgent（默认，走本后端 `POST /api/v1/dialogue/chat` deepagents 装配层主链路（A3 起），后端侧异常自动回落 Dify）；DifyAgent（直连 Dify Chat Agent）保留可切换
-
-启动步骤见上方「**4. 启动本地数字人服务**」。详细部署步骤与故障排查见 `AGENTS.md`（ADH 专节）或 `doc/local-digital-human-deploy-plan.md`。
+```
+请求流：Vue → fetch(/api/*) → Vite proxy → FastAPI → SQLite
+对话流：ADH → SSE(/api/v1/dialogue/chat) → deepagents 装配层
+        （意图分类 → 工具调用(本地 JSON/RAG/记忆/GPS) → LLM 总结）→ SSE 回 ADH
+数据流：Dify API ← polling task(30s) → SQLite → analysis task(300s)
+        → 本地 LLM 量化评估 → Evaluation 表 → 管理后台大屏/报告
+记忆流：对话 done 后 → 记忆提取钩子(后台任务) → user_memory 向量库
+        → 新会话轻量摘要注入 + 记忆四工具按需检索
+```
 
 ## 目录结构
 
 ```
-digitalHuman/
-├── digitalHumanApi/          # FastAPI 后端
+├── digitalHumanApi/            # FastAPI 后端（:8000）
 │   ├── app/
-│   │   ├── main.py           # 应用入口（lifespan、CORS、全局异常处理）
-│   │   ├── core/             # 配置 (config.py) + 数据库引擎 (database.py)
-│   │   ├── models/           # SQLAlchemy ORM 实体
-│   │   ├── schemas/          # Pydantic v2 请求/响应模型
-│   │   ├── data/             # 本地 JSON 数据源（景点、路线）
-│   │   ├── services/         # 业务逻辑 + Dify API 客户端
-│   │   ├── routers/          # FastAPI HTTP 端点
-│   │   └── tasks/            # 后台 asyncio 循环（polling、analysis）
-│   ├── tests/                # pytest 测试套件
-│   ├── requirements.txt
-│   ├── requirements-dev.txt
-│   └── .env                  # 后端环境变量（需自行创建）
-├── digitalHumanVue/          # Vue 3 前端
+│   │   ├── main.py             # 应用入口（lifespan、CORS、全局异常、router 注册）
+│   │   ├── core/               # config.py / database.py / llm.py（对话 LLM 工厂）
+│   │   │                       # embedding.py（Embedding 工厂）/ rag.py（命名空间向量存储）
+│   │   │                       # memory_store.py（短期记忆）/ migrations.py（启动自动迁移）
+│   │   │                       # security.py / rate_limiter.py / logging_config.py
+│   │   ├── models/             # SQLAlchemy ORM 实体（dialogue/evaluation/stat/user/visitor/
+│   │   │                       #   knowledge/announcement/usage）
+│   │   ├── schemas/            # Pydantic v2 请求/响应模型
+│   │   ├── data/               # 本地 JSON 数据源（景点、路线）
+│   │   ├── services/           # 业务逻辑
+│   │   │   ├── deepagents/     # ★ 对话主链路装配层（agent/harness/memory_tools/
+│   │   │   │                   #   amap_tools/tool_cache/compaction）
+│   │   │   ├── admin_agent/    # 管理员 Agent（agent/tools/confirm 两阶段确认）
+│   │   │   ├── amap/           # 高德 Web 服务封装（geocode/route）
+│   │   │   ├── chat_agent.py   # 会话存储层 + 记忆钩子（弃用链路保留参考实现）
+│   │   │   ├── recommend_agent.py / recommend_service.py   # 推荐引擎 / 推荐问句
+│   │   │   ├── rag_service.py / memory_service.py / knowledge_service.py
+│   │   │   ├── analytics_service.py / evaluation_service.py  # 运营分析 / 量化评估
+│   │   │   └── usage_tracker.py / usage_report.py            # token 记账 / 报表
+│   │   ├── routers/            # FastAPI 端点（auth/dialogue/recommend/analysis/admin/
+│   │   │                       #   knowledge/announcement/memory_admin/admin_agent/
+│   │   │                       #   rag/usage/home/visitor）
+│   │   └── tasks/              # 后台循环（polling/analysis/recommend_questions/
+│   │                           #   memory_cleanup）+ backfill CLI
+│   ├── migrations/             # Alembic（versions/：初始基线 + 公告表 + llm_usage 表）
+│   ├── tests/                  # pytest 测试套件（680 用例）
+│   ├── scripts/                # smoke_llm / smoke_amap / backup_db.sh
+│   └── doc/                    # 后端权威契约文档（见文档索引）
+├── digitalHumanVue/            # Vue 3 前端（:5173）
 │   ├── src/
-│   │   ├── api/index.ts      # 集中式端点常量
-│   │   ├── views/            # 页面组件
-│   │   ├── layouts/          # 布局壳组件（访客端 / 管理后台）
-│   │   ├── stores/           # Pinia 状态管理
-│   │   ├── composables/      # 可复用组合式函数
-│   │   ├── utils/            # 工具函数（fetch 封装、超时处理）
-│   │   └── types/            # TypeScript 类型声明
-│   ├── public/               # 静态资源
-│   ├── vite.config.ts        # 含 /api 代理到后端
-│   ├── tsconfig.json / tsconfig.app.json / tsconfig.node.json
-│   ├── .editorconfig / .prettierrc.json / .oxlintrc.json / eslint.config.ts
-│   └── .env                  # 前端环境变量（需自行创建）
-├── AGENTS.md                  # 项目记忆（唯一权威源；CLAUDE.md 为指向它的 symlink）
-├── .pi/                       # pi 编码助手配置与扩展
-├── doc/                       # 设计文档目录（Dify 工作流、部署计划等）；景区知识库/ 为 RAG 索引文档源
-├── live2d-frontend/           # 本地 Live2D 数字人（awesome-digital-human-live2d）
-├── docker-compose.yml
-├── Dockerfile.api             # 后端容器镜像构建
-├── Dockerfile.web             # 前端（Nginx）容器镜像构建
-├── nginx.conf
-└── .env.example              # Docker Compose 部署用环境变量示例
+│   │   ├── api/                # 集中式端点常量 + API 封装（index.ts/auth.ts/usage.ts/…）
+│   │   ├── views/              # 页面组件（Home/Chat/Login/Register + admin/*）
+│   │   ├── layouts/ stores/ composables/ styles/
+│   ├── e2e/                    # Playwright 冒烟测试（浏览器层 mock 后端）
+│   └── vite.config.ts          # /api 代理 → :8000
+├── live2d-frontend/            # ADH 本地 Live2D 数字人（独立 git 仓库）
+│   ├── main.py                 # 数字人后端（:8001，ASR/TTS/Agent 引擎）
+│   ├── configs/                # 引擎配置（tencentAPI/qwenTTS/minimaxTTS/langchainAgent/…）
+│   └── web/                    # Next.js 前端（:3000，Live2D 渲染 + 对话界面）
+├── doc/                        # 设计/验证/契约文档（景区知识库/ 为 RAG 文档源）
+├── docker-compose.yml          # 一体化部署（api + web/nginx）
+├── nginx.conf                  # /api/ 反代到后端（proxy_read_timeout 300s）
+├── Dockerfile.api / Dockerfile.web
+└── .env.example                # Docker Compose 部署环境变量模板
 ```
 
-## 前置系统依赖
+## 快速启动
+
+### 1. 前置系统依赖
 
 | 依赖 | 版本要求 | 用途 |
 |------|---------|------|
-| Python | 主后端 ≥ 3.9（建议 3.10+）；**ADH 要求 3.11 或更低** | 主后端 FastAPI；ADH 数字人后端 |
-| ffmpeg / ffprobe | 系统包（`sudo apt install ffmpeg`） | ADH 数字人 TTS 链路必需 |
-| Node.js | ^22.18.0 \|\| ≥ 24.12.0 | Vue 前端（package.json engines）；ADH Next.js 前端 v14 |
-| npm | ≥ 10 | 前端包管理 |
+| Python | 主后端 ≥ 3.10（numpy≥1.26）；**ADH 要求 ≤ 3.11**（numpy 1.24.4 预编译包上限，3.12 需源码编译易失败） | 后端 / 数字人后端 |
+| Node.js | ^22.18.0 \|\| ≥ 24.12.0 | Vue 前端 + ADH Next.js 前端 |
+| ffmpeg / ffprobe | 系统包（`sudo apt install ffmpeg`） | ADH TTS 链路 MP3→WAV 必需（缺失时 TTS 静默失败） |
+| sqlite3 CLI | 可选 | 仅备份脚本 `backup_db.sh` 需要 |
 
-**详细说明**（基于 2026-08-01 实际部署验证）：
+### 2. 配置环境变量
 
-- **ffmpeg / ffprobe**：ADH 数字人 TTS 链路必需——QwenAPI（默认）/MiniMax 返回 MP3，`pydub` 转 WAV 依赖它。缺失时 TTS 静默失败，后端日志报 `No such file or directory: 'ffprobe'`。安装：`sudo apt install ffmpeg`。
-- **Python 版本**：主后端 FastAPI 用 Python 3.10+（最低要求 3.9，因 `numpy>=1.26.0` 不再支持 Python 3.8）；**ADH（live2d-frontend）要求 Python 3.11 或更低**——其 `numpy==1.24.4` 的预编译包最高支持到 3.11，在 Python 3.12 下 pip 源码编译失败。若系统默认 Python 3.12，需用 `virtualenv` 创建 3.10 虚拟环境（Ubuntu 的 `python3.10-venv` 包可能缺失，`virtualenv` 是可靠替代）：
-
-  ```bash
-  cd live2d-frontend
-  virtualenv -p python3.10 venv
-  ./venv/bin/pip install -r requirements.txt
-  ```
-
-- **Node.js**：数字人 Vue 前端要求 `^22.18.0 || >= 24.12.0`（见 `digitalHumanVue/package.json` 的 `engines`）；ADH Next.js 前端为 v14。
-
-## 本地开发启动
-
-### 1. 配置环境变量
-
-**后端** — 复制并填写 `digitalHumanApi/.env`：
-
-```bash
-cd digitalHumanApi
-cp .env.example .env
-```
-
-需配置的关键变量：
+**后端**（`digitalHumanApi/.env`，从 `.env.example` 复制）：
 
 | 变量 | 说明 |
 |------|------|
-| `DATABASE_URL` | SQLite 路径，默认 `sqlite+aiosqlite:///./digital_human.db` |
-| `CORS_ORIGINS` | CORS 白名单（逗号分隔多个 origin）；未配置时默认 localhost / 127.0.0.1 / 192.168.16.132 × 5173/8001/3000（演示环境跨端口，生产务必显式收紧）；`CORS_ALLOW_CREDENTIALS=true`（默认）时白名单不能含通配符 `*` |
-| `CORS_ALLOW_CREDENTIALS` | 是否允许跨域携带凭证（默认 `true`，JWT Bearer 透传需要）；仅当显式设为 `false` 时 `CORS_ORIGINS` 才可使用 `*` |
-| `DIFY_API_URL` | Dify API 基础地址，如 `https://your-dify.example.com/v1` |
-| `DIFY_API_KEY` | Chat Agent 应用 Key（拉取对话） |
-| `DIFY_LIGHT4AI_USER` | light4ai 调 Dify 时固定的 user 字段 |
-| `OPENAI_API_KEY` | OpenAI API Key（用于 LangChain AI 运营分析，不配置时回退到纯 DB 统计；**当前部署单用 opencode-go 端点**，与 `LLM_*` 同一 key，见 `digitalHumanApi/.env`；LLM 分析失败/不可用时响应 `llm_analysis=false` 降级标记，见 `doc/phase3-analytics-verification.md`） |
-| `OPENAI_API_BASE` | OpenAI API 基础地址（可选；当前部署 `https://opencode.ai/zen/go/v1`） |
-| `OPENAI_MODEL` | OpenAI 模型名（默认 `gpt-4o-mini`；当前部署 `deepseek-v4-flash`） |
-| `LLM_API_KEY` | 对话 LLM Key（主端点 opencode-go，阶段1 接入层；与 `OPENAI_*`/`EMBEDDING_*` 完全独立，见 `app/core/llm.py` 与 `doc/llm-adapter-smoke-test.md`） |
-| `LLM_API_BASE` | 对话 LLM 主端点（默认 `https://opencode.ai/zen/go/v1`） |
-| `LLM_MODEL` | 对话 LLM 主模型（默认 `deepseek-v4-flash`） |
-| `LLM_FALLBACK_API_KEY` / `LLM_FALLBACK_API_BASE` / `LLM_FALLBACK_MODEL` | 对话 LLM 备用端点（**船长决策 2026-08-06：备用同主端点 opencode-go**——opencode 服务本质转发 DeepSeek 官方 key，无需另配官方备用；主端点未配置 key 时自动切换） |
-| `LLM_TEMPERATURE` | 对话 LLM 默认采样温度（默认 `0.7`） |
-| `DIALOGUE_ENGINE` | 对话引擎开关（默认 `langchain`：deepagents 装配层主链路（A3 起），异常自动回落 Dify；`dify`：强制走 Dify Chat Agent），见 `app/services/deepagents/` |
-| `AGENT_DUAL_MODE` | 双模式对话开关（默认 `true`；**A3 起仅对已弃用的 chat_agent 双模式链路生效**，主链路（deepagents）无条件意图分流，见「双模式对话」节） |
-| `EMBEDDING_API_KEY` | Embedding API Key（RAG 向量化，与 OPENAI_*/LLM_* 独立；不配置时自动降级本地 TF-IDF，详见 AGENTS.md「本地 RAG 知识库」） |
-| `EMBEDDING_API_BASE` | Embedding 端点（默认 `https://api.minimaxi.com/v1`） |
-| `EMBEDDING_MODEL` | Embedding 模型名（默认 `embo-01`；**2026-08-07 迁移 Qwen/DashScope：`qwen3.7-text-embedding`（1024 维）**） |
-| `EMBEDDING_API_STYLE` | Embedding 请求体格式（默认 `minimax`：原生格式 `texts`+`type`（query/db）、响应 `vectors`，实测模型 `embo-01`；`openai`：OpenAI 兼容格式 `input`、响应 `data[].embedding`，DashScope compatible-mode 用，见 `app/core/embedding.py` 与 `.env.example`） |
-| `MEMORY_DB_PATH` | 短期记忆 SQLite 存储路径（默认 `memory_store.db`，独立于主库 digital_human.db，标准库 sqlite3，无额外依赖，见 AGENTS.md「短期记忆持久化」） |
-| `MEMORY_TTL_DAYS` | 会话 TTL（天，默认 7）：滑动窗口，每次对话刷新过期时间，到期会话由后台任务清理 |
-| `MEMORY_CLEANUP_INTERVAL_SECONDS` | 过期会话清理周期（秒，默认 3600）：启动时立即清理一次 + 定期清理 |
-| `SSH_HOST` / `SSH_PORT` / `SSH_USER` / `SSH_PASSWORD` | 部署 Dify 的远程服务器（可选） |
-| `AMAP_WEB_KEY` | 高德 Web 服务 Key（GPS 地理编码/路径规划，可选；未配置时对话工具返回 `amap_not_configured` 错误码不阻断对话，与前端 `VITE_AMAP_JS_KEY` 两套独立凭据，见 [`doc/amap-gps-api.md`](doc/amap-gps-api.md)） |
+| `LLM_API_BASE` / `LLM_API_KEY` / `LLM_MODEL` | **对话 LLM**（主链路/推荐/评估共用，默认 opencode-go `https://opencode.ai/zen/go/v1` + `deepseek-v4-flash`）；未配置时对话走 Dify 回落 |
+| `LLM_FALLBACK_*` | 备用端点（部署默认同主端点 opencode-go；代码兜底默认官方 DeepSeek API） |
+| `EMBEDDING_API_KEY` / `EMBEDDING_MODEL` / `EMBEDDING_API_STYLE` | **RAG 向量化**（推荐 Qwen/DashScope：`EMBEDDING_API_STYLE=openai` + `qwen3.7-text-embedding`，端点 `https://dashscope.aliyuncs.com/compatible-mode/v1`；默认兼容旧 Minimax 配置 `embo-01`）；未配置自动降级本地 TF-IDF |
+| `OPENAI_API_KEY` / `OPENAI_API_BASE` / `OPENAI_MODEL` | **运营分析** LLM（当前部署与 `LLM_*` 同 opencode-go 端点）；未配置回退纯 DB 统计 |
+| `DIFY_API_URL` / `DIFY_API_KEY` / `DIFY_LIGHT4AI_USER` | **Dify 双轨回落 + 历史数据抓取**（config 校验器要求非空，dev 可填占位）；量化评估/推荐问句已本地化，不再需要 Workflow Key |
+| `AMAP_WEB_KEY` | **高德 Web 服务 Key**（GPS 地理编码/路径规划）；未配置时对话工具返回 `amap_not_configured` 错误码不阻断对话 |
+| `JWT_SECRET` | JWT 签名密钥（生产必填随机长串；留空则启动生成临时密钥、重启后 token 失效） |
+| `ADMIN_API_TOKEN` / `ADMIN_TOKENS` | 管理端认证（X-Admin-Token）；`ADMIN_TOKENS="token1=admin,token2=operator"` 支持 RBAC 角色分级 |
+| `CORS_ORIGINS` | 跨域白名单（默认覆盖 localhost/127.0.0.1/192.168.16.132 × 5173/8001/3000 演示环境，生产显式收紧；credentials 开启时不能含 `*`） |
+| `DIALOGUE_ENGINE` | `langchain`（默认，deepagents 主链路 + Dify 回落）/ `dify`（强制 Dify） |
 
-**前端** — 复制并填写 `digitalHumanVue/.env`：
+其余（记忆 TTL、A4 调优参数、限流、token 记账、RAG 分块等）均带合理默认值，见 `.env.example` 分区注释与 [`doc/deployment-environments.md`](doc/deployment-environments.md)。
 
-```bash
-cd digitalHumanVue
-cp .env.example .env
-```
+**前端**（`digitalHumanVue/.env`）：
 
 | 变量 | 说明 |
 |------|------|
-| `VITE_LIGHT4AI_URL` | light4ai 数字人 iframe 服务地址（如 `http://localhost:3000`） |
-| `VITE_API_BASE` | 后端 API 基础地址，开发默认 `http://localhost:8000`（Vite 代理目标） |
-| `VITE_LIVE2D_MODEL` | Live2D 模型名称（可选，默认 `hiyori`） |
-| `VITE_ADH_IFRAME_ORIGIN` | 数字人 iframe 的 origin，用于 postMessage 安全校验（可选，默认 `*`） |
+| `VITE_LIGHT4AI_URL` | 数字人 iframe 地址（局域网部署必填 `http://<服务器IP>:3000`，不能填 localhost） |
+| `VITE_API_BASE` | 后端地址（默认 `http://localhost:8000`，Vite 代理目标） |
+| `VITE_LIVE2D_MODEL` | Live2D 模型名（默认 `hiyori`） |
 
-> **用户认证**（前端）：登录/注册页为顶层路由 `/login`、`/register`，访客端与管理后台均可直达；游客模式免登录直接使用。token 持久化于浏览器 `localStorage`（`auth_token`/`auth_user`），对话页自动携带 token（iframe `auth_token` 参数透传 ADH）。**无需新增前端环境变量**；后端 JWT 相关配置（`JWT_SECRET`、`JWT_EXPIRES_MINUTES`、`GUEST_TOKEN_EXPIRES_MINUTES`）见 `digitalHumanApi/.env.example`。
+**ADH 前端**（`live2d-frontend/web/.env`）：
 
-### 2. 快速启动（一键后台）
+| 变量 | 说明 |
+|------|------|
+| `NEXT_PUBLIC_ADH_SERVER_PORT` | **必须设为 `8001`**（默认 8000 会连到主后端导致 "Soul is death!"） |
+| `NEXT_PUBLIC_AMAP_JS_KEY` / `NEXT_PUBLIC_AMAP_SECURITY_CODE` | 高德 JS API 凭据（对话路线卡片地图渲染，与后端 `AMAP_WEB_KEY` 两套独立凭据；未配置降级文字路线） |
 
-以下命令在 PowerShell 中执行，将所有服务以后台窗口启动：
+> 数据库 schema 由 **Alembic 启动自动迁移**（`app/core/migrations.py` 三态分流：空库建齐 / 遗留库幂等补建 + 基线化 / 版本化库升级），无需手动执行；本地开发也可 `alembic upgrade head`。
 
-```powershell
-# 主后端 (8000)
-Start-Process -WindowStyle Hidden -WorkingDirectory "$PWD/digitalHumanApi" -FilePath python -ArgumentList '-m', 'uvicorn', 'app.main:app', '--reload'
-
-# 主前端 (5173)
-Start-Process -WindowStyle Hidden -WorkingDirectory "$PWD/digitalHumanVue" -FilePath npm -ArgumentList 'run', 'dev'
-
-# 数字人后端 (8001) — 注意端口已从默认 8000 改为 8001，避免冲突
-Start-Process -WindowStyle Hidden -WorkingDirectory "$PWD/live2d-frontend" -FilePath python -ArgumentList 'main.py'
-
-# 数字人前端 (3000) — 若 pnpm run dev 启动失败，可降级为直接调用
-Start-Process -WindowStyle Hidden -WorkingDirectory "$PWD/live2d-frontend/web" -FilePath node -ArgumentList 'node_modules/next/dist/bin/next', 'dev', '-p', '3000'
-```
-
-> **注意**：
-> - 命令中的 `$PWD` 需替换为项目根目录绝对路径（如 `E:/project_file/digitalHuman`），或将终端 cd 到项目根目录后执行。
-> - 数字人后端端口已在 `config_template.yaml` 中改为 **8001**（原 8000 被主后端占用）。
-> - 数字人前端需在 `web/.env` 中设置 `NEXT_PUBLIC_ADH_SERVER_PORT=8001`，否则心跳连错端口导致 "Soul is death!"。
-> - 存在两个配置文件：`config_template.yaml`（端口 8001，使用腾讯云 ASR + LangChainAgent（默认，走本后端对话链路）+ QwenAPI TTS（2026-08-07 从 MiniMax 迁移））和 `config_all_in_dify.yaml`（端口 8000，引擎全部走 Dify API）。默认使用 `config_template.yaml`，切换配置时注意端口变化。
-
-### 3. 启动后端（手动）
+### 3. 启动四服务
 
 ```bash
+# ① 主后端（:8000）—— 后台任务自动启动（轮询/分析/推荐问句/记忆清理/用量 flush）
 cd digitalHumanApi
-pip install -r requirements.txt          # 首次运行安装依赖
-python -m uvicorn app.main:app --reload   # 启动开发服务器，端口 8000
-```
+pip install -r requirements.txt
+uvicorn app.main:app --reload
 
-启动成功标志：
-- 控制台输出 `Application startup complete.`
-- 访问 http://localhost:8000/api/v1/health 返回 `{"status":"ok"}`
-- API 文档 http://localhost:8000/docs 可打开
-- 后台轮询任务自动运行，连接 Dify 拉取对话
-
-### 4. 启动前端
-
-```bash
+# ② 主前端（:5173）
 cd digitalHumanVue
-npm install                              # 首次运行安装依赖
-npm run dev                              # 启动开发服务器，端口 5173
-```
+npm ci && npm run dev
 
-启动成功标志：
-- 控制台显示 `VITE ready` 与 `Local: http://localhost:5173/`
-- 浏览器访问 http://localhost:5173/ 可正常加载页面
-
-### 5. 启动本地数字人服务（live2d-frontend）
-
-数字人对话依赖 [awesome-digital-human-live2d](https://github.com/Kedreamix/awesome-digital-human-live2d)，需独立启动其后端和前端。
-
-```powershell
-# 数字人后端（FastAPI，端口 8001，注意与主项目 8000 区分）
+# ③ ADH 数字人后端（:8001，Python ≤ 3.11）
 cd live2d-frontend
-python -m venv venv                          # 创建虚拟环境（首次运行）
-venv\Scripts\pip install -r requirements.txt # 安装依赖（首次运行）
-venv\Scripts\python.exe main.py
+virtualenv -p python3.10 venv && ./venv/bin/pip install -r requirements.txt   # 首次（已有 venv/ 则直接下一步）
+./venv/bin/python main.py
 
-# 数字人前端（Next.js，端口 3000，若 pnpm run dev 启动失败，可降级为直接调用）
-cd live2d-frontend\web
-pnpm run dev    # 或 node node_modules\next\dist\bin\next dev -p 3000
+# ④ ADH 数字人前端（:3000）—— 勿用 pnpm dev（触发依赖检查失败）
+cd live2d-frontend/web
+node node_modules/next/dist/bin/next dev -p 3000
 ```
 
-> **两个命令需分别在各自的终端窗口中运行**（不要关掉）。首次启动前端可能需要清 localStorage `character-storage` 键以加载默认 Hiyori 模型。
->
-> 引擎配置详见 `AGENTS.md`（ADH 专节）或 `doc/local-digital-human-deploy-plan.md`。当前已配置：腾讯云 ASR + LangChainAgent（默认，走本后端 deepagents 装配层主链路，异常自动回落 Dify）+ QwenAPI TTS（`qwen-audio-3.0-tts-flash` + `longtongxuxian`（龙彤旭弦）音色，2026-08-07 从 MiniMax 迁移；key 经环境变量 `QWEN_API_KEY` 提供）。
-
-### 6. 访问应用
+### 4. 访问入口
 
 | 入口 | 地址 |
 |------|------|
 | 访客端首页 | http://localhost:5173/visitor |
-| 访客端数字人对话 | http://localhost:5173/visitor/chat |
-| 管理后台数据大屏 | http://localhost:5173/admin |
-| 管理后台报告 | http://localhost:5173/admin/report |
-| 管理后台知识库 | http://localhost:5173/admin/knowledge |
-| 数字人前端（调试） | http://localhost:3000 |
+| 数字人对话页 | http://localhost:5173/visitor/chat（iframe 嵌入 ADH） |
+| 管理后台（数据大屏） | http://localhost:5173/admin |
+| 管理后台（报告/知识库/公告/记忆/管理员Agent/成本仪表盘） | http://localhost:5173/admin/report · /admin/knowledge · /admin/announcements · /admin/memories · /admin/agent · /admin/usage |
+| ADH 数字人前端（调试） | http://localhost:3000 |
 | 后端 API 文档 | http://localhost:8000/docs |
+| 健康检查 | http://localhost:8000/api/v1/health（含 `app_env` 字段） |
 
-> 前端 `/api/*` 请求由 Vite 代理转发至 `http://localhost:8000`（见 `vite.config.ts`），开发时无需关心跨域。
->
-> 访客端数字人对话页面通过 iframe 嵌入数字人前端（`localhost:3000`），需确保两个服务同时运行。
+## 部署
 
-## 本地部署指南（Linux / 局域网）
-
-适用于在 Linux 服务器（或宿主机）上以开发模式本地部署、供局域网/远程访问的场景（部署经验基于 2026-08-01 实测）。生产环境请使用下方 Docker Compose 部署。
-
-### 1. 端口规划
-
-| 服务 | 端口 | 配置位置 |
-|------|------|---------|
-| FastAPI 主后端 | 8000 | `digitalHumanApi/`（`uvicorn app.main:app`） |
-| ADH 数字人后端 | 8001 | `live2d-frontend/configs/config_template.yaml` 的 `SERVER.PORT`（默认 8000，因主后端占用改为 8001） |
-| ADH 数字人前端（Next.js） | 3000 | `live2d-frontend/web/` |
-| Vue 管理/访客前端（Vite） | 5173 | `digitalHumanVue/` |
-
-### 2. 环境变量配置
-
-**Vue 前端** — `digitalHumanVue/.env`（复制 `.env.example`）：
-
-| 变量 | 说明 |
-|------|------|
-| `VITE_LIGHT4AI_URL` | 数字人 iframe 地址。**局域网/远程访问必须填 `http://<服务器IP>:3000`，不能填 `localhost`**——否则访客浏览器会指向自己机器上的 3000 端口 |
-| `VITE_API_BASE` | 后端 API 地址，默认 `http://localhost:8000`（开发时由 Vite 代理转发，可不改） |
-
-**ADH 前端** — `live2d-frontend/web/.env`（复制 `.env.example`）：
-
-| 变量 | 说明 |
-|------|------|
-| `NEXT_PUBLIC_ADH_SERVER_PORT` | **必须配置为 `8001`**。不配置则前端请求打到 8000 主后端，报 CORS/400，数字人显示 "Soul is death!" |
-
-**主后端** — `digitalHumanApi/.env`：按上方「1. 配置环境变量」填写 `DIFY_API_URL`、`DIFY_API_KEY`、`LLM_API_KEY` 等（`DIFY_*` 启动时校验非空，缺失会启动失败；阶段4 起量化评估已本地化，不再需要 `DIFY_WORKFLOW_API_KEY`，见 `doc/dify-dependency-audit.md`。**Dify 不可达（地址失效/服务下线）不影响核心链路**——对话（LangChain 本地链路）、推荐问句、分析、量化评估、记忆系统均正常，仅对话回落与历史数据接口降级（礼貌报错/重试后跳过，不崩溃），见 `doc/phase4-e2e-verification.md`）。
-
-### 3. 启动步骤（开发模式）
+### 方式一：Docker Compose（一体化）
 
 ```bash
-# 1) 主后端 (8000)
-cd digitalHumanApi
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-# 2) Vue 前端 (5173) —— 必须 --host 0.0.0.0，否则宿主机/局域网无法访问
-cd digitalHumanVue
-npm run dev -- --host 0.0.0.0
-
-# 3) ADH 数字人后端 (8001) —— venv 为 Python 3.10，依赖见 requirements.txt
-cd live2d-frontend
-./venv/bin/python main.py
-
-# 4) ADH 数字人前端 (3000)
-cd live2d-frontend/web
-npm run dev
-```
-
-四个服务需分别在各自终端中运行。若 ADH 前端 `npm run dev` 启动失败，可降级为 `node node_modules/next/dist/bin/next dev -p 3000`。
-
-### 4. 防火墙放行
-
-```bash
-sudo ufw allow 8000/tcp   # 主后端
-sudo ufw allow 5173/tcp   # Vue 前端
-sudo ufw allow 3000/tcp   # ADH 前端
-sudo ufw allow 8001/tcp   # ADH 后端
-```
-
-> 局域网内其他机器访问入口：访客端 `http://<服务器IP>:5173/visitor`；数字人 iframe 会按 `VITE_LIGHT4AI_URL` 加载 `http://<服务器IP>:3000`。
-
-## Docker Compose 部署
-
-用于生产或一体化部署（api + web + nginx）：
-
-```bash
-# 在项目根目录，先填写根目录 .env（参考 .env.example）
-cp .env.example .env   # 填入 DIFY_API_URL / DIFY_API_KEY 等
-
+cp .env.example .env   # 填写 DIFY_API_URL/DIFY_API_KEY/LLM_*/AMAP_WEB_KEY 等
 docker-compose up -d --build
 ```
 
-部署后：
-- 前端经 Nginx 提供：http://localhost/ （80 端口）
-- Nginx 将 `/api/` 反向代理到后端容器 `api:8000`
-- 后端健康检查端点：`/api/v1/health`
+- 前端经 Nginx 提供：http://localhost/（80 端口），`/api/` 反代到后端容器 `api:8000`（`proxy_read_timeout 300s`，与运营分析超时预算对齐）
+- 后端 volume 挂载 `./digitalHumanApi:/app`（库文件/记忆库/备份目录即宿主机路径）
+- 容器内访问宿主机服务（如 Dify）需在 `docker-compose.yml` 的 `api` 服务加 `extra_hosts: ["host.docker.internal:host-gateway"]` 并将 `DIFY_API_URL` 指向 `http://host.docker.internal/v1`
+- ADH 数字人不在 Compose 内（依赖音频/GPU 与真实浏览器），按本机四服务方式部署
 
-> **nginx 代理超时**：`nginx.conf` 中 `/api/` location 的 `proxy_read_timeout` 为 `300s`，与 AI 运营分析的超时预算（`LLM_ANALYSIS_TIMEOUT=240`，opencode-go 端点真实调用实测约 128s，见 `doc/phase3-analytics-verification.md`）对齐——管理后台 `/api/v1/analysis/overview` 经 nginx 代理等待 LLM 分析结果，代理超时小于该预算会被 504 掐断。调整分析超时配置时需同步检查此值。
+### 方式二：本机四服务（开发/局域网演示）
 
-> **如果 Dify 部署在宿主机而非 Docker 网络中**，容器内无法通过 `localhost` 访问宿主机 Dify。需在 `docker-compose.yml` 的 `api` 服务下添加 `extra_hosts`：
-> ```yaml
-> api:
->   extra_hosts:
->     - "host.docker.internal:host-gateway"
-> ```
-> 然后将 `.env` 中的 `DIFY_API_URL` 设为 `http://host.docker.internal/v1`。
+见上方「快速启动」；局域网访问注意：Vue 前端 `npm run dev -- --host 0.0.0.0`，`VITE_LIGHT4AI_URL` 填服务器 IP，防火墙放行 8000/5173/3000/8001 端口。
 
-## API 端点概览
+### 数据库备份
 
-所有端点前缀 `/api/v1`。
+`digitalHumanApi/scripts/backup_db.sh`：sqlite3 `.backup` 在线安全备份（快照语义，不中断业务）+ 完整性校验 + 保留最近 N 份（默认 7）。Docker 场景宿主机直接调度（volume 路径即容器内 `/app/...`）。恢复验证步骤见 [`doc/database-backup.md`](doc/database-backup.md)。
 
-| 方法 | 路径 | 说明 |
+### 多环境（dev / staging / prod）
+
+`APP_ENV` 三档标识（非法值启动即报错），差异：DEBUG、CORS 白名单、限流参数、JWT_SECRET、凭据必填项。切换指引见 [`doc/deployment-environments.md`](doc/deployment-environments.md)。
+
+## 核心能力详解
+
+> 详细设计以 **`AGENTS.md`（项目记忆，唯一权威源）** 与下方「文档索引」所列契约为准，本节为导读。
+
+| 主题 | 关键实现 | 权威文档 |
+|------|---------|---------|
+| 对话主链路 | `app/services/deepagents/`：HarnessProfile 装配（排除 9 个内置文件/子代理工具）、ScenicDeepAgentState（user 注入）、意图分类 + prompt 级规划指令、SSE 契约（suppress_tokens + 按 call id 去重）、`get_agent` 实例缓存（构造 ~24s） | [`digitalHumanApi/doc/deepagents-tuning.md`](digitalHumanApi/doc/deepagents-tuning.md)、[`doc/phase3-dual-mode.md`](doc/phase3-dual-mode.md)（历史） |
+| 成本/速度调优 | 工具调用上限 15（ToolCallLimitMiddleware，超限优雅作答不回落）、工具结果归一化缓存（LRU + TTL 分级 + 索引重建即时失效）、长会话上下文压缩（≥24 条消息触发，保留最近 10 条，后台任务不阻塞响应） | [`digitalHumanApi/doc/deepagents-tuning.md`](digitalHumanApi/doc/deepagents-tuning.md) |
+| 短期记忆 | `app/core/memory_store.py`：标准库 sqlite3 双写 + 进程内 TTL 缓存，`source` 归属判定（双轨回落兼容），清理任务定期删过期行 | `AGENTS.md`「短期记忆持久化」 |
+| 长期记忆 | `app/services/memory_service.py`：记忆条目 schema `{user, fact_type, content, source_conversation_id, timestamp}`，同事实覆盖去重、每用户上限 200、游客跳过；对话后后台提取 + 轻量摘要注入 + 记忆四工具 | [`digitalHumanApi/doc/long-term-memory.md`](digitalHumanApi/doc/long-term-memory.md) |
+| 记忆管理 API | `/api/admin/memories*`（X-Admin-Token，删除类要求 admin）：用户列表（含条数）、按用户查、增/改（删后重建）/删，审计日志先行 | [`digitalHumanApi/doc/memory-admin-api.md`](digitalHumanApi/doc/memory-admin-api.md) |
+| 本地 RAG | `app/core/embedding.py` + `rag.py` + `app/services/rag_service.py`：三命名空间向量存储 + sidecar 向量落盘（启动复用跳过重算）、统一检索入口、CRUD 后自动重建索引 | `AGENTS.md`「本地 RAG 知识库」 |
+| 推荐引擎 | `app/services/recommend_agent.py`：LangChain Tool Calling + 规则引擎，工具直查 `app/data/` 本地 JSON（零幻觉） | `AGENTS.md`「个性化推荐」 |
+| 公告/首页 | `announcements` 表 + 管理端 CRUD + 访客公开接口；`/api/v1/home/highlights` 活数据 | [`digitalHumanApi/doc/announcement-api.md`](digitalHumanApi/doc/announcement-api.md) |
+| 管理员 Agent | `app/services/admin_agent/`：管理工具集（全部复用既有 service）、删除两阶段确认（`confirm.py`，TTL 默认 120s）、`_audit_log` 审计 | `AGENTS.md`「管理员 agent」 |
+| 运营分析/评估 | `analytics_service.py`（LLM + DB 兜底 + 降级标记）+ `evaluation_service.py`（本地 LLM 量化评估 → Evaluation 表）；超时预算 `LLM_ANALYSIS_TIMEOUT=240`（opencode-go 延迟高） | [`doc/phase3-analytics-verification.md`](doc/phase3-analytics-verification.md) |
+| token 记账 | `usage_tracker.py`（UsageTrackingChatOpenAI 四入口埋点 + contextvars 链路标注 + 队列批量 flush）→ `llm_usage` 表 → `/api/admin/usage/*` 报表 + CSV 导出 | [`digitalHumanApi/doc/usage-tracking.md`](digitalHumanApi/doc/usage-tracking.md) |
+| GPS/高德 | `app/services/amap/`：geocode/route 封装 + 统一错误信封（`amap_*` 错误码）+ 对话两工具 + `route_data` 透出路线卡片 | [`doc/amap-gps-api.md`](doc/amap-gps-api.md) |
+| 安全 | 认证限流（IP+账号双维度滑动窗口）、CORS 白名单（credentials 与 `*` 互斥校验）、RBAC（`verify_admin_token` + `require_role`） | `AGENTS.md`「安全加固」 |
+| 日志 | `logging_config.py`：统一格式 + 每请求一条日志（key=value），token/key 绝不入日志 | [`doc/logging-request-logs.md`](doc/logging-request-logs.md) |
+| 数据库迁移 | Alembic async 模板，启动自动迁移，开发流程 autogenerate（改 models → revision → upgrade → 测试） | [`digitalHumanApi/doc/alembic-migrations.md`](digitalHumanApi/doc/alembic-migrations.md) |
+| 前端规范 | TS strict + ESLint + 集中式 API 封装 + 三态数据获取 | [`doc/frontend-conventions.md`](doc/frontend-conventions.md) |
+
+## API 概览
+
+> 访客/对话接口前缀 `/api/v1`；管理接口前缀 `/api/admin/*`（X-Admin-Token 认证）。完整契约见对应 doc。
+
+| 接口 | 说明 |
+|------|------|
+| `POST /api/v1/auth/register` / `login` / `guest` / `GET /me` | 用户注册/登录/游客 token/JWT 校验（认证端点限流保护） |
+| `POST /api/v1/dialogue/chat` | 对话（非流式 + `streaming=true` SSE：step/token/done/error 事件；deepagents 主链路 → Dify 回落） |
+| `POST /api/v1/recommend` | 个性化路线推荐 |
+| `GET /api/v1/visitor/recommended-questions` / `POST /refresh-recommend` | 推荐问句（读缓存 / 手动刷新） |
+| `GET /api/v1/analysis/overview` / `trends` / `POST /run-now` | AI 运营分析 / 趋势 / 手动触发评估 |
+| `GET /api/v1/home/highlights` / `GET /api/v1/announcements` | 首页活数据 / 访客公告（公开） |
+| `GET /api/v1/health` | 健康检查（含 `app_env`） |
+| `/api/admin/knowledge*` | 知识库 CRUD + 导入（删除要求 admin 角色） |
+| `/api/admin/announcements*` | 公告管理（CRUD + 发布状态切换 + 置顶） |
+| `/api/admin/memories*` | 长期记忆管理（用户列表/按用户查/增改删，删除要求 admin） |
+| `/api/admin/agent/chat`（+ `/chat/stream`） | 管理员 Agent 对话（两阶段删除确认 + 审计） |
+| `/api/admin/usage/overview` / `details` / `export` | token 用量报表（趋势/明细/CSV 导出） |
+| `POST /api/rag/search` / `index` / `GET /api/rag/status` | RAG 统一检索 / 重建索引 / 状态（含 embedding 后端与降级标记） |
+
+## 文档索引
+
+### 权威契约（当前状态，以这些为准）
+
+| 文档 | 位置 | 内容 |
 |------|------|------|
-| GET | `/health` | 健康检查 |
-| POST | `/auth/register` | 用户注册（用户名唯一，密码至少 6 位） |
-| POST | `/auth/login` | 登录（返回 JWT + 用户信息） |
-| GET | `/auth/me` | 当前登录用户（Bearer token，无效 token 401） |
-| POST | `/auth/guest` | 签发短期游客 token（匿名，30 分钟） |
-| GET | `/visitor/recommended-questions` | 获取动态推荐问句（后台每 5 分钟由本地 LLM 生成刷新，阶段3 T3 已脱离 Dify） |
-| POST | `/visitor/register` | 游客注册 |
-| POST | `/visitor/refresh-recommend` | 手动刷新推荐问句缓存 |
-| POST | `/recommend` | 个性化路线推荐（接收偏好描述，返回匹配路线） |
-| POST | `/dialogue/chat` | 对话（**双轨**：默认 deepagents 装配层主链路（A3 起，结构化工具直查景点/路线 + 知识检索 + 规则推荐 + 记忆四工具 + GPS 定位/路线规划 `geocode_location`/`plan_route`，见 [`doc/amap-gps-api.md`](doc/amap-gps-api.md)），多轮会话**短期记忆持久化**（SQLite 落盘 + TTL，重启可恢复，见下方「短期记忆持久化」）；异常自动回落 Dify；`DIALOGUE_ENGINE=dify` 强制走 Dify，响应字段兼容 `answer/conversation_id/rag_context/rag_sources`；`streaming=true` 时返回 SSE 流式事件，见下方「SSE 流式对话」） |
-| POST | `/dialogue/sync-now` | 手动触发对话抓取 |
-| POST | `/analysis/run-now` | 手动触发量化分析 |
-| GET | `/analysis/overview` | AI 运营分析概览（支持 `?days=7/30/90`；LangChain LLM 分析，失败自动回退纯 DB 统计并置 `llm_analysis=false` 降级标记；真实调用约 1-2 分钟（opencode-go 端点延迟高，最长可至 240s 超时预算），见 `doc/phase3-analytics-verification.md`；**docker 部署拓扑下需保证 nginx `/api/` 代理超时 ≥300s**（`nginx.conf` 已配置 `proxy_read_timeout 300s`，若再调大后端分析超时预算需同步调整）） |
-| GET | `/analysis/trends` | 趋势数据（每日对话量 + 满意度均分） |
-| GET | `/admin/dashboard` | 数据大屏聚合数据 |
-| GET | `/admin/report` | 分析报告数据 |
-| GET | `/announcements` | 访客公告列表（公开；仅已发布，置顶优先 + 时间倒序，`limit` 1-100；契约见 [`digitalHumanApi/doc/announcement-api.md`](digitalHumanApi/doc/announcement-api.md)） |
-| GET | `/home/highlights` | 首页活数据（热门景点/推荐路线，每次请求实时读 `app/data/*.json`，`spots_limit`/`routes_limit` 可调，文件缺失降级空数组） |
+| 项目记忆（唯一权威源） | `AGENTS.md`（`CLAUDE.md` 为 symlink） | 全量架构/实现/坑位/配置，任何新会话先读它 |
+| 高德 GPS 接口契约 | [`doc/amap-gps-api.md`](doc/amap-gps-api.md) | 错误码信封/工具用法/凭据 |
+| 公告模块契约 | [`digitalHumanApi/doc/announcement-api.md`](digitalHumanApi/doc/announcement-api.md) | 路径/请求响应 schema/鉴权/排序约定 |
+| 记忆管理 API 契约 | [`digitalHumanApi/doc/memory-admin-api.md`](digitalHumanApi/doc/memory-admin-api.md) | 管理端记忆增删改查契约 |
+| token 记账契约 | [`digitalHumanApi/doc/usage-tracking.md`](digitalHumanApi/doc/usage-tracking.md) | 埋点/表/报表 API/单价映射 |
+| 长期记忆设计 | [`digitalHumanApi/doc/long-term-memory.md`](digitalHumanApi/doc/long-term-memory.md) | 记忆 schema/接口/注入契约 |
+| Alembic 迁移 | [`digitalHumanApi/doc/alembic-migrations.md`](digitalHumanApi/doc/alembic-migrations.md) | 迁移流程/坑位/权威约定 |
+| deepagents 调优 | [`digitalHumanApi/doc/deepagents-tuning.md`](digitalHumanApi/doc/deepagents-tuning.md) | A4 组合拳实测定参 |
+| 多环境部署 | [`doc/deployment-environments.md`](doc/deployment-environments.md) | dev/staging/prod 三档差异与切换 |
+| 数据库备份 | [`doc/database-backup.md`](doc/database-backup.md) | `.backup` 对比/恢复验证/Docker 路径 |
+| 结构化日志 | [`doc/logging-request-logs.md`](doc/logging-request-logs.md) | 格式/请求日志/查询方式 |
+| 前端工程化规范 | [`doc/frontend-conventions.md`](doc/frontend-conventions.md) | TS strict/ESLint/组件规范 |
+| LLM 接入层冒烟 | [`doc/llm-adapter-smoke-test.md`](doc/llm-adapter-smoke-test.md) | DeepSeek 思考格式兼容性/备用端点差异 |
+| Dify 依赖审计 | [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md) | Dify 依赖面定稿（仅对话回落 + 历史接口） |
 
-管理接口（前缀 `/api/admin/knowledge`，需 `X-Admin-Token` 认证；**删除操作要求 admin 角色**（operator 403），角色映射 `ADMIN_TOKENS` 见 `digitalHumanApi/.env.example`）：
+### 历史文档（保留存档价值，不代表现状）
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/admin/knowledge` | 知识库列表（支持分类/关键词筛选、分页） |
-| POST | `/api/admin/knowledge` | 创建知识库条目 |
-| PUT | `/api/admin/knowledge/{id}` | 编辑知识库条目 |
-| DELETE | `/api/admin/knowledge/{id}` | 删除知识库条目 |
-| POST | `/api/admin/knowledge/import` | 批量导入（JSON/Markdown 文件） |
+| 文档 | 标注 |
+|------|------|
+| [`doc/phase1-e2e-verification.md`](doc/phase1-e2e-verification.md) / [`doc/phase2-memory-verification.md`](doc/phase2-memory-verification.md) / [`doc/phase3-e2e-verification.md`](doc/phase3-e2e-verification.md) / [`doc/phase4-e2e-verification.md`](doc/phase4-e2e-verification.md) | 各阶段全链路联调验证报告（结论当时有效；最新实现以 AGENTS.md 为准） |
+| [`doc/phase3-analytics-verification.md`](doc/phase3-analytics-verification.md) | 运营分析超时实测（结论仍被配置引用：`LLM_ANALYSIS_TIMEOUT` 依据） |
+| [`doc/phase3-dual-mode.md`](doc/phase3-dual-mode.md) | 自研双模式设计（**已弃用**，文档头部有弃用注记；主链路为 deepagents 装配层） |
+| [`doc/real-env-verification.md`](doc/real-env-verification.md) / [`doc/dify-data-migration-report.md`](doc/dify-data-migration-report.md) | 阶段0~2 真实环境验证 / Dify 数据迁移盘点（阶段0 历史） |
+| [`doc/project-plan.md`](doc/project-plan.md) / [`doc/next-steps-plan.md`](doc/next-steps-plan.md) / [`doc/status-review.md`](doc/status-review.md) / [`doc/architecture-analysis.md`](doc/architecture-analysis.md) / [`doc/decision-questions.md`](doc/decision-questions.md) / [`doc/phase3-workflow-review.md`](doc/phase3-workflow-review.md) | 早期规划/架构咨询/审视记录 |
+| [`doc/local-digital-human-deploy-plan.md`](doc/local-digital-human-deploy-plan.md) | ADH 部署任务清单（头部有 2026-08-05 更新注记，最新状态以 AGENTS.md ADH 专节为准） |
+| [`doc/dify配置/`](doc/dify配置/)、[`doc/腾讯云语音识别/`](doc/腾讯云语音识别/)、[`doc/推荐工作流/`](doc/推荐工作流/) | Dify/腾讯云配置存档（量化评估/推荐问句已本地化，仅存档） |
 
-管理接口（前缀 `/api/admin/announcements`，需 `X-Admin-Token` 认证；契约见 [`digitalHumanApi/doc/announcement-api.md`](digitalHumanApi/doc/announcement-api.md)）：
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/admin/announcements` | 公告列表（status/keyword 筛选 + 分页） |
-| POST | `/api/admin/announcements` | 创建公告（默认草稿） |
-| PUT | `/api/admin/announcements/{id}` | 部分更新公告 |
-| PATCH | `/api/admin/announcements/{id}/status` | 发布状态切换（published/draft） |
-| DELETE | `/api/admin/announcements/{id}` | 删除公告 |
-
-管理接口（前缀 `/api/admin/memories`，需 `X-Admin-Token` 认证；**删除操作要求 admin 角色**（operator 403）；契约见 [`digitalHumanApi/doc/memory-admin-api.md`](digitalHumanApi/doc/memory-admin-api.md)）：
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/api/admin/memories/users` | 注册用户列表（id/username/nickname/记忆条数/最后登录时间，keyword 模糊搜索 + 分页） |
-| GET | `/api/admin/memories?user={id}` | 按用户查看长期记忆（含 memory_id，legacy 派生 id 兼容；游客返回空列表） |
-| POST | `/api/admin/memories` | 新增记忆（管理员例外：可为任意注册用户新增；游客 400/未注册 404） |
-| PUT | `/api/admin/memories/{memory_id}` | 修改记忆（删除后重建：保留 user/source_conversation_id，memory_id 更新为新建 uuid） |
-| DELETE | `/api/admin/memories/{memory_id}` | 删除记忆（跨用户可用；uuid 与 legacy 派生 id 均可） |
-
-管理接口（前缀 `/api/admin/agent`，需 `X-Admin-Token` 认证；管理员 agent，可对话调用知识库/记忆/公告/统计/RAG 索引/首页数据工具，删除类操作两阶段二次确认 + 写操作审计日志）：
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/admin/agent/chat` | 管理 agent 非流式对话（知识库查询/增改删、用户记忆查询/删除、公告列表/发布下架、运营统计、RAG 重建索引、首页数据；删除类首次调用仅返回待确认 `operation_id`，需再调 `confirm_operation` 确认才真正执行（短 TTL 默认 120s 过期）；LLM 未配置返回 503） |
-| POST | `/api/admin/agent/chat/stream` | 管理 agent 流式对话（SSE，事件契约与用户侧一致：step/token/done，管理端步骤可视化零适配） |
-
-> **知识库与 RAG 联动**：管理后台知识库增/删/改/导入后自动同步重建 `knowledge` 命名空间向量索引，后台检索立即可见；结构化景点/路线数据不走向量，由推荐 Agent 结构化工具直查（零幻觉原则）。
-
-RAG 接口（`/api/rag/*`，统一检索入口，对话 RAG、推荐 Agent 与后台共用）：
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/rag/search` | 语义检索；`namespace` 逗号分隔限定（knowledge/documents/user_memory），默认 knowledge+documents；响应含 `embedding_backend`/`degraded` 标记 |
-| POST | `/api/rag/index` | 全量重新索引；默认 documents 命名空间，文档源限定 `doc/景区知识库/`（三份景区知识 md），不索引架构/设计文档 |
-| GET | `/api/rag/status` | 各命名空间状态（文档数、embedding 后端、降级标记） |
-
-## SSE 流式对话（阶段1 T3）
-
-`POST /api/v1/dialogue/chat` 携带 `streaming: true` 时返回 SSE（`text/event-stream`），前端可实时展示 agent 思考过程（工具调用步骤）与逐字回答。非流式（默认）行为不变。**无新增配置项**：流式/非流式共用 `DIALOGUE_ENGINE` 双轨开关与 `LLM_*`/`DIFY_*` 配置。
-
-### 事件格式（`data: {json}` 帧）
-
-| type | 字段 | 说明 |
-|------|------|------|
-| `step` | `tool` / `label` | agent 工具调用步骤（正在检索知识库 / 查询景点 / 推荐路线…，按调用 id 去重） |
-| `token` | `text` | 最终回答增量（逐字输出；DeepSeek 思考过程由 langchain-openai 剥离，不会外泄） |
-| `done` | `conversation_id` / `rag_context` / `rag_sources` | 流式完成（字段与 `ChatResponse` 对齐，`conversation_id` 供多轮续接） |
-| `error` | `message` / `fallback` | 链路错误；`fallback=true` 表示主链路异常已切换 Dify 兜底（清空部分回答继续输出），`false` 表示双链路均失败 |
-
-事件序列：主链路（deepagents 装配层）`step → token → done`；故障回落时先发 `error(fallback=true)` 再发 Dify 流式事件；双链路均失败时以 `error(fallback=false)` 礼貌报错结束。
-
-```json
-{"type": "step", "tool": "search_knowledge", "label": "正在检索知识库…"}
-{"type": "token", "text": "景区 8:00 开放"}
-{"type": "done", "conversation_id": "abc", "rag_context": "", "rag_sources": []}
-```
-
-Dify 兜底链路同样流式（`response_mode=streaming`），`<think>...</think>` 块经 `ThinkFilter` 实时过滤（参考 live2d-frontend 实现，见 `app/services/dify_stream.py`）。
-
-### 前端消费
-
-SSE 由 ADH 数字人消费（`live2d-frontend/digitalHuman/agent/core/langchainAgent.py`，事件契约见其代码头注释）。主前端对话页（`ChatView.vue`，2026-08-07 起）不再自带聊天面板——数字人 iframe 内置完整对话功能（输入框/语音/聊天记录），推荐问句点击后经 postMessage `SET_INPUT` 注入数字人输入框。
-
-## 双模式对话（阶段3 T1：简单问答 / 复杂规划）——**A3 起主链路改走 deepagents 装配层**
-
-> **弃用注记（A3，批次3）**：本节描述的自研双模式（chat_agent 快速路径 + planner_agent 规划图）已不再是对话主链路——主链路（`app/services/deepagents/agent.py`）复用同一意图分类器（`app/services/intent_classifier.py`，轻量规则、零延迟），复杂任务注入 prompt 级 `_PLAN_INSTRUCTION` 规划指令（回答结构化分节、工具链更完整）；chat_agent / planner_agent 保留为弃用代码（A4 收官再评估删除），本节保留为历史设计参考。
-
-船长决策 2026-08-06 方案B：对话入口先做**意图分类**（`app/services/intent_classifier.py`，轻量规则、零延迟），按任务复杂度分流：
-
-| 分类 | 判定 | 路径 | 特征 |
-|------|------|------|------|
-| 简单 | 单工具可答（开放时间 / 在哪 / 怎么去…） | 快速路径：现有 `create_agent` 流程 | 零延迟增加，行为与阶段2 一致 |
-| 复杂 | 明确多步规划意图（规划 / 安排 / 行程 / 一日游 / 路线推荐 / 预算…） | 规划路径：LangGraph 显式图（`app/services/planner_agent.py`） | 规划 → 多步执行 → 总结，SSE 步骤可视化思考过程 |
-
-**规划路径**（LangGraph 状态图，零新依赖）：
-
-- **规划**：LLM 按用户需求生成步骤序列（≤6 步，每步一个工具调用，JSON 输出经 `llm.astream` 累积后解析——图内模型调用被 langgraph 统一转为流式，`with_structured_output` 不兼容流式分块）；工具集复用快速路径的 6+1 工具（结构化直查 + 知识检索 + 规则推荐）；**偶发空响应重试**（2026-08-06 联调发现：opencode-go 思考型模型对长 prompt 偶发返回空 content，`plan_node` 对空/无效输出重试 1 次，见 `doc/phase3-e2e-verification.md` §3.1）
-- **执行**：逐步骤确定性调用工具（`BaseTool.ainvoke` 线程池执行，`recommend_routes` 内含 `asyncio.run` 安全）；单步失败记录错误继续，不中断
-- **总结**：LLM 聚合全部工具结果生成结构化最终回答（流式逐字输出，经 `stream_mode="messages"` 按 `langgraph_node=="summarize"` 区分）
-
-**SSE 事件序列（复用现有 step/token/done 契约，前端零改动）**：`step(正在为您规划行程…) → step(每个工具执行) → step(正在生成行程安排…) → token(总结增量) → done`。长期记忆注入（T3）在规划路径同样生效（记忆上下文随 messages 进入规划与总结阶段）。
-
-**安全降级（双轨回落不变）**：分类失败默认简单（快速路径）；规划路径任何异常（规划生成失败 / 步骤全非法 / 总结为空 / LLM 故障）静默降级快速路径，再由路由层兜底 Dify——对话永不中断。安全边界不变：工具集不含预订/账号/支付类操作，prompt 引导人工客服。分类词表经船长决策 2026-08-06 收窄（纯人群/导航单轮查询如「带老人去合适吗」「灵山怎么走」不判复杂，走快速路径避免延迟增量；组合规划类查询如「规划灵山一日游，带老人小孩，喜欢拍照」仍判复杂）。
-
-**回退开关**：`AGENT_DUAL_MODE=false`（`digitalHumanApi/.env`）仅对已弃用的 chat_agent 双模式链路生效（全部走快速路径）；**主链路（deepagents）不读取该开关**——无条件意图分流（简单不注入规划指令，复杂注入 prompt 级 `_PLAN_INSTRUCTION`）。详见 [`doc/phase3-dual-mode.md`](doc/phase3-dual-mode.md)（含 A3 弃用注记）。
-
-## 短期记忆持久化（阶段2 T1）
-
-多轮会话上下文已从**进程内 dict（重启即失）**升级为**SQLite 落盘 + 进程内 TTL 缓存**（登录用户与游客均享短期记忆，会话级、按 `conversation_id`）：
-
-- **重启恢复**：重启后同 `conversation_id` 续聊不丢多轮上下文（SQLite 懒恢复；LRU 淘汰只出缓存、不出库）
-- **TTL 滑动窗口**：默认 7 天（`MEMORY_TTL_DAYS`），每次对话刷新过期时间；过期会话由后台任务定期清理（启动立即执行一次 + 每 `MEMORY_CLEANUP_INTERVAL_SECONDS` 秒，默认 1 小时）＋ 访问时惰性清理双保险
-- **双轨回落兼容**：会话归属判定（`has_conversation`）随 `source` 字段持久化——LangChain 生成的 id 对 Dify 依旧未知（回落传空串新建会话），Dify 自己的 id 原样透传延续上下文
-- **降级不阻断**：SQLite 写失败仅告警，记忆降级为进程内，对话不中断
-- 配置项：`MEMORY_DB_PATH` / `MEMORY_TTL_DAYS` / `MEMORY_CLEANUP_INTERVAL_SECONDS`，见 `digitalHumanApi/.env.example`
-
-存储层与读写策略等实现细节见 AGENTS.md「短期记忆持久化」。
-
-## 记忆系统分层（登录用户 vs 游客）
-
-记忆分两层，按用户身份差异化生效（船长决策 2026-08-05/06 确认，阶段2 收官任务全链路联调验证，详见 [`doc/phase2-memory-verification.md`](doc/phase2-memory-verification.md)）：
-
-| 维度 | 短期记忆（T1） | 长期记忆（T2 写入 + T3 注入） |
-|------|----------------|-------------------------------|
-| 存储 | 会话级 SQLite（`memory_store.db`），按 `conversation_id` | 跨会话 user_memory 向量库（`rag_data/user_memory_docs.json`），按 user 隔离 |
-| 登录用户 | ✅ 同会话多轮上下文 | ✅ 对话后提取事实/偏好写入；新会话首轮检索注入（个性化回答） |
-| 游客（visitor / guest-*） | ✅ 同会话多轮上下文 | ❌ 不写不读（不调用提取 LLM、不注入） |
-| 生效时机 | 每次对话追加，TTL 7 天滑动窗口 | 对话完成后台异步提取；新会话首轮注入（仅首轮、top_k=3、时效 ≤180 天） |
-| 重启 | SQLite 懒恢复，同 id 续聊不丢 | 文件持久化，重启后按 user 可检索 |
-
-> 行为速记：**登录用户 = 短期 + 长期；游客 = 仅短期**。真实环境验证：登录用户新会话问「还记得我吗」→ 回答引用用户画像（带老人小孩/自然风光）；游客新会话同问 → 明确回答「没有记忆功能」；游客多轮会话上下文承接正常；同事实重复表达覆盖不膨胀。
-
-## 用户体系（注册/登录/JWT）
-
-后端提供最小可用用户体系，游客免登录可继续使用对话功能：
-
-- **注册/登录**：`POST /api/v1/auth/register`、`POST /api/v1/auth/login`（凭据校验失败返回 401，登录成功签发 JWT，有效期默认 24 小时）
-- **游客身份**：`POST /api/v1/auth/guest` 签发短期 token（默认 30 分钟，匿名、无持久化记录）
-- **认证限流（批次6 C3）**：login/register/guest 端点按 IP+账号维度进程内限流（默认 5 次失败/60s 滑动窗口后进入 15 分钟冷却，冷却期内返回 429 且带 `Retry-After` 头，前端可展示剩余秒数；登录成功自动清零防误伤；guest 端点纯 IP 每分钟 30 次频率限制），仅作用于认证端点不误伤对话；`AUTH_RATE_LIMIT_ENABLED=false` 可关闭，见 `digitalHumanApi/.env.example`
-- **对话接口用户标识**：`POST /api/v1/dialogue/chat` 优先从 `Authorization: Bearer <token>` 解析用户（登录用户 → 用户 id；游客 token → 游客 id）；无 token 时向后兼容回退请求体 `user` 字段（默认 `visitor`）；token 无效时降级为 `visitor` 并写告警日志（不阻断对话）。`/auth/me` 等认证接口对无效 token 严格返回 401
-- **安全**：密码使用 pwdlib[bcrypt] 哈希存储，绝不落明文；日志不打印 token/密码
-- **配置**：`JWT_SECRET`（生产必须设置，留空时启动生成随机临时密钥、重启后 token 失效）、`JWT_EXPIRES_MINUTES`（默认 1440）、`GUEST_TOKEN_EXPIRES_MINUTES`（默认 30），见 `digitalHumanApi/.env.example`
-
-## 长期记忆（阶段2 T2 对话记忆写入 + T3 检索注入）
-
-对话完成后后台异步提取用户事实/偏好/习惯，写入 `user_memory` 向量库（`EMBEDDING_*` 远端 Embedding（Minimax 或 Qwen/DashScope）+ 轻量文件持久化，按 user 隔离）：
-
-- **记忆条目 schema（T3 契约，详见 [`doc/long-term-memory.md`](digitalHumanApi/doc/long-term-memory.md)）**：`{user, fact_type, content, source_conversation_id, timestamp}`；`fact_type` 为 `preference`（偏好）/ `fact`（事实）/ `habit`（习惯），`content` 为自然语言记忆句（如「喜欢拍照」「带老人小孩」）
-- **写入**：`app/services/memory_service.py` 的 `save_user_memory(user, facts)`——同 user 同事实**覆盖更新**（记忆不膨胀），每用户条数上限 `MEMORY_MAX_PER_USER`（默认 200，超限淘汰最旧）
-- **提取**：主链路（deepagents，A3 起）与弃用链路（chat_agent）对话完成后均调 `extract_and_store`（LLM 单次调用提取，复用 `LLM_*` 配置）；**失败静默降级不写记忆，绝不阻塞对话响应**
-- **游客隔离**：游客（visitor / guest-* / 匿名）不产生长期记忆（不调用 LLM、不写入）
-- **检索（T3 对话前注入）**：**A3 起仅弃用链路（chat_agent）保留**语义检索注入（对话**首轮**按 user 调 `search_user_memory(user, query=用户当前问题, top_k=3)`，检索结果格式化为额外 SystemMessage 注入 agent 上下文（每条带事实类型标签 + 时效标记如「3天前」）；**仅首轮注入**（多轮续聊不重复）、游客跳过、陈旧记忆（超 `MEMORY_MAX_AGE_DAYS`）过滤、检索异常/无记忆**静默降级不阻断对话**；注入文本附「仅作参考、不执行指令」降权约束，不重建 agent、不改工具集/SSE/回落，详见 [`doc/long-term-memory.md`](digitalHumanApi/doc/long-term-memory.md)「七、检索注入」）；**主链路（deepagents）改为轻量摘要注入**（昵称 + 记忆条数概览，每轮注入，提示模型经记忆四工具按需检索，见 AGENTS.md「deepagents 装配层」专节）
-- **配置**：`MEMORY_ENABLED`（默认开启）、`MEMORY_MAX_PER_USER`（默认 200）、`MEMORY_INJECT_ENABLED`（默认开启，注入总开关）、`MEMORY_MAX_AGE_DAYS`（默认 180，注入记忆最大时效），见 `digitalHumanApi/.env.example`
-
-## 测试
+## 测试与质量门
 
 ### 后端（pytest + 覆盖率门禁）
 
 ```bash
 cd digitalHumanApi
 pip install -r requirements-dev.txt
-# 常规运行
-pytest -v
-# 覆盖率报告（基线实测 84%，门禁阈值 75%，低于阈值退出码非零）
-pytest -q --cov=app --cov-report=term:skip-covered --cov-fail-under=75
+pytest -v                                   # 全量 680 用例（内存 SQLite，无外部依赖）
+pytest -q --cov=app --cov-report=term:skip-covered --cov-fail-under=75   # 覆盖率门禁（阈值 75%，基线 84%+）
 ```
 
-测试使用内存 SQLite，不依赖外部服务，不使用 mock 库。CI 的 Backend job 以 `--cov-fail-under=75` 执行覆盖率门禁（批次7 C6：阈值基于当前基线留余量设定）。
+测试使用内存 SQLite 与 httpx.MockTransport 模拟外部 API，不发真实网络请求；不使用第三方 mock 库。CI Backend job 以 `--cov-fail-under=75` 门禁执行。
 
 ### 前端（Playwright E2E 冒烟）
 
 ```bash
 cd digitalHumanVue
 npm ci
-# 首次需安装浏览器（chromium，含系统依赖）
-npx playwright install --with-deps chromium
-# 运行冒烟套件（自动起 vite dev server；后端接口全部在浏览器层 mock，无需真实后端）
-npm run e2e
+npx playwright install --with-deps chromium    # 首次
+npm run e2e                                    # 自动起 vite dev server（:5199），后端接口浏览器层 mock
 ```
 
-E2E 冒烟覆盖核心路径：首页（加载 + 浏览推荐滚动）、对话页（进入 + 推荐问句浮层）、管理端（登录 + 知识库/公告/用量页基础渲染）。用例通过 `page.route` 拦截 `http://localhost:5199/api/**`（必须带 origin，`**/api/**` 会误伤应用自身的 `/src/api/*.ts` 模块请求）返回夹具数据，稳定可重复、不依赖后端与外部服务；CI 的 E2E job 与 Backend/Frontend 并行执行（批次7 C6）。
+8 用例覆盖核心路径：首页（hero/活数据卡片/公告区）、对话页（游客兜底 + 推荐问句浮层）、管理端（登录跳转 + 知识库/公告/用量页渲染）。后端接口全部 `page.route` mock（响应形状对齐后端契约），稳定可重复、不依赖真实后端。
 
-## 验收状态
+### CI（GitHub Actions）
 
-| 项 | 状态 |
-|----|------|
-| 后端启动 | ✅ 正常（健康检查 200，后台轮询已连接 Dify 并拉取到对话） |
-| 前端启动 | ✅ 正常（Vite 8 ready，页面 HTTP 200） |
-| Dify 对话抓取 | ✅ 正常（`/messages` 拉取返回 200） |
-| Dify Workflow 量化分析（早期验收记录；阶段4 起已本地 LLM 化，见下方「阶段4 量化评估本地化」行） | ✅ 正常（16 条对话全部评估完成，大屏/报告有真实数据） |
-| 数据大屏 | ✅ 正常（sentiment_trend 全量连续查询，从最早对话日到今天、缺失日零值回填 / satisfaction / hot_issues 均有数据） |
-| 手动触发端点 | ✅ 正常（`POST /sync-now` + `/run-now` 手动触发后台逻辑） |
-| 本地数字人部署 | ✅ 已部署（TencentAPI ASR + LangChainAgent + QwenAPI TTS（2026-08-07 从 MiniMax 迁移，DashScope `qwen-audio-3.0-tts-flash`）） |
-| 动态推荐问句 | ✅ 正常（每 5 分钟由本地 LLM 生成刷新（阶段3 T3 脱离 Dify，`LLM_API_*` 配置 opencode-go，聚合 Dashboard 数据生成，失败降级保留旧缓存），缓存 stale-while-revalidate） |
-| 阶段1 双轨联调 | ✅ 通过（LangChain 新链路全流程 + 故障回落 Dify + ADH 接入 + 前端流式渲染；联调发现并修复 3 个缺陷：Minimax Embedding 原生 API 格式、ADH SSE 事件契约、回落错误处理，详见 [`doc/phase1-e2e-verification.md`](doc/phase1-e2e-verification.md)） |
-| 阶段2 T1 短期记忆 | ✅ 实现完成（会话历史 SQLite 落盘 + TTL 滑动窗口过期清理 + 重启恢复，存储层/清理任务/集成单测覆盖，测试全绿） |
-| 阶段2 T2 长期记忆写入 | ✅ 实现完成（对话后后台 LLM 提取用户事实/偏好写入 user_memory 向量库，按 user 隔离、同事实覆盖、条数上限，游客不写，失败静默降级） |
-| 阶段2 T3 长期记忆检索注入 | ✅ 实现完成（对话首轮按 user 检索记忆注入 agent 上下文，仅首轮注入/游客跳过/时效过滤/异常静默降级，注入逻辑与端到端单测覆盖，全量 248 测试全绿） |
-| 阶段2 T4 登录生效联调（收官） | ✅ 通过（真实环境：登录用户注册/登录→多轮对话→长期记忆写入 user_memory（5 条）→新会话检索注入（回答引用用户画像）；游客无 token / guest token 降级正确（短期正常、无长期记忆、无注入）；同事实覆盖去重；无联调缺陷，详见 [`doc/phase2-memory-verification.md`](doc/phase2-memory-verification.md)） |
-| 阶段3 收官全链路联调 | ✅ 通过（真实环境：简单问答快速路径 / 复杂任务规划路径（SSE 步骤可视化）/ 推荐问句本地生成（脱离 Dify）/ 分析链路 LLM + DB 兜底降级标记 / 记忆系统（长期写入+注入+游客隔离）/ 双轨回落；联调发现并修复规划路径偶发空响应（opencode-go 长 prompt 思考耗尽）→ 增加重试；全量 320 测试全绿，详见 [`doc/phase3-e2e-verification.md`](doc/phase3-e2e-verification.md)） |
-| 阶段3 Dify 依赖盘点 | ✅ 完成（推荐/分析已脱离 Dify；剩余为对话双轨回落 + 历史数据接口 + Workflow 量化评估，清理建议见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md)） |
-| 阶段4 量化评估本地化 | ✅ 完成（真实调用：本地 LLM 评估产出情感/满意度/关注点/景点/改进建议，Evaluation 表与管理后台消费不变；`trigger_workflow`/`dify_helpers`/`DIFY_WORKFLOW_API_KEY` 已移除；全量测试全绿，详见 [`doc/dify-dependency-audit.md`](doc/dify-dependency-audit.md) §2） |
-| 阶段4 收官：脱离 Dify 全链路自检 | ✅ 通过（真实环境模拟 **Dify 不可达**：对话快速/规划/流式/多轮记忆、推荐问句本地生成、分析链路（LLM+DB 兜底）、量化评估 → Evaluation 表 → 管理后台报告（含 suggestions）、记忆系统（长期/短期/游客隔离）全部正常；仅保留项明确降级——历史数据接口重试后 `synced=0` 不崩溃、对话回落礼貌报错不崩溃；自检未发现代码缺陷，详见 [`doc/phase4-e2e-verification.md`](doc/phase4-e2e-verification.md)） |
-| 批次4 B2 公告模块 + 首页活数据 | ✅ 完成（announcements 迁移升级/回退（首个真实 Alembic 迁移）+ 管理端 CRUD（X-Admin-Token 鉴权）+ 访客接口仅已发布（置顶优先 + 时间倒序）+ 首页活数据接口（`app/data/*.json` 实时读取）；契约见 [`digitalHumanApi/doc/announcement-api.md`](digitalHumanApi/doc/announcement-api.md)；公告/首页/迁移新增单测 19 用例全绿） |
-| 批次6 B4 管理员 agent | ✅ 完成（deepagents 装配模式管理端变体：X-Admin-Token 鉴权对话 API（非流式 + SSE，事件契约与用户侧一致）、12 个管理工具（知识库/记忆/公告/统计/RAG 索引/首页数据，全部复用既有 service）、删除类两阶段二次确认（TTL 默认 120s，`ADMIN_AGENT_CONFIRM_TTL_SECONDS` 可配）+ 写操作审计日志（operator=admin-agent）；新增单测 43 用例全绿） |
-| Docker Compose | 已配置，未在本次验收中实际构建 |
+`.github/workflows/ci.yml` 三 job 并行：backend pytest（覆盖率门禁）+ frontend（lint + build，含 vue-tsc type-check）+ frontend E2E（Playwright）。
 
 ## 常见问题
 
 **Q: 数字人页面显示 "Soul is death!"？**
-A: 这是 ADH 前端 WebSocket 心跳连不上后端的提示。检查：
-1. 数字人后端是否启动（`curl http://localhost:8001/adh/agent/v0/list` 应返回 200）
-2. 数字人前端 `web/.env` 中是否设置了 `NEXT_PUBLIC_ADH_SERVER_PORT=8001`（默认 8000 会连到主后端）
-3. 改完 `.env` 后需重启数字人前端才能生效
+A: ADH 前端 WebSocket 心跳连不上数字人后端。检查：① 数字人后端是否启动（`curl http://localhost:8001/adh/agent/v0/list`）；② `live2d-frontend/web/.env` 是否设置 `NEXT_PUBLIC_ADH_SERVER_PORT=8001`；③ 改后重启数字人前端。
 
-**Q: 后端日志出现量化评估失败（本地 LLM）？**
-A: 阶段4 起量化评估由本地 LLM 产出（`LLM_API_*` 配置 opencode-go，见 `app/services/evaluation_service.py`），不再调用 Dify Workflow。评估失败会静默降级（该对话本轮跳过、下轮重试），不阻断 `analysis_loop`。若大量评估持续失败，检查：
-1. `LLM_API_KEY` 是否已配置且指向 opencode-go 端点（与对话 LLM 同 key）；
-2. opencode-go 端点网络是否可达（`doc/phase3-analytics-verification.md` 的超时经验：延迟高，单条预算 120s）。
-
-**Q: 大屏数据为空？**
-A: 大屏数据依赖量化评估结果（`evaluations` 表，由本地 LLM 评估产出）。若表为空，说明尚未有对话被评估。可手动触发一次：`curl -X POST http://localhost:8000/api/v1/analysis/run-now`。后台分析任务每 5 分钟自动运行一次。
-
-**Q: 前端 `/api` 请求 404 或跨域报错？**
-A: 确认后端已启动在 8000 端口，且 `digitalHumanVue/.env` 的 `VITE_API_BASE=http://localhost:8000` 配置正确。开发环境由 Vite 代理处理，无需后端 CORS 放行（生产由 Nginx 同源处理）。
-
-**Q: 数字人对话框空白？**
-A: 检查 `digitalHumanVue/.env` 的 `VITE_LIGHT4AI_URL` 是否指向可访问的 light4ai 服务地址。
-
-**Q: ADH 前端 `npm install` 报 nextui peer 依赖冲突？**
-A: 用 `npm install --legacy-peer-deps` 安装。若编译报 `'alert' is not exported from '@nextui-org/theme'`，升级 `@nextui-org/react`、`@nextui-org/system`、`@nextui-org/theme` 到 latest 后重启（清掉 `.next` 缓存）。
-
-**Q: Vue 前端 vite 报 `Cannot find native binding`（rolldown）？**
-A: 依赖安装不完整所致，执行 `npm ci` 重装依赖。
+**Q: 对话一直走 Dify 回落（无工具调用）？**
+A: 主链路依赖 `LLM_API_KEY`（opencode-go）。检查 `digitalHumanApi/.env` 中 `LLM_API_*` 是否配置且网络可达（冒烟：`cd digitalHumanApi && LLM_API_KEY=... python -m scripts.smoke_llm`）。
 
 **Q: 数字人 TTS 无声音？**
-A: 检查 ffmpeg 是否安装——后端日志报 `No such file or directory: 'ffprobe'` 即为缺失，执行 `sudo apt install ffmpeg` 后重启 ADH 后端。
+A: 检查 ffmpeg 是否安装（后端日志 `No such file or directory: 'ffprobe'` 即缺失，`sudo apt install ffmpeg`）；Qwen TTS key 经环境变量 `QWEN_API_KEY` 提供。
 
-**Q: 页面空白 + 控制台报 `crypto.randomUUID is not a function`？**
-A: `crypto.randomUUID()` 仅在安全上下文（HTTPS 或 localhost）可用，通过局域网 IP + 明文 HTTP 访问时浏览器无此 API。项目已在 `digitalHumanVue/src/utils/uuid.ts` 实现 fallback（降级为 `Math.random` + `Date.now` 生成 UUID v4）；旧版本需要同样处理。
+**Q: 大屏数据为空？**
+A: 大屏依赖量化评估结果（Evaluation 表，由本地 LLM 评估产出）。手动触发：`curl -X POST http://localhost:8000/api/v1/analysis/run-now`；后台分析任务每 5 分钟自动运行。
 
-**Q: 语音输入不可用（麦克风点击无响应、控制台报 `navigator.mediaDevices is undefined`、麦克风报 error 1）？**
-A: 语音功能需要**安全上下文**（HTTPS 或 localhost）。ADH 数字人的语音输入（`navigator.mediaDevices.getUserMedia`）与部分 Web API（如 `crypto.randomUUID`）仅限安全上下文可用；通过**局域网 IP + 明文 HTTP**（如 `http://<服务器IP>:3000`）访问时浏览器会直接禁用，表现即控制台报 `navigator.mediaDevices is undefined`、麦克风报 error 1、点击无响应。这是浏览器硬性安全策略，代码无法绕过。配置方法：
-1. **临时调试**：SSH 端口转发 `ssh -L 3000:127.0.0.1:3000 <user>@<服务器IP>` 后访问 `http://localhost:3000`
-2. **正式使用**：部署 HTTPS（nginx/caddy 反代 + 证书）
+**Q: 语音输入不可用（麦克风无响应、`navigator.mediaDevices is undefined`）？**
+A: 语音功能需要安全上下文（HTTPS 或 localhost）。局域网 IP + 明文 HTTP 访问时浏览器禁用麦克风，属硬性安全策略。临时调试用 SSH 端口转发（`ssh -L 3000:127.0.0.1:3000 ...`），正式使用部署 HTTPS。
 
-管理后台等非语音功能不受此限制。本项目已内置 `crypto.randomUUID` 的 fallback（见 `digitalHumanVue/src/utils/uuid.ts`），因此访客端非语音页面可在明文 HTTP 下正常运行，仅语音输入受限。
+**Q: 后端日志报量化评估/分析失败？**
+A: 阶段4 起评估与分析均为本地 LLM（`LLM_*`/`OPENAI_*` 配置 opencode-go）。失败会静默降级（评估跳过本轮、分析回退 DB 统计），不阻断任务；持续失败检查 key 与端点网络（opencode-go 延迟高，单条评估预算 120s）。
 
-**Q: ADH 数字人凭据在哪里配置？**
-A: 凭据不写入代码库，配置在 ADH 引擎配置文件中：`live2d-frontend/configs/engines/tts/qwenTTS.yaml`（QwenAPI TTS，key 优先读环境变量 `QWEN_API_KEY`，yaml 留空占位）、`live2d-frontend/configs/engines/tts/minimaxTTS.yaml`（MiniMax TTS，保留可切换）、`live2d-frontend/configs/engines/asr/tencentAPI.yaml`（腾讯云 ASR）、`live2d-frontend/configs/agents/langchainAgent.yaml`（默认引擎，`LLM_API_URL` 指向本后端，可选 Bearer token）、`live2d-frontend/configs/agents/difyAgent.yaml`（Dify Agent，保留可切换直连）。修改后需重启 ADH 后端生效。
+**Q: 认证接口突然返回 429？**
+A: 认证限流（批次6 C3）防爆破：默认 5 次失败/60s 后进入 15 分钟冷却，响应带 `Retry-After` 头。正常登录成功后自动清零，不误伤；`AUTH_RATE_LIMIT_ENABLED=false` 可关闭。
 
-## Dify Workflow 量化分析规格（历史存档）
+**Q: 局域网部署时前端跨域/CORS 报错？**
+A: 开发环境由 Vite 代理转发（无跨域）；直接跨端口访问需确认后端 `CORS_ORIGINS` 白名单包含访问源（默认含 192.168.16.132 演示环境）。生产用 Nginx 同源反代。
 
-阶段4 首项（2026-08-07）起量化评估已本地 LLM 化（`app/services/evaluation_service.py`，`LLM_API_*` 配置 opencode-go），**不再调用 Dify Workflow**。原 Workflow 的入参、输出格式、节点编排、后端解析容错等历史规格存档于 [`doc/dify配置/workflow-spec.md`](doc/dify配置/workflow-spec.md)。
+---
+
+更多实现细节与坑位见 **`AGENTS.md`**（项目记忆，唯一权威源，随项目持续更新）。
