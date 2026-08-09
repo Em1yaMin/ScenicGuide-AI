@@ -9,7 +9,7 @@
 | 后端 | Python 3.9+ · FastAPI · SQLAlchemy 2.0 (async) · SQLite (aiosqlite) · httpx · LangChain |
 | 前端 | Vue 3 · TypeScript · Vite 8 · Pinia · Vue Router · ECharts |
 | 部署 | Docker Compose · Nginx |
-| 外部服务 | Dify AI 平台（Chat Agent 对话双轨回落 + 历史数据接口；量化评估已本地 LLM 化）、LangChain 系 agent（对话主链路 = deepagents 装配层，A3 起）+ OpenAI（AI 运营分析）、对话 LLM（opencode-go DeepSeek，见 `doc/llm-adapter-smoke-test.md`）、本地 Live2D 数字人（live2d-frontend） |
+| 外部服务 | Dify AI 平台（Chat Agent 对话双轨回落 + 历史数据接口；量化评估已本地 LLM 化）、LangChain 系 agent（对话主链路 = deepagents 装配层，A3 起）+ OpenAI（AI 运营分析）、对话 LLM（opencode-go DeepSeek，见 `doc/llm-adapter-smoke-test.md`）、高德 Web 服务（GPS 地理编码/路径规划，`AMAP_WEB_KEY`，见 [`doc/amap-gps-api.md`](doc/amap-gps-api.md)）、本地 Live2D 数字人（live2d-frontend） |
 
 ## 本地数字人依赖
 
@@ -132,6 +132,7 @@ cp .env.example .env
 | `MEMORY_TTL_DAYS` | 会话 TTL（天，默认 7）：滑动窗口，每次对话刷新过期时间，到期会话由后台任务清理 |
 | `MEMORY_CLEANUP_INTERVAL_SECONDS` | 过期会话清理周期（秒，默认 3600）：启动时立即清理一次 + 定期清理 |
 | `SSH_HOST` / `SSH_PORT` / `SSH_USER` / `SSH_PASSWORD` | 部署 Dify 的远程服务器（可选） |
+| `AMAP_WEB_KEY` | 高德 Web 服务 Key（GPS 地理编码/路径规划，可选；未配置时对话工具返回 `amap_not_configured` 错误码不阻断对话，与前端 `VITE_AMAP_JS_KEY` 两套独立凭据，见 [`doc/amap-gps-api.md`](doc/amap-gps-api.md)） |
 
 **前端** — 复制并填写 `digitalHumanVue/.env`：
 
@@ -339,7 +340,7 @@ docker-compose up -d --build
 | POST | `/visitor/register` | 游客注册 |
 | POST | `/visitor/refresh-recommend` | 手动刷新推荐问句缓存 |
 | POST | `/recommend` | 个性化路线推荐（接收偏好描述，返回匹配路线） |
-| POST | `/dialogue/chat` | 对话（**双轨**：默认 deepagents 装配层主链路（A3 起，结构化工具直查景点/路线 + 知识检索 + 规则推荐 + 记忆四工具），多轮会话**短期记忆持久化**（SQLite 落盘 + TTL，重启可恢复，见下方「短期记忆持久化」）；异常自动回落 Dify；`DIALOGUE_ENGINE=dify` 强制走 Dify，响应字段兼容 `answer/conversation_id/rag_context/rag_sources`；`streaming=true` 时返回 SSE 流式事件，见下方「SSE 流式对话」） |
+| POST | `/dialogue/chat` | 对话（**双轨**：默认 deepagents 装配层主链路（A3 起，结构化工具直查景点/路线 + 知识检索 + 规则推荐 + 记忆四工具 + GPS 定位/路线规划 `geocode_location`/`plan_route`，见 [`doc/amap-gps-api.md`](doc/amap-gps-api.md)），多轮会话**短期记忆持久化**（SQLite 落盘 + TTL，重启可恢复，见下方「短期记忆持久化」）；异常自动回落 Dify；`DIALOGUE_ENGINE=dify` 强制走 Dify，响应字段兼容 `answer/conversation_id/rag_context/rag_sources`；`streaming=true` 时返回 SSE 流式事件，见下方「SSE 流式对话」） |
 | POST | `/dialogue/sync-now` | 手动触发对话抓取 |
 | POST | `/analysis/run-now` | 手动触发量化分析 |
 | GET | `/analysis/overview` | AI 运营分析概览（支持 `?days=7/30/90`；LangChain LLM 分析，失败自动回退纯 DB 统计并置 `llm_analysis=false` 降级标记；真实调用约 1-2 分钟（opencode-go 端点延迟高，最长可至 240s 超时预算），见 `doc/phase3-analytics-verification.md`；**docker 部署拓扑下需保证 nginx `/api/` 代理超时 ≥300s**（`nginx.conf` 已配置 `proxy_read_timeout 300s`，若再调大后端分析超时预算需同步调整）） |
