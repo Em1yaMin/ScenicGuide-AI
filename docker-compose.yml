@@ -28,6 +28,7 @@ services:
       - JWT_SECRET=${JWT_SECRET:-}
       - JWT_EXPIRES_MINUTES=${JWT_EXPIRES_MINUTES:-1440}
       - GUEST_TOKEN_EXPIRES_MINUTES=${GUEST_TOKEN_EXPIRES_MINUTES:-30}
+      - AMAP_WEB_KEY=${AMAP_WEB_KEY:-}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
       interval: 10s

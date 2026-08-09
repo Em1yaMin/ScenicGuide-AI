@@ -208,6 +208,14 @@ class Settings(BaseModel):
     SSH_USER: str = os.environ.get("SSH_USER", "root")
     SSH_PASSWORD: str = os.environ.get("SSH_PASSWORD", "")
 
+    # 高德 Web 服务 Key（批次8 B3：GPS 地理编码/路径规划，见
+    # app/services/amap/ 与 doc/amap-gps-api.md）——演示主推「描述位置 →
+    # 地理编码 → 路径规划 → 地图展示」，坐标全部来自高德 API（结构化零
+    # 幻觉）；与前端地图渲染的 JS API key（VITE_AMAP_JS_KEY）是两套独立
+    # 凭据。未配置时不报错：对话工具返回 amap_not_configured 错误码
+    # （不阻断对话），部署 .env 已配置真实 key
+    AMAP_WEB_KEY: str = os.environ.get("AMAP_WEB_KEY", "")
+
     ADMIN_API_TOKEN: str = os.environ.get("ADMIN_API_TOKEN", "")
 
     # 管理员 agent（批次6 B4）：删除类工具两阶段二次确认的待确认项 TTL（秒）

@@ -135,13 +135,15 @@ async def test_build_agent_model_side_tools_excluded_and_injected_hidden():
     # 内置 9 工具全部排除
     for builtin in _EXCLUDED_TOOLS:
         assert builtin not in tool_names, f"内置工具未被排除: {builtin}"
-    # 场景 7 工具 + 记忆 4 工具全部装配（use_rag=True 含 search_knowledge）
+    # 场景 7 工具 + 记忆 4 工具 + GPS 2 工具（批次8 B3）全部装配
+    # （use_rag=True 含 search_knowledge）
     expected = {
         "search_knowledge", "search_spots", "search_routes",
         "get_spot_detail", "get_route_detail", "filter_by_tags",
         "recommend_routes",
         "recall_user_memory", "save_user_memory",
         "list_user_memories", "delete_user_memory",
+        "geocode_location", "plan_route",
     }
     assert set(tool_names) == expected
     # 注入参数对模型隐藏：user 不出现在任何工具参数 schema 中

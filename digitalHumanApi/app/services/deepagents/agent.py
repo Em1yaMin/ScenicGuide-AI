@@ -56,6 +56,11 @@ from app.core.llm import get_chat_llm
 from app.services import chat_agent as main_chain  # 只读复用，不改主链路
 from app.services import memory_service
 from app.services.deepagents import compaction, tool_cache
+from app.services.deepagents.amap_tools import (
+    AMAP_STEP_LABELS,
+    geocode_location,
+    plan_route,
+)
 from app.services.deepagents.harness import (
     _AGENT_MAX_TOKENS,
     _AGENT_TIMEOUT,
@@ -104,7 +109,19 @@ def _build_system_prompt() -> str:
    引用真实记忆作答，不要凭空假设。
 3. 用户明确表达新的可复用偏好/事实时，可用 save_user_memory 记下；
    不要保存景点百科等一次性的资料性内容。
-4. 工具效率：一次检索到足够信息后直接作答，不要对同一主题反复重搜。"""
+4. 工具效率：一次检索到足够信息后直接作答，不要对同一主题反复重搜。
+
+位置/路线工具使用原则（GPS/高德，坐标全部来自高德 API，零幻觉）：
+1. 用户描述位置（而非给坐标）时，先调 geocode_location 解析坐标；返回多个
+   候选时结合景区上下文选择最匹配的一个（如景区在武汉就选"武汉市"候选），
+   不确定可带 city 参数（城市名/adcode）缩小范围。
+2. 规划路线遵循「先 geocode_location 再 plan_route」：plan_route 的
+   origin/destination 必须是 geocode_location 返回候选的 location 字段
+   （"经度,纬度"），不要传地址文本；mode 按用户出行方式选择
+   walking/driving/transit。
+3. 工具返回错误码（amap_not_configured / amap_unavailable / amap_no_result /
+   amap_invalid_param / amap_route_failed）时如实转达，不要编造坐标、
+   距离或路线。"""
 
 
 # 复用主链路系统提示词作为基础（chat_agent 保留期间维持单一来源，
@@ -133,6 +150,8 @@ _STEP_LABELS: Dict[str, str] = {
     "recommend_routes": "正在为您推荐路线…",
 }
 _STEP_LABELS.update(MEMORY_STEP_LABELS)
+# 批次8 B3：GPS/高德位置/路线工具（正在定位…/正在规划路线…）
+_STEP_LABELS.update(AMAP_STEP_LABELS)
 
 # 知识检索工具的调用名（与 chat_agent 一致，RAG 来源提取用）
 _KNOWLEDGE_TOOL_NAME = "search_knowledge"
@@ -159,10 +178,12 @@ _STATIC_CACHE_TTL = settings.AGENT_TOOL_CACHE_TTL_STATIC
 
 
 def _select_tools(use_rag: bool) -> List[Any]:
-    """装配工具集 = 场景工具（复用主链路选择逻辑）+ 记忆四工具。
+    """装配工具集 = 场景工具（复用主链路选择逻辑）+ 记忆四工具 + GPS 两工具。
 
     场景工具经 `chat_agent._select_tools` 只读复用（use_rag 决定是否含
-    search_knowledge），记忆四工具始终装配（A2 试点目标能力）。
+    search_knowledge），记忆四工具始终装配（A2 试点目标能力），GPS 位置/路线
+    工具（批次8 B3）始终装配（geocode_location / plan_route，管理员 agent
+    不装配）。
 
     A4 调优：高频只读场景工具包装为归一化缓存版本（同 query 不重查，
     降工具调用开销与 token 消耗）；记忆工具不缓存（有副作用）。
@@ -182,6 +203,10 @@ def _select_tools(use_rag: bool) -> List[Any]:
     cached.extend(
         [recall_user_memory, save_user_memory, list_user_memories, delete_user_memory]
     )
+    # 批次8 B3：GPS/高德位置/路线工具（用户侧装配；管理员 agent 不装配）。
+    # 坐标/路径来自高德 API（结构化零幻觉），返回统一错误信封不抛异常；
+    # 不参与工具结果缓存（实时外部数据，同地址结果可能变化）
+    cached.extend([geocode_location, plan_route])
     return cached
 
 

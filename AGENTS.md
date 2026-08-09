@@ -133,6 +133,16 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - **实测（真实 LLM 3+3 轮，见 doc/deepagents-tuning.md §4）**：simple 平均 17.7s/8083+693 tok（轮1 纯问答 4.57s/1843+253 与 A1 4.87s/1372+287 持平；轮2 首字 27s 为 opencode-go 延迟波动非调优引入）；complex 平均 37.4s/31713+3369 tok/11 工具调用（含多轮历史累积，口径与 A1 单轮不同）；长会话演示第 12 轮触发压缩（历史 22→11 条），压缩后下一轮 input 20k→4.5k；组合拳边界：3 轮复杂任务 7/14/12 次调用均 ≤15 未被截断；`recursion_limit`（harness `_MAX_AGENT_STEPS`）30→34——恰好 15 次调用 ≈ 31 superstep，34 保证 continue 优雅降级在边界不触发 GraphRecursionError（doc §1）
 - **测试**：`tests/test_deepagents_tool_cache.py`（10：归一化/键/TTL/知识版本失效/上限淘汰/开关/包装行为/统计）+ `tests/test_deepagents_tool_limit.py`（5：装配检查/拦截行为/未超限不变/run 级独立）+ `tests/test_deepagents_compaction.py`（12：阈值/质量/失败降级/开关/chat+stream 集成/持久化重启/并发写回保护/replace_messages）；全量 446 绿（基线 419 + 27）；SSE 契约与回落行为不变（上限拦截不抛异常、压缩失败静默）
 
+## GPS/高德（批次8 B3：演示主推「描述位置 → 地理编码 → 路径规划 → 地图展示」）
+
+船长决策：浏览器定位为辅（前端任务）；离线/异常直接报错误码不做离线兜底；坐标全部来自高德 API（结构化零幻觉）。权威契约 `doc/amap-gps-api.md`（错误码/信封/工具用法）。
+
+- `app/services/amap/` — 高德 Web 服务封装（httpx，零新依赖）：`geocode(address, city=None)`（地址 → ≤5 候选含省/市/区县，**多候选消歧=候选列表 + city 参数组合**，实测"黄鹤楼"跨城市同名）、`route(origin, destination, mode)`（walking/driving/transit；transit 走 integrated 接口，**自动 regeo 推导 city/cityd**，transits 归一化为统一 steps 含公交合成指令「乘坐{线路}（上车站 → 下车站）」）、`regeo`（内部辅助不对 agent 暴露）；`AmapClient(api_key=None, _transport=)` 测试注入 MockTransport（embedding 同模式）；模块级 `geocode/route` 单例供工具调用（key 每次调用实时读 `settings.AMAP_WEB_KEY`，monkeypatch 即模拟无 key）；**统一错误信封** `{ok, error, message}`：amap_not_configured（无 key，不阻断对话）/amap_unavailable（网络/HTTP/业务错误 status≠1/解析失败；httpx 0.28 的 HTTPStatusError 与 RequestError 平级须用超类 HTTPError 捕获）/amap_no_result/amap_invalid_param/amap_route_failed
+- `app/services/deepagents/amap_tools.py` — 对话两工具：`geocode_location(description, city)` / `plan_route(origin, destination, mode)`（origin/destination 必须是 geocode 候选的 location 坐标，**工具描述引导先 geocode 后 plan_route**）；信封 JSON 原样透出（意外异常防御性包装 amap_unavailable），模型如实转达不编造；`AMAP_STEP_LABELS`（正在定位…/正在规划路线…）合并进装配层 `_STEP_LABELS`，SSE step 事件透出（ADH 前端零改动）
+- **装配**：deepagents 用户侧 `_select_tools` 始终装配（use_rag 无关）；**管理员 agent（ADMIN_TOOLS）不装**；不参与工具结果缓存（实时外部数据）；系统提示词新增 GPS 使用原则
+- 配置：`AMAP_WEB_KEY`（config.py + 根目录/digitalHumanApi 两个 .env.example + docker-compose 透传）；与前端 JS API key（VITE_AMAP_JS_KEY）两套独立凭据
+- 冒烟：`python -m scripts.smoke_amap [起点] [终点] [mode]`（真实 key 在部署 .env；无 key 输出 amap_not_configured 等价验证错误码契约）；测试 `tests/test_amap_client.py`（28）+ `tests/test_amap_tools.py`（13：工具行为/装配用户侧有管理员无/不缓存/SSE 标签与流式透出/system prompt 引导）；harness 测试装配断言集合已同步（含 GPS 两工具）
+
 ## Dify 依赖面（阶段4 收官：退场依据见 doc/dify-dependency-audit.md）
 
 船长决策 2026-08-06 方案B：阶段4 Dify 退场工作并入阶段3 顺手推进——盘点并清理 Dify 依赖面，**除对话双轨回落保留外其余尽量清理**。阶段4 首项（2026-08-07 方案A）已落地：**量化评估已本地化**。阶段4 收官（2026-08-07）：**模拟 Dify 不可达全链路自检通过**（对话双模式/流式/记忆、推荐问句、分析、量化评估→Evaluation→管理后台报告全部正常；仅保留项明确降级不崩溃，自检无代码缺陷），详见 `doc/phase4-e2e-verification.md`。**Dify 依赖面定稿**——当前 Dify 依赖仅剩两类（推荐问句、分析接口、量化评估均已脱离 Dify）：
