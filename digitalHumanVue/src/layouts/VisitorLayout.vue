@@ -15,7 +15,6 @@ function withRedirect(path: string) {
   <div class="visitor-layout">
     <header class="visitor-header">
       <RouterLink to="/visitor" class="brand">
-        <span class="brand-icon" aria-hidden="true">⛰</span>
         <span class="brand-text">景区导览 AI 数字人</span>
       </RouterLink>
       <nav aria-label="主导航">
@@ -78,14 +77,8 @@ function withRedirect(path: string) {
 .brand {
   display: flex;
   align-items: baseline;
-  gap: var(--space-xs);
   color: var(--ink);
   text-decoration: none;
-}
-
-.brand-icon {
-  font-size: var(--text-title);
-  line-height: 1;
 }
 
 .brand-text {
