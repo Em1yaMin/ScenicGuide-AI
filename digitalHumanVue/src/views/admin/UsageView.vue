@@ -32,12 +32,12 @@ const GRANULARITY_OPTIONS: { key: UsageGranularity; label: string }[] = [
   { key: 'month', label: '按月' },
 ]
 
-/** 品牌色（与数据大屏/DashboardView 一致） */
+/** 图表主题色对齐设计体系色板（doc/redesign-v1.md §2.1，与数据大屏/DashboardView 一致） */
 const BRAND = {
-  accent: '#C45C26',
-  ink: '#1A1A1A',
-  inkSecondary: '#5C5C5C',
-  border: '#E5E2DB',
+  accent: '#2F6B5B', // jade
+  ink: '#1E2A26', // ink
+  inkSecondary: '#5C6B63', // slate
+  border: '#E4E9E5', // mist
 }
 const chartTextStyle = {
   color: BRAND.inkSecondary,
@@ -679,12 +679,12 @@ onMounted(() => {
   font-family: var(--font-display);
   font-size: var(--text-display);
   margin: 0 0 var(--space-xs);
-  color: var(--color-ink);
+  color: var(--ink);
 }
 
 .header-desc {
   font-size: var(--text-body);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   margin: 0;
 }
 
@@ -697,14 +697,14 @@ onMounted(() => {
 
 .export-msg {
   font-size: var(--text-small);
-  color: var(--color-accent);
+  color: var(--jade);
 }
 
 .primary-btn,
 .secondary-btn {
   padding: var(--space-sm) var(--space-lg);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: var(--text-small);
   font-weight: 500;
@@ -714,12 +714,12 @@ onMounted(() => {
 }
 
 .primary-btn {
-  background: var(--color-ink);
-  color: var(--color-paper);
+  background: var(--ink);
+  color: var(--surface);
 }
 
 .primary-btn:hover {
-  background: var(--color-accent);
+  background: var(--jade);
 }
 
 .primary-btn:disabled {
@@ -733,12 +733,13 @@ onMounted(() => {
 
 .secondary-btn {
   background: transparent;
-  color: var(--color-ink);
-  border: 1px solid var(--color-border);
+  color: var(--ink);
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-sm);
 }
 
 .secondary-btn:hover {
-  background: var(--color-overlay);
+  background: var(--overlay);
 }
 
 .secondary-btn:disabled {
@@ -748,10 +749,11 @@ onMounted(() => {
 
 /* 通用卡片 */
 .table-card {
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-md);
   overflow: hidden;
-  background: var(--color-paper);
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
 }
 
 .card-header {
@@ -759,7 +761,7 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: var(--space-md) var(--space-lg);
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--mist);
   gap: var(--space-md);
   flex-wrap: wrap;
 }
@@ -768,12 +770,12 @@ onMounted(() => {
   margin: 0;
   font-family: var(--font-display);
   font-size: var(--text-title);
-  color: var(--color-ink);
+  color: var(--ink);
 }
 
 .card-sub {
   font-size: var(--text-caption);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   font-family: var(--font-mono);
 }
 
@@ -796,23 +798,23 @@ onMounted(() => {
 
 .filter-label {
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
 }
 
 .preset-group {
   display: flex;
   gap: 2px;
-  background: var(--color-overlay);
-  border-radius: 6px;
+  background: var(--overlay);
+  border-radius: var(--radius-sm);
   padding: 2px;
 }
 
 .preset-btn {
   padding: var(--space-xs) var(--space-md);
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   font-size: var(--text-small);
   cursor: pointer;
   transition:
@@ -821,35 +823,35 @@ onMounted(() => {
 }
 
 .preset-btn:hover {
-  color: var(--color-ink);
+  color: var(--ink);
 }
 
 .preset-btn.active {
-  background: var(--color-paper);
-  color: var(--color-ink);
+  background: var(--surface);
+  color: var(--ink);
   font-weight: 500;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 2px rgba(30, 42, 38, 0.08);
 }
 
 .date-input {
   padding: var(--space-xs) var(--space-sm);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-sm);
   font-size: var(--text-small);
-  background: var(--color-paper);
-  color: var(--color-ink);
+  background: var(--surface);
+  color: var(--ink);
   font-family: var(--font-body);
 }
 
 .date-sep {
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
 }
 
 .range-error {
   flex-basis: 100%;
   margin: 0;
-  color: var(--color-accent);
+  color: var(--jade);
   font-size: var(--text-small);
 }
 
@@ -870,20 +872,20 @@ onMounted(() => {
 
 .kpi-label {
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
 }
 
 .kpi-value {
   font-family: var(--font-mono);
   font-size: var(--text-title);
   font-weight: 600;
-  color: var(--color-ink);
+  color: var(--ink);
   word-break: break-all;
 }
 
 .kpi-sub {
   font-size: var(--text-caption);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
 }
 
 /* 空数据提示 */
@@ -891,13 +893,13 @@ onMounted(() => {
   padding: var(--space-lg);
   margin-bottom: var(--space-lg);
   text-align: center;
-  color: var(--color-ink-secondary);
+  color: var(--slate);
 }
 
 .empty-banner .empty-title {
   margin: 0 0 var(--space-xs);
   font-weight: 500;
-  color: var(--color-ink);
+  color: var(--ink);
 }
 
 .empty-banner .empty-hint {
@@ -920,7 +922,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   height: 320px;
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   font-size: var(--text-body);
 }
 
@@ -942,14 +944,14 @@ onMounted(() => {
 .dim-table td {
   padding: var(--space-sm) var(--space-md);
   text-align: left;
-  border-bottom: 1px solid var(--color-border);
-  color: var(--color-ink);
+  border-bottom: 1px solid var(--mist);
+  color: var(--ink);
 }
 
 .dim-table th {
-  font-weight: 500;
-  color: var(--color-ink-secondary);
-  background: var(--color-overlay);
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--jade-soft);
   white-space: nowrap;
 }
 
@@ -980,20 +982,20 @@ onMounted(() => {
   flex: 1;
   height: 6px;
   border-radius: 3px;
-  background: var(--color-overlay);
+  background: var(--overlay);
   overflow: hidden;
 }
 
 .share-fill {
   height: 100%;
   border-radius: 3px;
-  background: var(--color-accent);
+  background: var(--jade);
 }
 
 .share-text {
   font-family: var(--font-mono);
   font-size: var(--text-caption);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   width: 42px;
   text-align: right;
 }
@@ -1020,11 +1022,11 @@ onMounted(() => {
 
 .filter-select {
   padding: var(--space-xs) var(--space-sm);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-sm);
   font-size: var(--text-small);
-  background: var(--color-paper);
-  color: var(--color-ink);
+  background: var(--surface);
+  color: var(--ink);
   font-family: var(--font-body);
 }
 
@@ -1038,15 +1040,15 @@ onMounted(() => {
 .detail-table td {
   padding: var(--space-sm) var(--space-md);
   text-align: left;
-  border-bottom: 1px solid var(--color-border);
-  color: var(--color-ink);
+  border-bottom: 1px solid var(--mist);
+  color: var(--ink);
   white-space: nowrap;
 }
 
 .detail-table th {
-  font-weight: 500;
-  color: var(--color-ink-secondary);
-  background: var(--color-overlay);
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--jade-soft);
 }
 
 .detail-table tr:last-child td {
@@ -1065,16 +1067,16 @@ onMounted(() => {
 .mono {
   font-family: var(--font-mono);
   font-size: var(--text-caption);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
 }
 
 .chain-badge {
   display: inline-block;
   padding: 1px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   font-size: var(--text-caption);
-  background: var(--color-accent-light);
-  color: var(--color-accent);
+  background: var(--jade-soft);
+  color: var(--jade);
 }
 
 /* 分页 */
@@ -1083,15 +1085,15 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: var(--space-md) var(--space-lg);
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid var(--mist);
 }
 
 .page-btn {
   padding: var(--space-sm) var(--space-md);
-  border: 1px solid var(--color-border);
-  background: var(--color-paper);
-  color: var(--color-ink);
-  border-radius: 6px;
+  border: 1px solid var(--mist);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: var(--text-small);
 }
@@ -1102,31 +1104,31 @@ onMounted(() => {
 }
 
 .page-btn:hover:not(:disabled) {
-  background: var(--color-overlay);
+  background: var(--overlay);
 }
 
 .page-info {
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
 }
 
 /* 空态 / 错误态 */
 .empty-cell {
   text-align: center;
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   padding: var(--space-3xl);
 }
 
 .empty-title {
   margin: 0 0 var(--space-xs);
   font-weight: 500;
-  color: var(--color-ink);
+  color: var(--ink);
 }
 
 .empty-hint {
   margin: 0;
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
 }
 
 .error-state {
@@ -1135,7 +1137,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: var(--space-3xl);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   gap: var(--space-md);
 }
 
@@ -1143,7 +1145,7 @@ onMounted(() => {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(30, 42, 38, 0.4);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1152,14 +1154,14 @@ onMounted(() => {
 }
 
 .modal-panel {
-  background: var(--color-paper);
-  border-radius: 10px;
+  background: var(--surface);
+  border-radius: var(--radius-md);
   width: 100%;
   max-width: 560px;
   max-height: 90vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-pop);
 }
 
 .modal-small {
@@ -1171,27 +1173,27 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: var(--space-lg) var(--space-xl);
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--mist);
 }
 
 .modal-header h2 {
   margin: 0;
   font-family: var(--font-display);
   font-size: var(--text-title);
-  color: var(--color-ink);
+  color: var(--ink);
 }
 
 .icon-btn {
   background: transparent;
   border: none;
   font-size: var(--text-title);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   cursor: pointer;
   line-height: 1;
 }
 
 .icon-btn:hover {
-  color: var(--color-ink);
+  color: var(--ink);
 }
 
 .modal-body {
@@ -1204,7 +1206,7 @@ onMounted(() => {
   justify-content: flex-end;
   gap: var(--space-sm);
   padding: var(--space-lg) var(--space-xl);
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid var(--mist);
 }
 
 .form-row {
@@ -1214,30 +1216,30 @@ onMounted(() => {
 .form-row label {
   display: block;
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   margin-bottom: var(--space-xs);
 }
 
 .form-row input {
   width: 100%;
   padding: var(--space-sm) var(--space-md);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-sm);
   font-size: var(--text-body);
-  background: var(--color-paper);
-  color: var(--color-ink);
+  background: var(--surface);
+  color: var(--ink);
   box-sizing: border-box;
   font-family: var(--font-body);
 }
 
 .form-row input:focus {
   outline: none;
-  border-color: var(--color-ink-secondary);
+  border-color: var(--slate);
 }
 
 .form-hint {
   font-size: var(--text-caption);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   margin: var(--space-xs) 0 0;
 }
 

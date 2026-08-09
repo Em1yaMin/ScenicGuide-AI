@@ -62,7 +62,8 @@ const topConcern = computed(() => {
 })
 
 const sentimentPieOption = computed(() => {
-  const warmPalette = ['#C45C26', '#6B9E6D', '#D4C5B9', '#E0A88A', '#5C5C5C']
+  // 情感色板对齐设计体系（doc/redesign-v1.md §2.1）：青玉/山岚深/黛 同源
+  const sentimentPalette = ['#2F6B5B', '#5E8A7B', '#9CB3A8', '#C89C8E', '#C1412F']
   return {
     tooltip: { trigger: 'item' as const, textStyle: { fontSize: 13 } },
     series: [{
@@ -72,7 +73,7 @@ const sentimentPieOption = computed(() => {
       avoidLabelOverlap: false,
       itemStyle: {
         borderRadius: 2,
-        borderColor: '#F7F5F0',
+        borderColor: '#F7F8F6',
         borderWidth: 2,
       },
       label: {
@@ -80,16 +81,16 @@ const sentimentPieOption = computed(() => {
         position: 'right' as const,
         fontFamily: '"Noto Sans SC", sans-serif',
         fontSize: 13,
-        color: '#5C5C5C',
+        color: '#5C6B63',
         formatter: '{b}\n{d}%',
       },
       labelLine: {
-        lineStyle: { color: '#E5E2DB' },
+        lineStyle: { color: '#E4E9E5' },
       },
       data: (data.value?.sentiment_stats ?? []).map((item, i) => ({
         name: item.label,
         value: item.count,
-        itemStyle: { color: warmPalette[i % warmPalette.length] },
+        itemStyle: { color: sentimentPalette[i % sentimentPalette.length] },
       })),
     }],
   }
@@ -223,21 +224,21 @@ const sentimentPieOption = computed(() => {
   font-family: var(--font-display);
   font-size: var(--text-display);
   margin: 0 0 var(--space-xs);
-  color: var(--color-ink);
+  color: var(--ink);
 }
 
 .header-date {
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   margin: 0;
 }
 
 .refresh-btn {
   padding: var(--space-sm) var(--space-lg);
-  background: var(--color-ink);
-  color: var(--color-paper);
+  background: var(--jade);
+  color: var(--surface);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: var(--text-small);
   font-weight: 500;
@@ -246,7 +247,7 @@ const sentimentPieOption = computed(() => {
 }
 
 .refresh-btn:hover {
-  background: var(--color-accent);
+  background: var(--jade-strong);
 }
 
 .refresh-btn:disabled {
@@ -260,7 +261,7 @@ const sentimentPieOption = computed(() => {
   align-items: center;
   justify-content: center;
   padding: var(--space-3xl);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   gap: var(--space-md);
 }
 
@@ -268,16 +269,16 @@ const sentimentPieOption = computed(() => {
 .key-finding {
   margin-bottom: var(--space-2xl);
   padding: var(--space-xl);
-  border-left: 3px solid var(--color-accent);
-  background: var(--color-accent-light);
-  border-radius: 0 6px 6px 0;
+  border-left: 3px solid var(--jade);
+  background: var(--jade-soft);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
 }
 
 .finding-label {
   display: block;
   font-family: var(--font-mono);
   font-size: var(--text-caption);
-  color: var(--color-accent);
+  color: var(--jade);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   margin-bottom: var(--space-sm);
@@ -288,7 +289,7 @@ const sentimentPieOption = computed(() => {
   font-family: var(--font-display);
   font-size: var(--text-subtitle);
   font-style: italic;
-  color: var(--color-ink);
+  color: var(--ink);
   line-height: 1.6;
   quotes: none;
 }
@@ -301,7 +302,7 @@ const sentimentPieOption = computed(() => {
 }
 
 .report-section {
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid var(--mist);
   padding-top: var(--space-xl);
 }
 
@@ -309,7 +310,7 @@ const sentimentPieOption = computed(() => {
   font-family: var(--font-display);
   font-size: var(--text-title);
   margin: 0 0 var(--space-lg);
-  color: var(--color-ink);
+  color: var(--ink);
 }
 
 /* ── Sentiment Section ── */
@@ -343,22 +344,22 @@ const sentimentPieOption = computed(() => {
   flex-shrink: 0;
 }
 
-.summary-dot--0 { background: #C45C26; }
-.summary-dot--1 { background: #6B9E6D; }
-.summary-dot--2 { background: #D4C5B9; }
-.summary-dot--3 { background: #E0A88A; }
-.summary-dot--4 { background: #5C5C5C; }
+.summary-dot--0 { background: #2F6B5B; }
+.summary-dot--1 { background: #5E8A7B; }
+.summary-dot--2 { background: #9CB3A8; }
+.summary-dot--3 { background: #C89C8E; }
+.summary-dot--4 { background: #C1412F; }
 
 .summary-label {
   flex: 1;
   font-size: var(--text-body);
-  color: var(--color-ink);
+  color: var(--ink);
 }
 
 .summary-count {
   font-family: var(--font-mono);
   font-size: var(--text-body);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
 }
 
 /* ── Ranking ── */
@@ -373,7 +374,7 @@ const sentimentPieOption = computed(() => {
   justify-content: space-between;
   gap: var(--space-lg);
   padding: var(--space-md) 0;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--mist);
 }
 
 .ranking-item:last-child {
@@ -391,13 +392,13 @@ const sentimentPieOption = computed(() => {
   font-family: var(--font-mono);
   font-size: var(--text-title);
   font-weight: 600;
-  color: var(--color-accent);
+  color: var(--jade);
   min-width: 1.8em;
 }
 
 .ranking-name {
   font-size: var(--text-body);
-  color: var(--color-ink);
+  color: var(--ink);
   font-weight: 500;
 }
 
@@ -411,7 +412,7 @@ const sentimentPieOption = computed(() => {
 
 .ranking-bar {
   height: 4px;
-  background: var(--color-accent);
+  background: var(--jade);
   opacity: 0.3;
   border-radius: 2px;
   min-width: 4px;
@@ -421,7 +422,7 @@ const sentimentPieOption = computed(() => {
 .ranking-count {
   font-family: var(--font-mono);
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   white-space: nowrap;
 }
 
@@ -441,7 +442,7 @@ const sentimentPieOption = computed(() => {
   gap: var(--space-sm);
   font-size: var(--text-body);
   line-height: 1.7;
-  color: var(--color-ink);
+  color: var(--ink);
 }
 
 .suggestion-bullet {
@@ -449,13 +450,13 @@ const sentimentPieOption = computed(() => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--color-accent);
+  background: var(--jade);
   margin-top: 0.5em;
   flex-shrink: 0;
 }
 
 .no-data {
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   font-size: var(--text-small);
 }
 

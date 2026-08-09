@@ -15,8 +15,8 @@ function withRedirect(path: string) {
   <div class="admin-layout">
     <aside class="admin-sidebar">
       <div class="sidebar-brand">
-        <span class="brand-dot" />
-        <span class="brand-text">管理后台</span>
+        <span class="brand-seal">管</span>
+        <span class="brand-text">景区管理后台</span>
       </div>
       <nav class="sidebar-nav">
         <RouterLink to="/admin" class="nav-item">
@@ -74,18 +74,22 @@ function withRedirect(path: string) {
 </template>
 
 <style scoped>
+/* 第二阶段视觉打磨：侧边栏/内容区在新 token 体系下的精修。
+ * 数据工具风：与访客端同一体系（青玉/朱砂/宣纸），但更紧凑——
+ * 素白侧边栏、6px 圆角、无大阴影，信息密度优先。 */
 .admin-layout {
   min-height: 100vh;
   display: flex;
-  color: var(--color-ink);
-  background: var(--color-paper);
+  color: var(--ink);
+  background: var(--paper);
 }
 
 .admin-sidebar {
-  width: 240px;
+  width: 232px;
   min-height: 100vh;
-  padding: var(--space-xl) 0;
-  border-right: 1px solid var(--color-border);
+  padding: var(--space-lg) 0;
+  border-right: 1px solid var(--mist);
+  background: var(--surface);
   display: flex;
   flex-direction: column;
   position: sticky;
@@ -93,34 +97,47 @@ function withRedirect(path: string) {
   height: 100vh;
 }
 
+/* 品牌区：朱砂印章式方块（母题同访客端印章落款，见 doc/redesign-v1.md §4） */
 .sidebar-brand {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  padding: 0 var(--space-xl) var(--space-xl);
-  border-bottom: 1px solid var(--color-border);
-  margin-bottom: var(--space-lg);
+  padding: var(--space-xs) var(--space-lg) var(--space-lg);
+  border-bottom: 1px solid var(--mist);
+  margin-bottom: var(--space-md);
 }
 
-.brand-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--color-accent);
+.brand-seal {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  background: var(--cinnabar);
+  color: var(--surface);
+  font-family: var(--font-display);
+  font-size: var(--text-small);
+  font-weight: 700;
+  line-height: 1;
   flex-shrink: 0;
+  transform: rotate(-2deg);
 }
 
 .brand-text {
   font-family: var(--font-display);
-  font-size: var(--text-title);
-  color: var(--color-ink);
+  font-size: var(--text-subtitle);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+  white-space: nowrap;
 }
 
 .sidebar-nav {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 0 var(--space-md);
+  padding: 0 var(--space-sm);
   flex: 1;
 }
 
@@ -128,26 +145,29 @@ function withRedirect(path: string) {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  padding: var(--space-sm) var(--space-md);
-  color: var(--color-ink-secondary);
+  padding: var(--space-xs) var(--space-md);
+  color: var(--slate);
   text-decoration: none;
-  font-size: var(--text-body);
-  border-radius: 6px;
+  font-size: var(--text-small);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
   transition:
     color var(--duration-fast) var(--ease-out),
-    background var(--duration-fast) var(--ease-out);
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
 }
 
 .nav-item:hover {
-  color: var(--color-ink);
-  background: var(--color-overlay);
+  color: var(--ink);
+  background: var(--overlay);
 }
 
 /* 精确匹配（router-link-exact-active）：仅当前路径命中，避免「数据大屏」在子路由（/admin/*）下仍高亮 */
 .nav-item.router-link-exact-active {
-  color: var(--color-accent);
-  background: var(--color-accent-light);
-  font-weight: 500;
+  color: var(--jade);
+  background: var(--jade-soft);
+  border-color: var(--mist);
+  font-weight: 600;
 }
 
 .nav-icon {
@@ -158,8 +178,8 @@ function withRedirect(path: string) {
 }
 
 .sidebar-footer {
-  padding: var(--space-lg) var(--space-xl);
-  border-top: 1px solid var(--color-border);
+  padding: var(--space-md) var(--space-lg);
+  border-top: 1px solid var(--mist);
   margin-top: auto;
 }
 
@@ -167,32 +187,32 @@ function withRedirect(path: string) {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  margin-bottom: var(--space-sm);
+  margin-bottom: var(--space-xs);
   flex-wrap: wrap;
 }
 
 .auth-user {
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
 }
 
 .auth-link {
   font-size: var(--text-small);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   text-decoration: none;
   transition: color var(--duration-fast) var(--ease-out);
 }
 
 .auth-link:hover {
-  color: var(--color-accent);
+  color: var(--jade);
 }
 
 .auth-btn {
   padding: 2px var(--space-sm);
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-sm);
   background: transparent;
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   font-size: var(--text-caption);
   cursor: pointer;
   transition:
@@ -201,13 +221,13 @@ function withRedirect(path: string) {
 }
 
 .auth-btn:hover {
-  color: var(--color-accent);
-  border-color: var(--color-accent);
+  color: var(--jade);
+  border-color: var(--jade);
 }
 
 .version {
   font-size: var(--text-caption);
-  color: var(--color-ink-secondary);
+  color: var(--slate);
   font-family: var(--font-mono);
 }
 
