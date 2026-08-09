@@ -28,6 +28,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { API_ADMIN_DASHBOARD } from '@/api'
+import { fetchWithCodeEnvelope } from '@/utils/fetchWithCodeEnvelope'
 
 const data = ref<ResponseType | null>(null)
 const isLoading = ref(true)
@@ -37,10 +38,8 @@ const hasData = computed(() => data.value !== null && /* 检查是否有实际�
 async function fetchData() {
   isLoading.value = true; error.value = null
   try {
-    const response = await fetch(API_ADMIN_DASHBOARD)
-    const result = await response.json()
-    if (result.code) { error.value = result.message || '服务器错误'; return }
-    data.value = result
+    // 统一走 fetchWithCodeEnvelope（双向错误检查 + 超时），详见 doc/frontend-conventions.md「API 封装模式」
+    data.value = await fetchWithCodeEnvelope<ResponseType>(API_ADMIN_DASHBOARD)
   } catch (e) {
     error.value = e instanceof Error ? e.message : '未知错误'
   } finally { isLoading.value = false }

@@ -19,17 +19,9 @@ assets/main.css       — #app { min-height: 100vh } 入口
 所有组件使用 `<style scoped>` + `var(--*)` 令牌，**不使用** Sass/Tailwind。
 
 ## API Client Pattern
-```ts
-// api/index.ts — 集中式端点常量，禁止组件内硬编码 URL
-export const API_VISITOR_REGISTER = '/api/v1/visitor/register'
-export const API_ADMIN_DASHBOARD   = '/api/v1/admin/dashboard'
 
-// 组件中使用原生 fetch()
-const response = await fetch(API_ADMIN_DASHBOARD)
-const result = await response.json()
-if (result.code) { error.value = result.message || '服务器错误' }
-```
-**不使用 axios** — 全部用原生 `fetch()`。Vite dev proxy（`vite.config.ts`）将 `/api` 转发到后端。
+统一走 `src/utils/fetchWithCodeEnvelope.ts` 封装（双向错误检查 + 默认 15s 超时 + FastAPI detail 三形态解析），按域封装见 `api/auth.ts` / `api/memory.ts` / `api/usage.ts` / `api/adminAgent.ts`；端点常量集中于 `api/index.ts`（禁止组件内硬编码 URL）。**权威约定见 [`doc/frontend-conventions.md`](../../doc/frontend-conventions.md)「API 封装模式」**，此处不重复全文。
+**不使用 axios** — 全部用原生 `fetch()`（经 fetchWithCodeEnvelope 封装）。Vite dev proxy（`vite.config.ts`）将 `/api` 转发到后端。
 
 ## Pinia Store Pattern
 ```ts
@@ -73,5 +65,5 @@ export const useVisitorStore = defineStore('visitor', () => {
 <important if="you are adding a new API endpoint to the frontend">
 1. 在 `api/index.ts` 添加 `export const API_MY_FEATURE = '/api/v1/my/feature'`
 2. 如需类型，在 `types/` 创建接口文件
-3. 在 view/store 中使用 `fetch(API_MY_FEATURE)` 调用
+3. 在 `api/xxx.ts` 按域封装 `fetchWithCodeEnvelope` 调用（SSE/CSV 特例见 doc/frontend-conventions.md），view/store 中经封装调用
 </important>
