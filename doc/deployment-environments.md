@@ -63,6 +63,13 @@ AUTH_GUEST_MAX_PER_MINUTE=20
 4. 数据：轮询/量化跟踪 `DIFY_LIGHT4AI_USER` 填演示虚拟访客；建议演示前
    执行一次 `scripts/backup_db.sh`（备份策略见 doc/database-backup.md）
 
+> ⚠ **Docker 场景 APP_ENV 覆盖警告**：`config.py` 的 `load_dotenv(override=True)`
+> 使挂载的 `digitalHumanApi/.env` **优先于** docker-compose 透传的容器环境变量。
+> 若 `digitalHumanApi/.env` 由模板复制而来（默认 `APP_ENV=dev`），它会静默覆盖
+> 根目录 `.env` 里 `APP_ENV=staging/prod` 的透传——健康检查会显示 `app_env=dev`
+> 而运维以为在 staging/prod。Docker 部署请以 `digitalHumanApi/.env` 的 `APP_ENV`
+> 为准（同步修改或删除该行，让 compose 透传生效），并用健康检查确认档位。
+
 ### prod（正式部署）
 
 1. 根目录 `.env` 设 `APP_ENV=prod`，逐一确认「prod 必填」项：
@@ -71,7 +78,8 @@ AUTH_GUEST_MAX_PER_MINUTE=20
 2. `docker-compose up -d --build`；nginx `proxy_read_timeout ≥ 300s`（分析超时预算，
    见 doc/phase3-analytics-verification.md）
 3. 配置定时备份（cron 调 `scripts/backup_db.sh`，volume 路径见 doc/database-backup.md）
-4. 变更后健康检查确认 `app_env=prod`
+4. 变更后健康检查确认 `app_env=prod`（Docker 场景注意上节 ⚠ 警告：
+   `digitalHumanApi/.env` 的 `APP_ENV` 优先于 compose 透传，需同步修改或删除）
 
 ## 配置覆盖机制说明
 

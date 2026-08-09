@@ -69,8 +69,11 @@ temp_path="$BACKUP_DIR/.$backup_name.tmp"           # 临时文件，成功后�
 trap 'rm -f "$temp_path"' EXIT
 
 # --- 在线安全备份（sqlite3 .backup） ------------------------------------------
-# 先写临时文件再 mv（原子替换）：.backup 中断时不会在备份目录留下半成品
-sqlite3 "$DB_PATH" ".backup '$temp_path'"
+# 先设置 busy timeout（默认 0）再 .backup：应用正在写库（rollback-journal 模式
+# 下的写事务）时 `.backup` 会等锁而不是立即报 database is locked，提升并发写
+# 场景下的在线备份成功率（review c7-1）；随后写临时文件再 mv（原子替换），
+# .backup 中断时不会在备份目录留下半成品
+sqlite3 "$DB_PATH" ".timeout 10000" ".backup '$temp_path'"
 mv "$temp_path" "$backup_path"
 
 # --- 备份可恢复性校验（临时库打开 + 表计数，见 doc/database-backup.md）--------
