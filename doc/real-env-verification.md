@@ -1,5 +1,7 @@
 # 真实环境全链路验证报告（阶段0~2 合并后）
 
+> **历史文档**：本文为阶段0~2（2026-08-06）合并后验证报告，描述当时实现状态（对话主链路、Embedding 均已有演进）。最新实现以根目录 `AGENTS.md`（项目记忆）与 `README.md` 为准。
+
 - 日期：2026-08-06
 - 分支：`fm/sg-real-e2e`
 - 背景：阶段0~阶段2 代码合并（#14~#26），但主项目 `.env` 此前停留在阶段0快照，缺少 `LLM_*`/`DIALOGUE_ENGINE`/`MEMORY_*` 配置，LangChain 新链路从未在真实 key 下运行过。firstmate 已按船长指示补全主 `.env`（LLM/OPENAI 单用 opencode-go，DIALOGUE_ENGINE=langchain，MEMORY_* 已配）。本任务在独立 worktree 内复制主 `.env` 做真实环境全链路验证。
