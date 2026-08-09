@@ -57,10 +57,11 @@
   --ease-stamp: cubic-bezier(0.34, 1.56, 0.64, 1); /* 印章落定：轻微回弹 */
 
   /* ── 字体角色（CDN 均带系统兑底） ── */
-  --font-display: 'Noto Serif SC', 'Source Han Serif SC', 'STSong', 'IBM Plex Serif',
-    'Newsreader', Georgia, serif; /* 题字 */
-  --font-body: 'Noto Sans SC', 'Source Han Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Inter',
-    system-ui, sans-serif; /* 正文 */
+  --font-display:
+    'Noto Serif SC', 'Source Han Serif SC', 'STSong', 'IBM Plex Serif', 'Newsreader', Georgia, serif; /* 题字 */
+  --font-body:
+    'Noto Sans SC', 'Source Han Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Inter', system-ui,
+    sans-serif; /* 正文 */
   --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace; /* 数据 */
 
   /* ── 字阶 ── */

@@ -510,7 +510,7 @@ function onQuestionClick(text: string) {
   background: var(--jade-soft);
 }
 
-/* 浮层开合：200ms 淡入上滑（唯一浮层动效） */
+/* 浮层开合：300ms 淡入上滑（唯一浮层动效，见 doc/redesign-v1.md §5） */
 .questions-pop-enter-active,
 .questions-pop-leave-active {
   transition:

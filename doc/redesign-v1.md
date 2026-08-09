@@ -16,7 +16,7 @@
 
 ## 2. Token 系统（权威表）
 
-### 2.1 色彩（5 个命名色 + 3 个派生，全部 hex）
+### 2.1 色彩（命名色板 6 色 + 派生，全部 hex）
 
 | Token | 命名 | Hex | 角色与用法 | 对比度 |
 |---|---|---|---|---|
@@ -25,10 +25,12 @@
 | `--jade` | 青玉 | `#2F6B5B` | 主强调：动作按钮/链接/激活态/路线序数 | 文字 on paper ≈ 5.8:1 |
 | `--cinnabar` | 朱砂 | `#C1412F` | 次强调：印章落款/置顶徽标/错误。**全页限量使用** | 白字 on 朱砂 ≈ 6.9:1 |
 | `--mist` | 山岚 | `#E4E9E5` | 分隔线/卡片边框（灰绿调） | — |
-| 派生 | | | | |
 | `--slate` | 黛 | `#5C6B63` | 次级正文（描述/日期/元信息） | on paper ≈ 5.2:1 ✓ |
+| 派生 | | | | |
 | `--jade-soft` | 青玉淡 | `#E3EDE8` | 标签浅底/hover 底 | — |
 | `--surface` | 素白 | `#FFFFFF` | 卡片/浮层底 | — |
+
+其余派生 token（见 `src/styles/design-tokens.css`）：`--jade-strong`（hover/按下）、`--cinnabar-soft`（错误浅底）、`--mist-strong`（hover 边框）、`--overlay`（hover 底）、`--focus`（键盘焦点描边 = 青玉）。
 
 色相逻辑：墨绿青玉为骨（山水），宣纸为底（卷轴），朱砂只作印（落款）。**全页朱砂出现 ≤ 3 处**：hero 印章、置顶徽标、section 题跋点。
 
@@ -107,7 +109,7 @@
 ## 5. 动效编排（只选一处）
 
 - **唯一编排**：Hero 入场序列（小标 → 题字 → 副文 → 动作 → 印章落款，stagger 80ms，`--ease-out`）。
-- 其余全部安静：无滚动显现、无卡片悬浮位移（hover 只换边框/底色这类功能反馈）、浮层开合仅 200ms 淡入上滑。
+- 其余全部安静：无滚动显现、无卡片悬浮位移（hover 只换边框/底色这类功能反馈）、浮层开合仅 300ms（`--duration-normal`）淡入上滑。
 - `prefers-reduced-motion`：关动画、关印章回弹。
 
 ## 6. 自审（对照 brief，双遍流程第二遍）
@@ -139,7 +141,7 @@
 
 - 语义化：header/nav/main/section/article/footer/button/time 保持并强化；浮层加 `role="region"` + `aria-label`，收起按钮 `aria-expanded`。
 - 对比度：正文 ≥4.5:1（见 2.1 表，全部达标）。
-- 键盘：全局 `:focus-visible` 青玉 2px 外描边（`--color-focus` token）。
+- 键盘：全局 `:focus-visible` 青玉 2px 外描边（`--focus` token）。
 - `prefers-reduced-motion` 媒体查询降级。
 
 ## 8. 兼容策略（供阶段 2 复用）
