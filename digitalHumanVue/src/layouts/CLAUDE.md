@@ -71,11 +71,13 @@ CSS: `display: flex; flex-direction: column`、`border-bottom` 分隔线
 ## Active Link Styling
 
 ```css
-nav a.router-link-active {
+nav a.router-link-exact-active {
   color: var(--color-accent);
   /* Admin: 额外加 background: var(--color-accent-light) */
 }
 ```
+
+> 注意：必须用 **exact-active**（精确匹配）而非 `router-link-active`（包含匹配）——父级菜单（访客端「首页」to="/visitor"、管理端「数据大屏」to="/admin"）在子路由下仍会命中包含匹配导致误高亮。
 
 ## Architectural Boundaries
 

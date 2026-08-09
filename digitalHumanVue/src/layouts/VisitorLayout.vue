@@ -116,7 +116,8 @@ nav a:hover {
   color: var(--ink);
 }
 
-nav a.router-link-active {
+/* 精确匹配（router-link-exact-active）：仅当前路径命中，避免「首页」在子路由（如 /visitor/chat）下仍高亮 */
+nav a.router-link-exact-active {
   color: var(--jade);
   border-bottom-color: var(--jade);
 }

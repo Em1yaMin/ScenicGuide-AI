@@ -143,7 +143,8 @@ function withRedirect(path: string) {
   background: var(--color-overlay);
 }
 
-.nav-item.router-link-active {
+/* 精确匹配（router-link-exact-active）：仅当前路径命中，避免「数据大屏」在子路由（/admin/*）下仍高亮 */
+.nav-item.router-link-exact-active {
   color: var(--color-accent);
   background: var(--color-accent-light);
   font-weight: 500;
