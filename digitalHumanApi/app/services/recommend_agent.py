@@ -37,22 +37,85 @@ def _load_json(filename: str) -> List[Dict[str, Any]]:
 # ── LangChain Tools ───────────────────────────────────────────────────────
 
 
+# 问题式 query 常见疑问/停用词（搜索降级用）：
+# 去词后为空串表示「泛查询」意图（如「有哪些值得去的景点」），此时返回全部数据；
+# 去词后仍为非空且无命中表示具体名称/关键词确实不存在（如「黄鹤楼」），返回未找到。
+_QUERY_STOPWORDS = (
+    # 疑问词
+    "有哪些", "有什么", "什么", "哪些", "哪里", "哪儿",
+    "值得", "推荐", "建议",
+    "想去", "想看", "想玩", "可以去", "可以", "能",
+    "怎么玩", "怎么逛", "怎么", "如何", "怎么样", "怎样",
+    "介绍一下", "介绍", "看看", "适合", "好玩", "好看",
+    "规划", "安排", "计划", "制定", "帮忙",
+    # 口语/礼貌词
+    "帮我", "请问", "一下", "一条", "一个",
+    # 领域泛指词
+    "景区", "景点", "路线", "线路",
+    "游览", "参观", "逛逛", "逛", "游玩", "去",
+    # 语气词
+    "吧", "呢", "吗", "呀", "啊", "哦", "了", "的",
+)
+
+
+def _strip_query_stopwords(query: str) -> str:
+    """去掉 query 中的常见疑问/停用词，返回剩余查询串（可能为空串）。
+
+    词表按长度降序替换，避免子词抢先命中破坏长词（如先去掉「有哪些」
+    再处理「哪些」，避免「有哪些」被拆成「有」+「哪些」）。"""
+    stripped = query.lower()
+    for word in sorted(_QUERY_STOPWORDS, key=len, reverse=True):
+        stripped = stripped.replace(word, "")
+    return stripped.strip()
+
+
+def _search_items(items: List[Dict[str, Any]], query: str) -> Optional[List[Dict[str, Any]]]:
+    """按关键词搜索条目列表，含问题式 query 降级。
+
+    匹配策略：
+    1. 空 query → 返回全部数据；
+    2. 整串子串匹配（现状，名称/标签/ID 精确匹配行为不变）；
+    3. 无命中 → 去掉常见疑问/停用词后再匹配；
+    4. 去词后为空串（纯泛查询，如「有哪些值得去的景点」）→ 返回全部数据，
+       让 agent 自行筛选；
+    5. 去词后仍非空且无命中（具体名称确实不存在，如「黄鹤楼」）→ 返回 None
+       表示未找到，调用方构造「未找到」消息。
+    """
+    if not query:
+        return items
+
+    query_lower = query.lower()
+    results = [
+        item for item in items
+        if query_lower in json.dumps(item, ensure_ascii=False).lower()
+    ]
+    if results:
+        return results
+
+    # 问题式 query 降级：去掉常见疑问/停用词后再匹配
+    stripped = _strip_query_stopwords(query)
+    if stripped:
+        results = [
+            item for item in items
+            if stripped in json.dumps(item, ensure_ascii=False).lower()
+        ]
+        if results:
+            return results
+        # 具体名称/关键词确实不存在
+        return None
+    # 去词后为空串 → 泛查询意图，返回全部数据让 agent 自行筛选
+    return items
+
+
 @tool
 def search_spots(query: str) -> str:
     """根据关键词搜索景点信息。query 可以是景点名称、标签（如'自然风光''亲子'）
     或位置（如'北部''中部'），支持模糊匹配。返回匹配景点的 JSON 列表，
-    包含 id、名称、描述、标签、时长、难度等信息。"""
+    包含 id、名称、描述、标签、时长、难度等信息。问题式 query（如
+    '有哪些值得去的景点'）无命中时自动降级返回全部景点。"""
     spots = _load_json("spots.json")
-    if not query:
-        return json.dumps(spots, ensure_ascii=False, indent=2)
-
-    query_lower = query.lower()
-    results = []
-    for spot in spots:
-        text = json.dumps(spot, ensure_ascii=False).lower()
-        if query_lower in text:
-            results.append(spot)
-    if not results:
+    results = _search_items(spots, query)
+    if results is None:
         return json.dumps({"message": f"未找到与'{query}'匹配的景点"}, ensure_ascii=False)
     return json.dumps(results, ensure_ascii=False, indent=2)
 
@@ -61,18 +124,11 @@ def search_spots(query: str) -> str:
 def search_routes(query: str) -> str:
     """根据关键词搜索游览路线。query 可以是路线名称、标签（如'亲子''自然风光'）、
     适合人群（如'带老人''情侣'）或难度（如'轻松''挑战'），支持模糊匹配。
-    返回匹配路线的 JSON 列表，包含 id、名称、描述、标签、适合人群、时长等信息。"""
+    返回匹配路线的 JSON 列表，包含 id、名称、描述、标签、适合人群、时长等信息。
+    问题式 query（如'有什么路线'）无命中时自动降级返回全部路线。"""
     routes = _load_json("routes.json")
-    if not query:
-        return json.dumps(routes, ensure_ascii=False, indent=2)
-
-    query_lower = query.lower()
-    results = []
-    for route in routes:
-        text = json.dumps(route, ensure_ascii=False).lower()
-        if query_lower in text:
-            results.append(route)
-    if not results:
+    results = _search_items(routes, query)
+    if results is None:
         return json.dumps({"message": f"未找到与'{query}'匹配的路线"}, ensure_ascii=False)
     return json.dumps(results, ensure_ascii=False, indent=2)
 
