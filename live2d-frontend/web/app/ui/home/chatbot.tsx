@@ -3,13 +3,13 @@
 import clsx from "clsx";
 import { debounce } from 'lodash';
 import { useEffect, useRef, useState } from "react";
-import { useChatRecordStore, ChatRole, ChatMessage, useAgentEngineSettingsStore, useAgentModeStore, useMuteStore, useInteractionModeStore, InteractionMode, useAudioAutoStopStore } from "@/app/lib/store";
+import { useChatRecordStore, ChatRole, ChatMessage, ChatMessageType, useAgentEngineSettingsStore, useAgentModeStore, useMuteStore, useInteractionModeStore, InteractionMode, useAudioAutoStopStore } from "@/app/lib/store";
 import { ConfirmAlert } from "@/app/ui/common/alert";
 import { AUDIO_SUPPORT_ALERT } from "@/app/lib/constants";
 import { Comm } from "@/app/lib/comm";
 import { CharacterManager } from "@/app/lib/character";
 import Markdown from 'react-markdown';
-import RouteCard, { RouteEnvelope } from "@/app/ui/home/routeCard";
+import RouteCard from "@/app/ui/home/routeCard";
 
 let mediaStream: MediaStream | null = null;
 let mediaRecorder: MediaRecorder | null = null;
@@ -94,14 +94,10 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
     const [micRecording, setMicRecording] = useState(false);
     const [micRecordAlert, setmicRecordAlert] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
-    // Agent 工具调用步骤（LangChainAgent 步骤帧，如"正在检索知识库…"）
-    const [agentSteps, setAgentSteps] = useState<{ tool: string; label: string }[]>([]);
-    // 本轮 AI 流式文本：独立渲染于步骤气泡之后的新气泡（逐字填充），
-    // 流完成后再并入 chatRecord 历史记录（不再用"我想想..."占位气泡）
+    // 当前 AI 流式文本片段（按 step/route 事件边界切分）：实时逐字渲染，
+    // step/route 回调或流完成时固化进 chatRecord 历史（文本片段/步骤/路线
+    // 各自独立气泡按发生顺序入列，多轮保留不清空）
     const [streamingText, setStreamingText] = useState("");
-    // 路线卡片数据（批次8 B3：后端 done 事件 route_data 透出，本轮的
-    // plan_route 工具结果；新一轮对话清空）
-    const [routeData, setRouteData] = useState<RouteEnvelope | null>(null);
     // 浏览器定位可用性（需 secure context：HTTPS 或 localhost；演示环境
     // 经局域网 IP 访问不可用则隐藏 📍 按钮）
     const [geoSupported, setGeoSupported] = useState(false);
@@ -138,13 +134,25 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
 
     const chatWithAI = (message: string) => {
         console.log("chatWithAI: ", message);
-        // 新一轮对话：清空上一轮步骤提示、路线卡片与流式文本
-        setAgentSteps([]);
-        setRouteData(null);
+        // 新一轮对话：清空上一轮流式文本；聊天记录 chatRecord 保留
+        // （步骤气泡/路线卡片/文本片段均已按序固化进历史，多轮不清空）
         setStreamingText("");
         addChatRecord({ role: ChatRole.HUMAN, content: message });
         // 请求AI
-        let responseText = "";
+        // 当前文本片段（按 step/route 事件边界切分）：token 回调实时累积并
+        // 渲染（逐字可见）；step/route 回调到达时先把当前片段固化（append 为
+        // text 消息）再 append 该 step/route，开始新片段；流完成时固化最后片段
+        let fragment = "";
+        // 上一条已提交的步骤（连续重复步骤去重用；文本片段固化后重置）
+        let lastStep: { tool: string; label: string } | null = null;
+        const flushFragment = () => {
+            if (fragment) {
+                addChatRecord({ role: ChatRole.AI, content: fragment });
+                fragment = "";
+                lastStep = null;
+                setStreamingText("");
+            }
+        };
         let audioText = "";
         // 保证顺序执行
         let audioRecorderIndex = 0;
@@ -153,10 +161,9 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
             CharacterManager.getInstance().clearAudioQueue();
         }
         Comm.getInstance().streamingChat(message, agentEngine, conversationId, settings, (index: number, data: string) => {
-            responseText += data;
-            // AI 流式文本渲染到独立新气泡（位于步骤气泡之后），
-            // 流完成后并入历史记录
-            setStreamingText(responseText);
+            fragment += data;
+            // AI 流式文本：当前片段实时渲染（用户可见逐字），切分时固化进历史
+            setStreamingText(fragment);
             if (!mute && mode != InteractionMode.CHATBOT) {
                 // 按照标点符号断句处理
                 audioText += data;
@@ -218,30 +225,28 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
                     }
                 )
             }
-            // 流完成：把本轮回答并入历史记录（多轮顺序：用户→AI），
-            // 清除独立流式气泡与本轮步骤提示（步骤是流式过程提示，回答完成后
-            // 移除可避免其落在回答气泡下方造成视觉回跳；空回答不产生空气泡）
-            if (responseText) {
-                addChatRecord({ role: ChatRole.AI, content: responseText });
-            }
-            setStreamingText("");
-            setAgentSteps([]);
+            // 流完成：固化最后文本片段（若为空说明前面均已按序提交），
+            // 多轮顺序：用户 → [文本片段1][步骤][文本片段2]... → AI
+            flushFragment();
             setIsProcessing(false);
         }, (step: { tool: string; label: string }) => {
-            // 工具调用步骤：追加到步骤提示列表（连续重复步骤去重，避免同一
-            // 工具多次调用时刷屏），按序显示直到下一轮对话
+            // 工具调用步骤：先固化当前文本片段，再把该步骤作为独立气泡按序
+            // 提交进聊天记录（多轮保留，展示对话整体过程）；连续重复步骤去重
             console.log("agent step: ", step);
-            setAgentSteps((prev) => {
-                const last = prev[prev.length - 1];
-                if (last && last.tool === step.tool && last.label === step.label) {
-                    return prev;
-                }
-                return [...prev, step];
-            });
+            flushFragment();
+            if (lastStep && lastStep.tool === step.tool && lastStep.label === step.label) {
+                return;
+            }
+            lastStep = step;
+            addChatRecord({ role: ChatRole.AI, type: ChatMessageType.STEP, step, content: step.label || step.tool });
         }, (route: any) => {
-            // 路线帧（批次8 B3）：plan_route 工具结果，渲染路线卡片
+            // 路线帧（批次8 B3）：先固化当前文本片段，再把路线卡片作为独立
+            // 消息按序提交进聊天记录（多轮保留，新问题不再清空）
             console.log("route data: ", route);
-            setRouteData(route || null);
+            flushFragment();
+            if (route) {
+                addChatRecord({ role: ChatRole.AI, type: ChatMessageType.ROUTE, route, content: "" });
+            }
         });
     }
 
@@ -445,49 +450,62 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
             <div id="messages" ref={chatbotRef} className="flex flex-col space-y-4 p-3 overflow-y-auto no-scrollbar z-10">
                 {
                     showChatHistory ?
-                        chatRecord.map((chat: ChatMessage, index: number) => (
-                            <div className="chat-message" key={index}>
-                                <div className={clsx(
-                                    "flex items-end",
-                                    chat.role == ChatRole.AI ? "" : "justify-end"
-                                )}>
-                                    <div className={clsx(
-                                        "flex flex-col space-y-2 text-xs max-w-xs mx-2",
-                                        chat.role == ChatRole.AI ? "order-2 items-start" : "order-1 items-end"
-                                    )}>
-                                        <div><Markdown className="px-4 py-2 rounded-lg inline-block rounded-bl-none bg-gray-300 text-gray-600">{chat.content}</Markdown></div>
-                                    </div>
-                                    <img src={chat.role == ChatRole.HUMAN ? "/icons/human_icon.svg" : "/icons/ai_icon.svg"} className="w-6 h-6 rounded-full order-1 self-start" />
-                                </div>
-                            </div>
-                        ))
-                        :
-                        <></>
-                }
-                {
-                    // 工具调用步骤提示：随回答进度按序追加显示（下一轮对话时清空）
-                    agentSteps.length > 0 ?
-                        <div className="chat-message">
-                            <div className="flex items-end">
-                                <div className="flex flex-col space-y-1 text-xs max-w-xs mx-2 order-2 items-start">
-                                    {agentSteps.map((step, i) => (
-                                        <div key={`${step.tool}-${i}`} className="px-3 py-1.5 rounded-lg rounded-bl-none bg-gray-200/80 text-gray-500">
-                                            <span className="inline-flex items-center gap-1.5">
-                                                <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                                                <span>🔍 {step.label || step.tool}</span>
-                                            </span>
+                        chatRecord.map((chat: ChatMessage, index: number) => {
+                            // step 消息：工具调用步骤小气泡（保留既有样式，多轮保留）
+                            if (chat.type === ChatMessageType.STEP) {
+                                return (
+                                    <div className="chat-message" key={index}>
+                                        <div className="flex items-end">
+                                            <div className="flex flex-col space-y-1 text-xs max-w-xs mx-2 order-2 items-start">
+                                                <div className="px-3 py-1.5 rounded-lg rounded-bl-none bg-gray-200/80 text-gray-500">
+                                                    <span className="inline-flex items-center gap-1.5">
+                                                        <span className="w-2 h-2 rounded-full bg-blue-500" />
+                                                        <span>🔍 {chat.step?.label || chat.step?.tool || chat.content}</span>
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            <img src="/icons/ai_icon.svg" alt="" className="w-6 h-6 rounded-full order-1 self-start" />
                                         </div>
-                                    ))}
+                                    </div>
+                                );
+                            }
+                            // route 消息：路线卡片（地图失败自动降级文字路线，见 RouteCard）
+                            if (chat.type === ChatMessageType.ROUTE && chat.route) {
+                                return (
+                                    <div className="chat-message" key={index}>
+                                        <div className="flex items-end">
+                                            <div className="flex flex-col space-y-1 text-xs max-w-xs mx-2 order-2 items-start">
+                                                <RouteCard route={chat.route} />
+                                            </div>
+                                            <img src="/icons/ai_icon.svg" alt="" className="w-6 h-6 rounded-full order-1 self-start" />
+                                        </div>
+                                    </div>
+                                );
+                            }
+                            // text（缺省 type 即 text）：Markdown 气泡
+                            return (
+                                <div className="chat-message" key={index}>
+                                    <div className={clsx(
+                                        "flex items-end",
+                                        chat.role == ChatRole.AI ? "" : "justify-end"
+                                    )}>
+                                        <div className={clsx(
+                                            "flex flex-col space-y-2 text-xs max-w-xs mx-2",
+                                            chat.role == ChatRole.AI ? "order-2 items-start" : "order-1 items-end"
+                                        )}>
+                                            <div><Markdown className="px-4 py-2 rounded-lg inline-block rounded-bl-none bg-gray-300 text-gray-600">{chat.content}</Markdown></div>
+                                        </div>
+                                        <img src={chat.role == ChatRole.HUMAN ? "/icons/human_icon.svg" : "/icons/ai_icon.svg"} className="w-6 h-6 rounded-full order-1 self-start" />
+                                    </div>
                                 </div>
-                                <img src="/icons/ai_icon.svg" alt="" className="w-6 h-6 rounded-full order-1 self-start" />
-                            </div>
-                        </div>
+                            );
+                        })
                         :
                         <></>
                 }
                 {
-                    // AI 流式文本气泡：本轮回答逐字填充于此（位于步骤气泡之后），
-                    // 流完成后并入 chatRecord 历史记录；空文本不渲染
+                    // AI 流式文本气泡：当前文本片段逐字填充于此（位于已固化的
+                    // 历史消息之后，顺序正确）；step/route/流完成时固化进 chatRecord
                     streamingText ?
                         <div className="chat-message">
                             <div className="flex items-end">
@@ -500,21 +518,7 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
                         :
                         <></>
                 }
-                {
-                    // 路线卡片（批次8 B3）：本轮对话规划了路线时渲染
-                    // （地图渲染失败自动降级文字路线，见 RouteCard）
-                    routeData ?
-                        <div className="chat-message">
-                            <div className="flex items-end">
-                                <div className="flex flex-col space-y-1 text-xs max-w-xs mx-2 order-2 items-start">
-                                    <RouteCard route={routeData} />
-                                </div>
-                                <img src="/icons/ai_icon.svg" alt="" className="w-6 h-6 rounded-full order-1 self-start" />
-                            </div>
-                        </div>
-                        :
-                        <></>
-                }
+
             </div>
 
             <div className="px-4 pt-4 mb-2 sm:mb-0 z-10 w-full">
