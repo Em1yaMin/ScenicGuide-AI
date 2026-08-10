@@ -25,6 +25,7 @@
 | `JWT_SECRET` | 可留空（临时密钥，重启失效） | **必填**随机长串 | **必填**随机长串 |
 | `LLM_API_KEY` 等凭据 | 可留空（对话回落 Dify / 降级 TF-IDF） | 必填真实 key | 必填真实 key |
 | `ADMIN_API_TOKEN` / `ADMIN_TOKENS` | 可占位 | 必填 | 必填（建议配 operator 多角色） |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD`（批次9 管理后台账号密码登录） | 可用默认演示值 `admin`/`admin123456` | 建议修改（演示环境应改掉默认值） | **必填**强密码（演示默认值绝不用于生产） |
 | `EMBEDDING_API_KEY` | 可留空（TF-IDF 降级） | 配置（检索质量） | 配置 |
 | `AMAP_WEB_KEY` | 可留空（`amap_not_configured` 错误码） | 配置（演示主推 GPS） | 配置 |
 | `USAGE_TRACKING_ENABLED` | `true` | `true` | `true`（成本可视）；`MODEL_PRICES` 建议配置 |
@@ -73,7 +74,8 @@ AUTH_GUEST_MAX_PER_MINUTE=20
 ### prod（正式部署）
 
 1. 根目录 `.env` 设 `APP_ENV=prod`，逐一确认「prod 必填」项：
-   `JWT_SECRET`（随机长串）、`ADMIN_API_TOKEN`/`ADMIN_TOKENS`、`CORS_ORIGINS`
+   `JWT_SECRET`（随机长串）、`ADMIN_API_TOKEN`/`ADMIN_TOKENS`、
+   `ADMIN_USERNAME`/`ADMIN_PASSWORD`（强密码，默认演示值 `admin`/`admin123456` 绝不用于生产）、`CORS_ORIGINS`
    （真实域名）、全部 API key
 2. `docker-compose up -d --build`；nginx `proxy_read_timeout ≥ 300s`（分析超时预算，
    见 doc/phase3-analytics-verification.md）
