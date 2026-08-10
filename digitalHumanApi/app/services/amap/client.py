@@ -246,7 +246,13 @@ class AmapClient:
 
         成功 data: {"mode", "origin", "destination", "distance"（米）,
         "duration"（秒）, "steps": [{"instruction", "distance", "duration",
-        "road"}], "strategy"}
+        "road", "polyline"}], "strategy"}
+
+        每步 steps 增加 `polyline` 字段（高德原样透出坐标串
+        "lng,lat;lng,lat;..."，供前端拼接完整路径画 AMap.Polyline
+        实际折线，不再画起终点直线）；transit 归一化时步行段保留
+        walking.steps 的 polyline、公交段可能为空串（AMAP busline 无
+        polyline 时留空，前端无 polyline 时降级直线/文字路线）。
         """
         key = self._resolve_key()
         if not key:
@@ -308,6 +314,8 @@ class AmapClient:
                 "distance": str(s.get("distance") or ""),
                 "duration": str(s.get("duration") or ""),
                 "road": str(s.get("road") or ""),
+                # 高德坐标串（"lng,lat;lng,lat;..."），原样透出供前端画实际路径
+                "polyline": str(s.get("polyline") or ""),
             }
             for s in (path.get("steps") or [])
         ]
@@ -347,9 +355,10 @@ class AmapClient:
 
         AMAP transit 响应结构为 route.transits[0].segments[]，每段含
         walking（steps 指令）与 bus（buslines 数组）；归一化规则：
-        - 步行段：透出 walking.steps[].instruction
+        - 步行段：透出 walking.steps[].instruction 与 polyline
         - 公交段：每段取首条 busline，合成「乘坐{线路名}（上车站 → 下车站）」
-          指令（road 记为线路名）
+          指令（road 记为线路名）；polyline 尽量保留（busline 有
+          polyline 则透出，无则留空——公交段可空，前端据此降级）
         无 transits 返回 None（调用方转 amap_route_failed）。
         """
         transits: List[Dict[str, Any]] = route_data.get("transits") or []
@@ -366,6 +375,8 @@ class AmapClient:
                         "distance": str(s.get("distance") or ""),
                         "duration": str(s.get("duration") or ""),
                         "road": "",
+                        # 步行段高德坐标串（"lng,lat;lng,lat;..."）原样透出
+                        "polyline": str(s.get("polyline") or ""),
                     }
                 )
             bus: Dict[str, Any] = segment.get("bus") or {}
@@ -381,6 +392,8 @@ class AmapClient:
                         "distance": str(bl.get("distance") or ""),
                         "duration": str(bl.get("duration") or ""),
                         "road": name,
+                        # 公交段 polyline 尽量保留（busline 无该字段时可空）
+                        "polyline": str(bl.get("polyline") or ""),
                     }
                 )
         return {
