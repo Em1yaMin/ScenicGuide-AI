@@ -211,6 +211,52 @@ class TestTools:
         assert "message" in data
 
 
+class TestSearchQueryFallback:
+    """问题式 query 降级搜索测试（船长反馈：问"有哪些值得去的景点"曾返回未找到）。"""
+
+    def test_search_spots_question_style(self):
+        """问题式 query（有哪些值得去的景点/景点/值得去）应返回景点列表而非未找到。"""
+        for q in ["有哪些值得去的景点", "景点", "值得去"]:
+            data = json.loads(search_spots.invoke({"query": q}))
+            assert isinstance(data, list), f"search_spots({q!r}) 应返回列表而非未找到"
+            assert len(data) >= 5
+            assert all("name" in s for s in data)
+
+    def test_search_routes_question_style(self):
+        """问题式 query（有什么路线/路线）应返回路线列表而非未找到。"""
+        for q in ["有什么路线", "路线"]:
+            data = json.loads(search_routes.invoke({"query": q}))
+            assert isinstance(data, list), f"search_routes({q!r}) 应返回列表而非未找到"
+            assert len(data) >= 3
+            assert all("name" in r for r in data)
+
+    def test_question_style_strips_to_tags(self):
+        """去停用词后命中标签：应返回匹配子集（而非未找到或全部数据）。"""
+        data = json.loads(search_spots.invoke({"query": "帮我推荐拍照的景点"}))
+        assert isinstance(data, list)
+        assert len(data) >= 1
+        assert all("拍照" in json.dumps(s, ensure_ascii=False) for s in data)
+
+    def test_specific_nonexistent_name_not_found(self):
+        """具体不存在的名称（黄鹤楼）仍返回未找到语义。"""
+        for tool in (search_spots, search_routes):
+            data = json.loads(tool.invoke({"query": "黄鹤楼"}))
+            assert isinstance(data, dict)
+            assert "message" in data
+
+    def test_specific_existing_name_still_matches(self):
+        """具体存在的名称/标签/ID 精确匹配行为不变。"""
+        data = json.loads(search_spots.invoke({"query": "翠微峰"}))
+        assert isinstance(data, list)
+        assert len(data) == 1
+        assert data[0]["name"] == "翠微峰"
+        # 标签匹配不变
+        data = json.loads(search_spots.invoke({"query": "自然"}))
+        assert isinstance(data, list)
+        assert len(data) >= 1
+        assert all("自然" in json.dumps(s, ensure_ascii=False) for s in data)
+
+
 @pytest.mark.asyncio
 class TestRecommend:
     """完整推荐流程测试。"""
