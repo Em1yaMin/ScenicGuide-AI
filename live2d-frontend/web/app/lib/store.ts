@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { ModelDefault } from "@/app/lib/live2d/lappdefine";
 import { Comm } from "@/app/lib/comm";
+import type { RouteEnvelope } from "@/app/ui/home/routeCard";
 
 // ==================== 交互模式 ==================
 export enum InteractionMode {
@@ -68,9 +69,27 @@ export enum ChatRole {
     HUMAN = "HUMAN",
     AI = "AI",
 }
+/** 消息类型：text=普通文本（默认，兼容既有用法）；step=工具调用步骤小气泡；
+ *  route=路线卡片（route 字段为 plan_route 结果信封，见 RouteEnvelope）。 */
+export enum ChatMessageType {
+    TEXT = "text",
+    STEP = "step",
+    ROUTE = "route",
+}
+/** 工具调用步骤负载（step 类型消息）。 */
+export interface ChatStep {
+    tool: string;
+    label: string;
+}
 export interface ChatMessage {
     role: ChatRole
     content: string
+    /** 消息类型，缺省视为 text（兼容既有 text 用法） */
+    type?: ChatMessageType
+    /** type=step 时携带的步骤负载（tool/label） */
+    step?: ChatStep
+    /** type=route 时携带的路线信封（plan_route 工具结果） */
+    route?: RouteEnvelope
 }
 interface ChatRecordState {
     chatRecord: ChatMessage[]
