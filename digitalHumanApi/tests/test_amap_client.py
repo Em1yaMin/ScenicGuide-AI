@@ -8,8 +8,9 @@
    （amap_unavailable 含 info）、网络异常（amap_unavailable）、HTTP 错误、
    响应解析失败
 3. regeo 成功（city/city_adcode 推导，直辖市退化）与失败（无 key/业务错误）
-4. route 成功：walking/driving（paths[0].steps 指令解析）、transit
-   （自动 regeo 推导 city/cityd + transits 归一化：步行指令 + 公交合成指令）
+4. route 成功：walking/driving（paths[0].steps 指令解析 + polyline 坐标串
+   透出）、transit（自动 regeo 推导 city/cityd + transits 归一化：步行指令
+   + 公交合成指令，polyline 步行段保留/公交段可空）
 5. route 失败路径：无 key、mode 非法、坐标非法（amap_invalid_param）、
    业务错误/无路径（amap_route_failed）、网络异常（amap_unavailable）、
    transit 城市推导失败（amap_route_failed）
@@ -71,12 +72,14 @@ WALKING_ROUTE_OK = {
                         "road": "黄鹤楼东路",
                         "distance": "10",
                         "duration": "8",
+                        "polyline": "114.306967,30.545389;114.307200,30.545500;114.307500,30.545600",
                     },
                     {
                         "instruction": "左转进入武昌路",
                         "road": "武昌路",
                         "distance": "1252",
                         "duration": "900",
+                        "polyline": "114.307500,30.545600;114.309000,30.547000;114.320000,30.560000",
                     },
                 ],
             }
@@ -98,7 +101,12 @@ TRANSIT_ROUTE_OK = {
                     {
                         "walking": {
                             "steps": [
-                                {"instruction": "步行至黄鹤楼站", "distance": "300", "duration": "240"}
+                                {
+                                    "instruction": "步行至黄鹤楼站",
+                                    "distance": "300",
+                                    "duration": "240",
+                                    "polyline": "114.306967,30.545389;114.307100,30.545800;114.308000,30.546500",
+                                }
                             ]
                         },
                         "bus": {
@@ -336,15 +344,43 @@ async def test_route_walking_success():
         "左转进入武昌路",
     ]
     assert data["steps"][0]["road"] == "黄鹤楼东路"
+    # polyline：高德坐标串原样透出（前端拼接画实际路径）
+    assert data["steps"][0]["polyline"] == (
+        "114.306967,30.545389;114.307200,30.545500;114.307500,30.545600"
+    )
+    assert data["steps"][1]["polyline"].endswith("114.320000,30.560000")
 
 
 async def test_route_driving_success():
-    """驾车路径规划：同 walking 结构。"""
+    """驾车路径规划：同 walking 结构（含 polyline 透出）。"""
     client = AmapClient(api_key="k", _transport=httpx.MockTransport(_json_handler(WALKING_ROUTE_OK)))
     result = await client.route("114.306967,30.545389", "114.320,30.560", "driving")
     assert result["ok"] is True
     assert result["data"]["mode"] == "driving"
     assert result["data"]["steps"]
+    assert all("polyline" in s for s in result["data"]["steps"])
+    assert result["data"]["steps"][0]["polyline"]
+
+
+async def test_route_walking_steps_without_polyline():
+    """高德响应无 polyline 字段时降级为空串（不报错，前端保持直线/文字兜底）。"""
+    payload = {
+        "status": "1",
+        "info": "OK",
+        "route": {
+            "paths": [
+                {
+                    "distance": "100",
+                    "duration": "60",
+                    "steps": [{"instruction": "直行", "road": ""}],
+                }
+            ]
+        },
+    }
+    client = AmapClient(api_key="k", _transport=httpx.MockTransport(_json_handler(payload)))
+    result = await client.route("114.3,30.5", "114.32,30.56", "walking")
+    assert result["ok"] is True
+    assert result["data"]["steps"][0]["polyline"] == ""
 
 
 async def test_route_transit_success():
@@ -379,6 +415,52 @@ async def test_route_transit_success():
         "乘坐804路（黄鹤楼站 → 武昌火车站）",
     ]
     assert data["steps"][1]["road"] == "804路"
+    # polyline：步行段保留 walking.steps 坐标串；公交段无 polyline 留空（可空）
+    assert data["steps"][0]["polyline"] == (
+        "114.306967,30.545389;114.307100,30.545800;114.308000,30.546500"
+    )
+    assert data["steps"][1]["polyline"] == ""
+
+
+async def test_route_transit_bus_polyline_preserved():
+    """公交段 busline 带 polyline 时尽量保留（前端多段拼接）。"""
+    payload = {
+        "status": "1",
+        "info": "OK",
+        "route": {
+            "transits": [
+                {
+                    "distance": "100",
+                    "duration": "60",
+                    "segments": [
+                        {
+                            "walking": {"steps": []},
+                            "bus": {
+                                "buslines": [
+                                    {
+                                        "name": "804路",
+                                        "departure_stop": {"name": "A"},
+                                        "arrival_stop": {"name": "B"},
+                                        "polyline": "114.3,30.5;114.31,30.51;114.32,30.56",
+                                    }
+                                ]
+                            },
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+
+    def handler(request):
+        if "regeo" in str(request.url):
+            return httpx.Response(200, json=REGEO_OK)
+        return httpx.Response(200, json=payload)
+
+    client = AmapClient(api_key="k", _transport=httpx.MockTransport(handler))
+    result = await client.route("114.3,30.5", "114.32,30.56", "transit")
+    assert result["ok"] is True
+    assert result["data"]["steps"][0]["polyline"] == "114.3,30.5;114.31,30.51;114.32,30.56"
 
 
 async def test_route_transit_no_transits_failed():

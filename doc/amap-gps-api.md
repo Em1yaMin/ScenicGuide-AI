@@ -90,12 +90,24 @@
   "duration": "908",
   "strategy": "",
   "steps": [
-    {"instruction": "步行向南出发，进入……", "distance": "10", "duration": "8", "road": ""}
+    {"instruction": "步行向南出发，进入……", "distance": "10", "duration": "8", "road": "", "polyline": "114.306967,30.545389;114.3072,30.5455;114.3075,30.5456"}
   ]
 }
 ```
 
 `distance` 单位米、`duration` 单位秒（字符串，高德原样透出）。
+
+### steps[].polyline（批次8 B4 新增，前端画实际路径）
+
+- 每步 `polyline` 为高德**原样透出**的坐标串（`"lng,lat;lng,lat;..."`
+  分号分隔，坐标顺序与行走方向一致），字段缺失/无坐标时为空串
+  （透出时统一 `str(...) or ""`，不新增字段类型变化）。
+- walking/driving：每步均带 polyline；transit 归一化时**步行段保留**
+  `walking.steps[].polyline`、**公交段尽量保留**（busline 带 polyline 则
+  透出，无则留空——公交段可空）。
+- 前端渲染：将全部 steps 的 polyline 拼接（去重相邻重复坐标点）为完整
+  路径数组画 AMap.Polyline 实际折线（不再是起终点直线）；无任何 polyline
+  时保持现状直线/文字兜底。
 
 ## 对话工具（`app/services/deepagents/amap_tools.py`）
 

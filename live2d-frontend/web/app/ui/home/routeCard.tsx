@@ -6,7 +6,10 @@
  * digitalHumanApi/doc/amap-gps-api.md）：
  * - 成功信封 {"ok": true, "data": {mode/origin/destination/distance/
  *   duration/steps}}：高德 JS API 地图（起点/终点 Marker + 路径 Polyline）
- *   + 距离/时长摘要 + 步骤列表
+ *   + 距离/时长摘要 + 步骤列表。Polyline 使用后端透出的
+ *   steps[].polyline 坐标串（"lng,lat;lng,lat;..."）拼接的实际路径
+ *   （walking/driving 单段拼接、transit 多段拼接），不再画起终点直线；
+ *   无任何 polyline 时降级起终点直线示意（步骤列表提供文字指引）
  * - 失败信封 {"ok": false, "error": "amap_*", "message"}：错误提示卡片
  *   （如实转达后端错误码，不编造路线）
  * - 地图加载失败（网络/域名白名单/key 未配置）或坐标非法时**降级文字路线**：
@@ -39,6 +42,8 @@ export interface RouteEnvelope {
             distance?: string | number;
             duration?: string | number;
             road?: string;
+            /** 高德坐标串（"lng,lat;lng,lat;..."），缺省/空串时无实际路径。 */
+            polyline?: string;
         }>;
         strategy?: string;
     };
@@ -51,14 +56,52 @@ const MODE_LABELS: Record<string, string> = {
     transit: "🚌 公交",
 };
 
+/** 解析单个步骤 polyline 坐标串（"lng,lat;lng,lat;..."）为 [lng, lat] 点数组。 */
+function parsePolyline(polyline?: string): Array<[number, number]> {
+    if (!polyline) return [];
+    const points: Array<[number, number]> = [];
+    for (const part of polyline.split(";")) {
+        const loc = parseLocation(part.trim());
+        if (loc) points.push(loc);
+    }
+    return points;
+}
+
+/**
+ * 拼接全部步骤的 polyline 为完整路径点数组。
+ *
+ * walking/driving 每步一段、transit 归一化后多段（步行段+公交段），
+ * 统一按序拼接（相邻步骤首尾坐标点重叠时去重防重复顶点）；无任何
+ * 有效 polyline 时返回空数组（调用方降级起终点直线/文字兜底）。
+ */
+function buildRoutePath(
+    steps: Array<{ polyline?: string }>,
+): Array<[number, number]> {
+    const path: Array<[number, number]> = [];
+    for (const step of steps) {
+        for (const point of parsePolyline(step.polyline)) {
+            const last = path[path.length - 1];
+            if (last && last[0] === point[0] && last[1] === point[1]) continue;
+            path.push(point);
+        }
+    }
+    return path;
+}
+
 /** 地图子组件：高德 JS API 渲染起点/终点 Marker + 路径 Polyline。 */
 function RouteMap({
     origin,
     destination,
+    path,
+    pathKey,
     onMapError,
 }: {
     origin: [number, number];
     destination: [number, number];
+    /** 后端 steps[].polyline 拼接的实际路径点（≥2 点画真实折线）。 */
+    path: Array<[number, number]>;
+    /** 路径稳定串（仅内容变化时触发地图重建，防父组件重渲染闪烁）。 */
+    pathKey: string;
     onMapError: (message: string) => void;
 }) {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -84,10 +127,11 @@ function RouteMap({
                     title: "终点",
                 });
                 map.add([startMarker, endMarker]);
-                // 路线路径点后端未透出（仅起终点坐标），绘制直线示意；
-                // 步骤列表提供详细文字指引
+                // 优先用后端透出的实际路径点（≥2 点画真实折线）；
+                // 无 polyline 时降级起终点直线示意（步骤列表提供文字指引）
+                const routePath = path.length >= 2 ? path : [origin, destination];
                 const polyline = new AMap.Polyline({
-                    path: [origin, destination],
+                    path: routePath,
                     strokeColor: "#3b82f6",
                     strokeWeight: 5,
                     lineJoin: "round",
@@ -108,7 +152,7 @@ function RouteMap({
             }
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [origin[0], origin[1], destination[0], destination[1]]);
+    }, [origin[0], origin[1], destination[0], destination[1], pathKey]);
 
     return <div ref={containerRef} className="w-full h-48 rounded-lg bg-gray-100" />;
 }
@@ -140,6 +184,10 @@ export default function RouteCard({ route }: { route: RouteEnvelope }) {
     const durationText = formatDuration(data.duration ?? "");
     // 地图可用条件：起终点坐标均合法（key 未配置/加载失败时 mapError 兜底）
     const canDrawMap = !!origin && !!destination;
+    // 后端 steps[].polyline 拼接的实际路径（无任何 polyline 时空数组）
+    const routePath = buildRoutePath(steps);
+    // 路径稳定串：仅内容变化时重建地图（防父组件重渲染地图闪烁）
+    const routePathKey = routePath.map((p) => `${p[0]},${p[1]}`).join(";");
 
     return (
         <div className="px-4 py-3 rounded-lg rounded-bl-none bg-white border border-gray-200 text-xs text-gray-600 w-72 space-y-2">
@@ -155,6 +203,8 @@ export default function RouteCard({ route }: { route: RouteEnvelope }) {
                 <RouteMap
                     origin={origin}
                     destination={destination}
+                    path={routePath}
+                    pathKey={routePathKey}
                     onMapError={(msg) => setMapError(msg)}
                 />
             ) : null}
