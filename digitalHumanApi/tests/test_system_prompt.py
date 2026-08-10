@@ -18,8 +18,9 @@ from app.services.deepagents import agent as dg_agent
 
 
 def test_role_name_unchanged():
-    """角色名称保持现有设定（景区导览AI数字人助手），不改名。"""
-    assert "「景区导览」的 AI 数字人助手" in chat_agent.SYSTEM_PROMPT
+    """角色名称保持现有设定（AI 导览员 Neuro），不改名。"""
+    assert "「景区导览」的 AI 导览员" in chat_agent.SYSTEM_PROMPT
+    assert "名字叫「Neuro」" in chat_agent.SYSTEM_PROMPT
 
 
 def test_tool_principles_preserved():
