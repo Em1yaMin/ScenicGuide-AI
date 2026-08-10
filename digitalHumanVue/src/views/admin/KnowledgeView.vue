@@ -3,12 +3,12 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { fetchWithCodeEnvelope } from '@/utils/fetchWithCodeEnvelope'
+import { adminApiHeaders } from '@/utils/adminHeaders'
 import { API_ADMIN_KNOWLEDGE, API_ADMIN_KNOWLEDGE_IMPORT } from '@/api'
 import type { KnowledgeItem, KnowledgeListResponse, KnowledgeFormData } from '@/types/knowledge'
 
 const CATEGORIES = ['讲解词', 'FAQ', '景点资料']
 const PAGE_SIZE = 10
-const TOKEN_KEY = 'admin_api_token'
 
 // ── State ──
 const items = ref<KnowledgeItem[]>([])
@@ -41,10 +41,6 @@ const isImporting = ref(false)
 const importError = ref<string | null>(null)
 const importResult = ref<string | null>(null)
 
-const showToken = ref(false)
-const adminToken = ref(localStorage.getItem(TOKEN_KEY) ?? '')
-const tokenInput = ref('')
-
 const showDelete = ref(false)
 const deletingItem = ref<KnowledgeItem | null>(null)
 
@@ -75,11 +71,7 @@ watch(selectedCategory, () => {
 
 // ── API helpers ──
 function getHeaders(): Record<string, string> {
-  const token = localStorage.getItem(TOKEN_KEY) ?? ''
-  return {
-    'Content-Type': 'application/json',
-    'X-Admin-Token': token,
-  }
+  return adminApiHeaders()
 }
 
 async function fetchList() {
@@ -195,7 +187,7 @@ async function doDelete() {
   try {
     await fetchWithCodeEnvelope(`${API_ADMIN_KNOWLEDGE}/${deletingItem.value.id}`, {
       method: 'DELETE',
-      headers: { 'X-Admin-Token': localStorage.getItem(TOKEN_KEY) ?? '' },
+      headers: adminApiHeaders(false),
     })
     showDelete.value = false
     await fetchList()
@@ -225,7 +217,7 @@ async function doImport() {
       API_ADMIN_KNOWLEDGE_IMPORT,
       {
         method: 'POST',
-        headers: { 'X-Admin-Token': localStorage.getItem(TOKEN_KEY) ?? '' },
+        headers: adminApiHeaders(false),
         body,
       },
     )
@@ -242,20 +234,6 @@ async function doImport() {
   } finally {
     isImporting.value = false
   }
-}
-
-function openToken() {
-  tokenInput.value = adminToken.value
-  showToken.value = true
-}
-
-function saveToken() {
-  const trimmed = tokenInput.value.trim()
-  if (trimmed) {
-    localStorage.setItem(TOKEN_KEY, trimmed)
-    adminToken.value = trimmed
-  }
-  showToken.value = false
 }
 
 function goPage(p: number) {
@@ -282,7 +260,6 @@ onMounted(() => {
         <p class="header-desc">管理景区讲解词、FAQ 与景点资料</p>
       </div>
       <div class="header-actions">
-        <button class="secondary-btn" @click="openToken">Token 设置</button>
         <button class="secondary-btn" @click="showImport = true">批量导入</button>
         <button class="primary-btn" @click="openCreate">+ 新建条目</button>
       </div>
@@ -444,33 +421,6 @@ onMounted(() => {
             <button class="primary-btn" :disabled="isImporting" @click="doImport">
               {{ isImporting ? '导入中…' : '开始导入' }}
             </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
-    <!-- Token Modal -->
-    <Teleport to="body">
-      <div v-if="showToken" class="modal-overlay" @click.self="showToken = false">
-        <div class="modal-panel">
-          <div class="modal-header">
-            <h2>管理员 Token</h2>
-            <button class="icon-btn" @click="showToken = false">✕</button>
-          </div>
-          <div class="modal-body">
-            <div class="form-row">
-              <label>X-Admin-Token</label>
-              <input
-                v-model="tokenInput"
-                type="password"
-                :placeholder="adminToken ? '已设置' : '请输入 Token'"
-              />
-              <p class="form-hint">Token 保存在浏览器本地，用于调用管理接口。</p>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button class="secondary-btn" @click="showToken = false">取消</button>
-            <button class="primary-btn" @click="saveToken">保存</button>
           </div>
         </div>
       </div>

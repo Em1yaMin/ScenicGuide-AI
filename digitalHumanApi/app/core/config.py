@@ -222,6 +222,14 @@ class Settings(BaseModel):
 
     ADMIN_API_TOKEN: str = os.environ.get("ADMIN_API_TOKEN", "")
 
+    # 管理员账号密码登录（批次9，2026-08-10 船长指示：替代 X-Admin-Token
+    # 输入形式）：POST /api/v1/admin/login 校验后签发管理员 JWT（typ=admin），
+    # 管理端接口经 Authorization Bearer 透传（deps.verify_admin_token 双路径，
+    # 旧 X-Admin-Token 完全保留向后兼容）。
+    # 默认值为演示环境账号（README 已注明）；生产必须修改。
+    ADMIN_USERNAME: str = os.environ.get("ADMIN_USERNAME", "admin")
+    ADMIN_PASSWORD: str = os.environ.get("ADMIN_PASSWORD", "admin123456")
+
     # 管理员 agent（批次6 B4）：删除类工具两阶段二次确认的待确认项 TTL（秒）
     # 首次删除调用仅登记待确认项（含 operation_id 与目标摘要），短 TTL 过期后
     # confirm_operation 失效，需重新发起（防模型误删/操作滞留，见

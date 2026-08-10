@@ -71,6 +71,15 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - 错误提示：`fetchWithCodeEnvelope` 解析 FastAPI `detail`（401 "用户名或密码错误"、409 "用户名已存在"、422 校验字段）
 - 无需新增前端环境变量（后端 JWT 配置见 `digitalHumanApi/.env.example`）
 
+## 管理员账号密码登录（批次9，2026-08-10 船长指示：替代 X-Admin-Token 输入形式）
+
+管理后台登录改为「主页账号密码登录 → 跳转 /admin」，旧 X-Admin-Token 完全保留向后兼容。
+
+- **后端**：`POST /api/v1/admin/login`（`app/routers/admin.py`，前缀 `/api/v1/admin`）——凭据来自 `ADMIN_USERNAME`/`ADMIN_PASSWORD` 环境变量（`config.py`，默认演示值 `admin`/`admin123456`，README 已注明；生产必须修改）；错误凭据 401；成功签发管理员 JWT（`create_access_token(token_type="admin")`，载荷 `typ=admin` 区分普通用户/游客 token）；登录端点复用 `AuthRateLimiter` 限流（同 auth.py 模式，`_admin_login_limiter`，失败 5 次/60s 进冷却 429，成功清零）
+- **鉴权双路径**：`app/routers/deps.py::verify_admin_token` 新增 `authorization` Header 参数——① X-Admin-Token（既有 ADMIN_TOKENS/ADMIN_API_TOKEN 映射，向后兼容）② Authorization Bearer 管理员 JWT（`decode_bearer` + `typ=="admin"` → 恒为 admin 角色）；任一命中放行；`require_role` 同型透传；管理员 agent（ADMIN_TOOLS）内部调用方式不变
+- **前端**：`src/stores/adminAuth.ts`（Pinia，`admin_jwt`/`admin_username` 持久化）+ `src/api/adminAuth.ts` + `src/views/admin/AdminLoginView.vue`（路由 `/admin/login`）+ 路由守卫（router beforeEach：未登录访问 /admin 重定向 `/admin/login?redirect=`）+ 主页 Hero 区「进入管理后台」入口；管理端 API 请求头统一走 `src/utils/adminHeaders.ts`（同时带 JWT 与旧 X-Admin-Token，旧用法不受影响）；管理页 Token 弹窗已移除（AdminLayout 侧栏显示管理身份 + 退出登录，AdminAgentView 登录失效提示条）
+- **配置**：`ADMIN_USERNAME`/`ADMIN_PASSWORD` 需同步三处（digitalHumanApi/.env.example + 根目录 .env.example + docker-compose.yml 透传，默认 `admin`/`admin123456`）；测试 `tests/test_admin_login.py`（10：签发/401/双路径/RBAC/JWT 载荷区分/限流重置 fixture）
+
 ## 知识库管理（X-Admin-Token 认证）
 
 - `app/models/knowledge.py` + `app/services/knowledge_service.py` + `app/routers/knowledge.py` — `/api/admin/knowledge*` CRUD + `/import`

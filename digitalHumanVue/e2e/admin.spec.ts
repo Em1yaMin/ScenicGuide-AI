@@ -2,22 +2,58 @@ import { expect, test, type Page } from '@playwright/test'
 import { attachPageErrorCollector, mockApiRoutes } from './mocks'
 
 /**
- * 管理端冒烟（批次7 C6）：登录流程 + 知识库/公告/用量页基础渲染。
+ * 管理端冒烟（批次7 C6 基础 + 批次9 管理员登录改造）。
  *
- * 鉴权策略：管理端页面读 localStorage 的 `admin_api_token` 作为 X-Admin-Token，
- * 用例在 goto 前用 addInitScript 预置 token（无需走真实登录），接口请求全部
- * 由浏览器层 mock 应答。
+ * 批次9 起管理端鉴权为「管理员账号密码登录 → JWT（admin_jwt）」：
+ * - 路由守卫：未登录访问 /admin 重定向 /admin/login
+ * - 管理页 API 请求携带 Authorization Bearer（utils/adminHeaders.ts，
+ *   同时保留 X-Admin-Token 向后兼容）
+ * 用例在 goto 前用 addInitScript 预置 admin_jwt（无需走真实登录），
+ * 接口请求全部由浏览器层 mock 应答。
  */
 
-/** 预置管理端 token，使各管理页 API 请求携带 X-Admin-Token。 */
-async function presetAdminToken(page: Page): Promise<void> {
+/** 预置管理员登录态（admin_jwt），使各管理页 API 请求携带管理员 JWT。 */
+async function presetAdminLogin(page: Page): Promise<void> {
   await page.addInitScript(() => {
+    localStorage.setItem('admin_jwt', 'e2e-admin-jwt')
+    localStorage.setItem('admin_username', 'admin')
+    // 旧用法兼容：仍预置 X-Admin-Token（证明旧路径不受影响）
     localStorage.setItem('admin_api_token', 'e2e-admin-token')
   })
 }
 
 test.describe('管理端', () => {
-  test('登录流程：mock 登录成功跳转访客首页', async ({ page }) => {
+  test('管理员登录流程：账号密码登录成功跳转管理后台', async ({ page }) => {
+    const errors = attachPageErrorCollector(page)
+    await mockApiRoutes(page)
+    await page.goto('/admin/login')
+
+    await page.getByLabel(/管理员账号/).fill('admin')
+    await page.getByLabel(/密码/).fill('admin123456')
+    await page.getByRole('button', { name: /进入管理后台/ }).click()
+
+    // 登录成功 → 跳转管理后台首页（数据大屏侧栏导航渲染）
+    await expect(page).toHaveURL(/\/admin$/)
+    await expect(page.locator('.sidebar-nav')).toContainText('数据大屏')
+    // 侧栏显示管理身份
+    await expect(page.locator('.sidebar-footer')).toContainText('管理：admin')
+
+    expect(errors).toEqual([])
+  })
+
+  test('登录守卫：未登录访问 /admin 重定向到 /admin/login', async ({ page }) => {
+    const errors = attachPageErrorCollector(page)
+    await mockApiRoutes(page)
+    await page.goto('/admin/knowledge')
+
+    // 未登录（无 admin_jwt）→ 重定向管理员登录页，登录表单可见
+    await expect(page).toHaveURL(/\/admin\/login/)
+    await expect(page.getByLabel(/管理员账号/)).toBeVisible()
+
+    expect(errors).toEqual([])
+  })
+
+  test('用户登录流程：mock 登录成功跳转访客首页', async ({ page }) => {
     const errors = attachPageErrorCollector(page)
     await mockApiRoutes(page)
     await page.goto('/login')
@@ -30,16 +66,12 @@ test.describe('管理端', () => {
     await expect(page).toHaveURL(/\/visitor$/)
     await expect(page.locator('.hero-title')).toContainText('AI 数字人')
 
-    // 登录态持久化（侧栏显示用户名）——回到管理端布局验证
-    await page.goto('/admin')
-    await expect(page.locator('.sidebar-footer')).toContainText('E2E 测试员')
-
     expect(errors).toEqual([])
   })
 
   test('知识库页：列表渲染', async ({ page }) => {
     const errors = attachPageErrorCollector(page)
-    await presetAdminToken(page)
+    await presetAdminLogin(page)
     await mockApiRoutes(page)
     await page.goto('/admin/knowledge')
 
@@ -56,7 +88,7 @@ test.describe('管理端', () => {
 
   test('公告管理页：列表渲染', async ({ page }) => {
     const errors = attachPageErrorCollector(page)
-    await presetAdminToken(page)
+    await presetAdminLogin(page)
     await mockApiRoutes(page)
     await page.goto('/admin/announcements')
 
@@ -70,7 +102,7 @@ test.describe('管理端', () => {
 
   test('用量页：KPI 与明细渲染', async ({ page }) => {
     const errors = attachPageErrorCollector(page)
-    await presetAdminToken(page)
+    await presetAdminLogin(page)
     await mockApiRoutes(page)
     await page.goto('/admin/usage')
 

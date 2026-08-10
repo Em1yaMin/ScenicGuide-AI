@@ -6,8 +6,9 @@
  *   （step/token/done/error），解析模式参考 ADH langchainAgent 的 SSE 消费：
  *   帧格式 `data: {json}\n\n`，按行取 `data:` 前缀解析 JSON 后分发回调。
  *
- * 全部接口需 X-Admin-Token 鉴权（token 存 localStorage 的 admin_api_token，
- * 与知识库/公告/记忆管理页一致）。
+ * 全部接口需管理端鉴权（管理员 JWT Authorization Bearer，批次9 账号密码
+ * 登录；或 X-Admin-Token localStorage admin_api_token，向后兼容），
+ * 见 utils/adminHeaders.ts。
  */
 import { API_ADMIN_AGENT_CHAT, API_ADMIN_AGENT_CHAT_STREAM } from '@/api'
 import type {
@@ -18,17 +19,8 @@ import type {
   AdminAgentTokenEvent,
 } from '@/types/adminAgent'
 import { fetchWithCodeEnvelope } from '@/utils/fetchWithCodeEnvelope'
+import { adminApiHeaders } from '@/utils/adminHeaders'
 
-const TOKEN_KEY = 'admin_api_token'
-
-/** 构造带 X-Admin-Token 的请求头（json=true 时附带 Content-Type） */
-function adminHeaders(json = true): Record<string, string> {
-  const headers: Record<string, string> = {
-    'X-Admin-Token': localStorage.getItem(TOKEN_KEY) ?? '',
-  }
-  if (json) headers['Content-Type'] = 'application/json'
-  return headers
-}
 
 /** 对话请求体（conversation_id 透传回显，空串由后端生成新 uuid） */
 export interface AdminAgentChatPayload {
@@ -52,7 +44,7 @@ export async function chatWithAdminAgent(
   // 管理 agent 工具调用链可能较长，禁用默认 15s 超时
   return fetchWithCodeEnvelope<AdminAgentChatResponse>(API_ADMIN_AGENT_CHAT, {
     method: 'POST',
-    headers: adminHeaders(),
+    headers: adminApiHeaders(),
     body: JSON.stringify({
       query,
       conversation_id: conversationId,
@@ -83,7 +75,7 @@ export async function streamAdminAgentChat(
   try {
     response = await fetch(API_ADMIN_AGENT_CHAT_STREAM, {
       method: 'POST',
-      headers: adminHeaders(),
+      headers: adminApiHeaders(),
       body: JSON.stringify(payload),
       signal,
     })
