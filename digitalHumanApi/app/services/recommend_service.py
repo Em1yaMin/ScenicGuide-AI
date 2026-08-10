@@ -11,6 +11,13 @@ LLM 上下文，保证问句与真实数据相关。
 失败降级：LLM 未配置（LLMConfigError）/调用异常/解析失败均返回 None（不抛错、
 不阻断页面），由调用方（tasks/recommend_questions.refresh_cycle）保持
 stale-while-revalidate 缓存（旧缓存兜底）。
+
+无评估数据降级（2026-08 船长反馈：调试/演示环境空库时推荐问句接口返回空，
+对话页浮层只剩空态提示无可点击问句）：`_aggregate_dashboard_7d` 在 7 天窗口
+内无评估数据（concern_tags/mentioned_spots 均空）时返回 None，`fetch_`
+改为降级基于本地景点/路线数据（app/data/spots.json、routes.json）模板构造
+推荐问句（不依赖 LLM），保证演示环境空库也有可点击问句；本地数据也缺失时
+才返回 None（保持 None 契约，调用方保留旧缓存）。有评估数据时主路径行为不变。
 """
 import asyncio
 import json
@@ -27,6 +34,7 @@ from app.core.database import async_session_factory
 from app.core.llm import LLMConfigError, get_chat_llm
 from app.models.dialogue import Dialogue
 from app.models.evaluation import Evaluation
+from app.services.home_service import _load_json
 from app.services.usage_tracker import CHAIN_RECOMMEND, usage_context
 
 logger = logging.getLogger(__name__)
@@ -34,6 +42,27 @@ logger = logging.getLogger(__name__)
 _RECOMMEND_MAX_TOKENS = 512
 _RECOMMEND_TIMEOUT = 60
 _RECOMMEND_TEMPERATURE = 0.5
+
+# 无评估数据降级生成的推荐问句模板（本地景点/路线数据构造，不依赖 LLM）
+_FALLBACK_MAX_QUESTIONS = 8
+_FALLBACK_MIN_QUESTIONS = 3
+_FALLBACK_SPOT_LIMIT = 3
+_SPOT_QUESTION_TEMPLATE = "{name}有什么特色？"
+_FALLBACK_GENERIC_QUESTIONS = [
+    "有哪些值得去的景点？",
+    "推荐一条经典游玩路线",
+]
+# 路线标签 → 推荐问句（顺序即优先级；任一标签命中即产出该问句）
+_FALLBACK_ROUTE_TAG_QUESTIONS = [
+    (("半日游",), "帮我规划一条半日游路线"),
+    (("一日游",), "帮我规划一条一日游路线"),
+    (("拍照打卡", "摄影"), "适合拍照的路线推荐"),
+    (("亲子",), "带小孩适合走哪条路线？"),
+    (("浪漫", "情侣"), "有什么适合情侣的路线？"),
+    (("休闲", "养生"), "推荐一条休闲放松的路线"),
+    (("登山", "徒步", "挑战"), "想爬山走哪条路线好？"),
+]
+
 
 # 推荐问句生成 System 提示词（本地 LLM 版，语义对齐原 Dify 推荐工作流，
 # 见 doc/dify配置/recommend-workflow-推荐工作流.md——该文档现为历史存档）
@@ -249,6 +278,72 @@ def _invoke_recommend_llm(llm: Any, messages: List[Any]) -> Any:
         return llm.invoke(messages)
 
 
+def _build_fallback_questions(
+    spots: Optional[List[Dict[str, Any]]] = None,
+    routes: Optional[List[Dict[str, Any]]] = None,
+    max_questions: int = _FALLBACK_MAX_QUESTIONS,
+) -> Optional[List[str]]:
+    """无评估数据时降级生成推荐问句（本地景点/路线数据模板构造，不依赖 LLM）。
+
+    空库/新部署环境没有 Evaluation 数据时，直接基于 app/data/ 的景点/路线
+    数据构造通用推荐问句（如「翠微峰有什么特色？」「帮我规划一条半日游路线」
+    「适合拍照的路线推荐」），保证演示环境对话页底部浮层始终有可点击问句、
+    不显示空态。
+
+    Args:
+        spots/routes: 可注入的景点/路线数据（测试用）；默认从 app/data/ 读取
+        max_questions: 问句条数上限（默认 8）
+
+    Returns:
+        非空问句列表（兜底通用问句 → 景点问句 → 路线标签问句，去重、上限截断）；
+        本地数据缺失/为空（连 _FALLBACK_MIN_QUESTIONS 条通用问句都凑不齐）时
+        返回 None（保持 None 契约，调用方走 stale-while-revalidate）。
+    """
+    if spots is None:
+        spots = _load_json("spots.json")
+    if routes is None:
+        routes = _load_json("routes.json")
+
+    questions: List[str] = []
+    seen: set = set()
+
+    def _add(q: str) -> None:
+        if len(questions) >= max_questions or not q or q in seen:
+            return
+        questions.append(q)
+        seen.add(q)
+
+    # 1. 兜底通用问句（优先保证基础可点问句始终存在）
+    for question in _FALLBACK_GENERIC_QUESTIONS:
+        _add(question)
+
+    # 2. 景点问句（取前 _FALLBACK_SPOT_LIMIT 个热门景点，问句与真实数据相关）
+    for spot in spots[:_FALLBACK_SPOT_LIMIT]:
+        name = (spot or {}).get("name") if isinstance(spot, dict) else None
+        if name:
+            _add(_SPOT_QUESTION_TEMPLATE.format(name=name))
+
+    # 3. 路线标签问句（命中任一标签即产出对应问句，覆盖游玩攻略维度）
+    route_tags = {
+        tag
+        for route in routes
+        if isinstance(route, dict)
+        for tag in (route.get("tags") or [])
+    }
+    for tag_set, question in _FALLBACK_ROUTE_TAG_QUESTIONS:
+        if route_tags.intersection(tag_set):
+            _add(question)
+
+    if len(questions) < _FALLBACK_MIN_QUESTIONS:
+        logger.debug(
+            "降级推荐问句不足（spots=%d routes=%d），放弃生成",
+            len(spots),
+            len(routes),
+        )
+        return None
+    return questions
+
+
 async def fetch_recommended_questions(
     llm: Optional[Any] = None,
 ) -> Optional[List[str]]:
@@ -259,15 +354,28 @@ async def fetch_recommended_questions(
             （get_chat_llm，LLM_API_* 配置 opencode-go，max_tokens 经 extra_body 注入）
 
     Returns:
-        List of question strings on success, None on any failure (no evaluation
-        data, LLM unconfigured, LLM exception, empty output, parse error).
-        Caller implements stale-while-revalidate.
+        List of question strings on success, None on any failure (LLM unconfigured,
+        LLM exception, empty output, parse error, or no evaluation data AND local
+        scenic data missing). Caller implements stale-while-revalidate.
+
+    无评估数据（_aggregate_dashboard_7d 返回 None）时降级基于本地景点/路线数据
+    模板生成推荐问句（不依赖 LLM），保证演示/调试环境空库不返回空；有评估数据
+    时主路径行为不变（LLM 生成，失败仍返回 None 保留旧缓存）。
     """
     # Phase 1: Aggregate dashboard data
     async with async_session_factory() as db:
         inputs = await _aggregate_dashboard_7d(db)
 
     if inputs is None:
+        # 无评估数据（空库/新部署）→ 降级生成：本地景点/路线数据模板构造，
+        # 不依赖 LLM，保证演示环境浮层有可点击问句而非空态。
+        fallback = _build_fallback_questions()
+        if fallback:
+            logger.info(
+                "无评估数据，降级生成 %d 条推荐问句", len(fallback)
+            )
+            return fallback
+        logger.debug("降级生成失败（本地景点/路线数据缺失），保持旧缓存")
         return None
 
     # Phase 2: Local LLM generation (app/core/llm.py factory, LLM_API_* config)

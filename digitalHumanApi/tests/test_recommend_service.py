@@ -5,6 +5,7 @@
 - 提示词构造（含聚合 Dashboard 数据）
 - 本地 LLM 生成（注入 fake LLM，输出契约不变）
 - 失败降级（LLM 异常/未配置 → None，不抛错）
+- 无评估数据降级（本地景点/路线数据模板构造推荐问句，不依赖 LLM，非空）
 """
 import contextlib
 
@@ -12,6 +13,7 @@ import pytest
 
 from app.services.recommend_service import (
     _aggregate_dashboard_7d,
+    _build_fallback_questions,
     _build_recommend_prompt,
     _parse_questions_output,
     fetch_recommended_questions,
@@ -191,9 +193,92 @@ async def test_fetch_recommended_questions_full_pipeline(monkeypatch, db_session
     assert questions == ["日光岩几点去最好看？", "皓月园怎么走？"]
 
 
+# 与真实数据源结构一致的样本（测试不依赖真实文件内容）
+SAMPLE_SPOTS = [
+    {"id": "spot_001", "name": "翠微峰", "tags": ["自然风光", "拍照打卡"]},
+    {"id": "spot_002", "name": "碧波湖", "tags": ["自然风光", "湖泊"]},
+    {"id": "spot_003", "name": "古寺钟声", "tags": ["历史人文"]},
+    {"id": "spot_004", "name": "飞瀑流泉", "tags": ["自然风光"]},
+]
+
+SAMPLE_ROUTES = [
+    {"id": "route_001", "name": "经典一日游", "tags": ["自然风光", "一日游"]},
+    {"id": "route_002", "name": "亲子半日游", "tags": ["亲子", "半日游"]},
+    {"id": "route_003", "name": "摄影线", "tags": ["拍照打卡"]},
+]
+
+
+class TestBuildFallbackQuestions:
+    """无评估数据降级生成（本地景点/路线数据模板构造，不依赖 LLM）。"""
+
+    def test_with_data_returns_questions(self):
+        questions = _build_fallback_questions(SAMPLE_SPOTS, SAMPLE_ROUTES)
+        assert questions
+        assert len(questions) <= 8
+        # 兜底通用问句（优先，保证始终存在）
+        assert "有哪些值得去的景点？" in questions
+        assert "推荐一条经典游玩路线" in questions
+        # 景点问句（热门景点名入问句）
+        assert "翠微峰有什么特色？" in questions
+        assert "碧波湖有什么特色？" in questions
+        assert "古寺钟声有什么特色？" in questions
+        # 路线标签问句（命中标签即产出对应问句；样例候选超上限，仅断言前部命中）
+        assert "帮我规划一条半日游路线" in questions
+        assert "帮我规划一条一日游路线" in questions
+        assert "适合拍照的路线推荐" in questions
+
+    def test_route_tag_questions_all_match(self):
+        """路线标签全部命中（候选不超过上限时不截断）。"""
+        questions = _build_fallback_questions(
+            [{"name": "翠微峰"}], SAMPLE_ROUTES
+        )
+        assert "帮我规划一条半日游路线" in questions
+        assert "帮我规划一条一日游路线" in questions
+        assert "适合拍照的路线推荐" in questions
+        assert "带小孩适合走哪条路线？" in questions
+
+    def test_dedup_and_cap(self):
+        """去重 + 条数上限截断。"""
+        questions = _build_fallback_questions(
+            SAMPLE_SPOTS, SAMPLE_ROUTES, max_questions=4
+        )
+        assert len(questions) == 4
+        assert len(set(questions)) == len(questions)
+
+    def test_empty_data_returns_none(self):
+        assert _build_fallback_questions([], []) is None
+
+    def test_only_generic_when_no_routes(self):
+        """无路线数据时仍有景点问句 + 兜底通用问句（≥3 条）。"""
+        questions = _build_fallback_questions(SAMPLE_SPOTS, [])
+        assert questions
+        assert len(questions) >= 3
+        assert "翠微峰有什么特色？" in questions
+        assert "有哪些值得去的景点？" in questions
+
+    def test_missing_files_returns_none(self, monkeypatch):
+        """本地数据文件缺失（_load_json 返回空）→ None（保持 None 契约）。"""
+        monkeypatch.setattr(
+            "app.services.recommend_service._load_json", lambda name: []
+        )
+        assert _build_fallback_questions() is None
+
+    def test_spot_order_respected(self):
+        """景点问句按数据顺序产出（前 _FALLBACK_SPOT_LIMIT 个）。"""
+        questions = _build_fallback_questions(
+            [{"name": "景点甲"}, {"name": "景点乙"}, {"name": "景点丙"}],
+            [],
+        )
+        assert "景点甲有什么特色？" in questions
+        assert questions.index("景点甲有什么特色？") < questions.index(
+            "景点乙有什么特色？"
+        )
+        assert "景点丙有什么特色？" in questions
+
+
 @pytest.mark.asyncio
-async def test_fetch_recommended_questions_no_data_skips_llm(monkeypatch):
-    """无评估数据 → 跳过 LLM 调用，返回 None。"""
+async def test_fetch_recommended_questions_no_data_uses_fallback(monkeypatch):
+    """无评估数据 → 不调 LLM，降级生成推荐问句（非空，不再返回空态）。"""
 
     async def _agg_none(db):
         return None
@@ -205,10 +290,63 @@ async def test_fetch_recommended_questions_no_data_skips_llm(monkeypatch):
         "app.services.recommend_service.async_session_factory",
         _fake_session_factory,
     )
+    # 本地数据缺失路径由 TestBuildFallbackQuestions 专项覆盖；
+    # 这里固定降级结果，验证 fetch 走降级分支且不调 LLM
+    monkeypatch.setattr(
+        "app.services.recommend_service._build_fallback_questions",
+        lambda: ["翠微峰有什么特色？", "帮我规划一条半日游路线"],
+    )
     fake = _FakeLLM('{"questions": ["不会用到"]}')
 
-    assert await fetch_recommended_questions(llm=fake) is None
+    questions = await fetch_recommended_questions(llm=fake)
+
+    assert questions == ["翠微峰有什么特色？", "帮我规划一条半日游路线"]
     assert not fake.invoked
+
+
+@pytest.mark.asyncio
+async def test_fetch_recommended_questions_empty_db_fallback_nonempty(monkeypatch):
+    """验收场景：空库（无评估数据）+ 真实本地数据文件 → 返回非空降级问句。"""
+
+    async def _agg_none(db):
+        return None
+
+    monkeypatch.setattr(
+        "app.services.recommend_service._aggregate_dashboard_7d", _agg_none
+    )
+    monkeypatch.setattr(
+        "app.services.recommend_service.async_session_factory",
+        _fake_session_factory,
+    )
+
+    questions = await fetch_recommended_questions()
+
+    assert questions
+    assert len(questions) >= 3
+
+
+@pytest.mark.asyncio
+async def test_fetch_recommended_questions_no_data_fallback_failure_returns_none(
+    monkeypatch,
+):
+    """无评估数据且降级生成失败（本地数据缺失）→ 返回 None（保持 None 契约）。"""
+
+    async def _agg_none(db):
+        return None
+
+    monkeypatch.setattr(
+        "app.services.recommend_service._aggregate_dashboard_7d", _agg_none
+    )
+    monkeypatch.setattr(
+        "app.services.recommend_service.async_session_factory",
+        _fake_session_factory,
+    )
+    monkeypatch.setattr(
+        "app.services.recommend_service._build_fallback_questions",
+        lambda: None,
+    )
+
+    assert await fetch_recommended_questions() is None
 
 
 @pytest.mark.asyncio

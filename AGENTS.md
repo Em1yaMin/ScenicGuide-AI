@@ -41,11 +41,11 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 ## 推荐问句（阶段3 T3：本地 LLM 生成，脱离 Dify）
 
 - `app/services/recommend_service.py` — 推荐问句生成（首页数字人引导区可提问句）：聚合 7 天 Dashboard 数据（concern_tags/mentioned_spots/sentiment_summary/total_dialogues）→ 本地 LLM 生成 questions 数组。**船长决策 2026-08-06 方案B：直接移除 Dify Workflow 调用**（不再有 DIFY_RECOMMEND_WORKFLOW_API_KEY，不留 fallback，为阶段4 Dify 退场铺路）；改用 `app/core/llm.py` 工厂（`get_chat_llm`，`LLM_*` 配置 opencode-go），输出契约不变（questions 数组，前端无感）
-  - 入口 `fetch_recommended_questions(llm=None)`（可注入 llm 测试）；无评估数据/LLM 未配置/调用异常/解析失败均返回 None 不抛错（LLMConfigError 单独告警），调用方保持 stale-while-revalidate 旧缓存
+  - 入口 `fetch_recommended_questions(llm=None)`（可注入 llm 测试）；**无评估数据降级（2026-08 船长反馈修复）**：`_aggregate_dashboard_7d` 在 7 天窗口无评估数据（concern_tags/mentioned_spots 均空）时返回 None，fetch 改为降级用 `_build_fallback_questions` 基于本地景点/路线数据（app/data/spots.json、routes.json，复用 home_service._load_json）模板构造推荐问句（通用问句优先 → 前 3 热门景点「{名}有什么特色？」 → 路线标签问句如「帮我规划一条半日游路线」「适合拍照的路线推荐」，上限 8 条/去重/不足 3 条返回 None），不依赖 LLM，保证演示环境空库浮层有可点击问句不显示空态；本地数据也缺失时才返回 None；LLM 未配置/调用异常/解析失败仍返回 None 不抛错（LLMConfigError 单独告警），调用方保持 stale-while-revalidate 旧缓存；有评估数据时主路径（LLM 生成）行为不变
   - 输出解析 `_parse_questions_output`（容错：剥 `<think>` 标签/```json``` 围栏/JSON 解码/别名兜底/去重），不依赖 dify_helpers
 - `app/tasks/recommend_questions.py` — 后台循环每 5 分钟刷新缓存（recommend_loop，main.py lifespan 注册）；`/api/v1/visitor/recommended-questions` 读缓存、`/refresh-recommend` 手动刷新
 - 清理面：dify_client 已删除 `trigger_recommend_workflow`/`recommend_workflow_headers`；config.py 校验器不再要求推荐 key；`.env.example`（根目录与 digitalHumanApi/）与 docker-compose.yml 已移除该变量；对话双轨回落 Dify（dialogue.py/dify_client 其他用途）保持不动
-- 测试：`tests/test_recommend_service.py`（解析/提示词/本地 LLM mock/失败降级）
+- 测试：`tests/test_recommend_service.py`（解析/提示词/本地 LLM mock/失败降级/无评估数据降级路径）
 
 ## 本地 RAG 知识库（无外部向量库依赖）
 
