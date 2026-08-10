@@ -5,7 +5,7 @@ import { debounce } from 'lodash';
 import { useEffect, useRef, useState } from "react";
 import { useChatRecordStore, ChatRole, ChatMessage, useAgentEngineSettingsStore, useAgentModeStore, useMuteStore, useInteractionModeStore, InteractionMode, useAudioAutoStopStore } from "@/app/lib/store";
 import { ConfirmAlert } from "@/app/ui/common/alert";
-import { AUDIO_SUPPORT_ALERT, AI_THINK_MESSAGE } from "@/app/lib/constants";
+import { AUDIO_SUPPORT_ALERT } from "@/app/lib/constants";
 import { Comm } from "@/app/lib/comm";
 import { CharacterManager } from "@/app/lib/character";
 import Markdown from 'react-markdown';
@@ -83,7 +83,7 @@ async function convertToWav(audioBlob: Blob): Promise<Blob> {
 
 export default function Chatbot(props: { showChatHistory: boolean }) {
     const { showChatHistory } = props;
-    const { chatRecord, addChatRecord, updateLastRecord, clearChatRecord } = useChatRecordStore();
+    const { chatRecord, addChatRecord, clearChatRecord } = useChatRecordStore();
     const { mute } = useMuteStore();
     const { agentEngine } = useAgentModeStore();
     const { mode } = useInteractionModeStore();
@@ -96,6 +96,9 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
     const [isProcessing, setIsProcessing] = useState(false);
     // Agent 工具调用步骤（LangChainAgent 步骤帧，如"正在检索知识库…"）
     const [agentSteps, setAgentSteps] = useState<{ tool: string; label: string }[]>([]);
+    // 本轮 AI 流式文本：独立渲染于步骤气泡之后的新气泡（逐字填充），
+    // 流完成后再并入 chatRecord 历史记录（不再用"我想想..."占位气泡）
+    const [streamingText, setStreamingText] = useState("");
     // 路线卡片数据（批次8 B3：后端 done 事件 route_data 透出，本轮的
     // plan_route 工具结果；新一轮对话清空）
     const [routeData, setRouteData] = useState<RouteEnvelope | null>(null);
@@ -135,9 +138,10 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
 
     const chatWithAI = (message: string) => {
         console.log("chatWithAI: ", message);
-        // 新一轮对话：清空上一轮步骤提示与路线卡片
+        // 新一轮对话：清空上一轮步骤提示、路线卡片与流式文本
         setAgentSteps([]);
         setRouteData(null);
+        setStreamingText("");
         addChatRecord({ role: ChatRole.HUMAN, content: message });
         // 请求AI
         let responseText = "";
@@ -145,13 +149,14 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
         // 保证顺序执行
         let audioRecorderIndex = 0;
         let audioRecorderDict = new Map<number, ArrayBuffer>();
-        addChatRecord({ role: ChatRole.AI, content: AI_THINK_MESSAGE });
         if (audioAutoStop) {
             CharacterManager.getInstance().clearAudioQueue();
         }
         Comm.getInstance().streamingChat(message, agentEngine, conversationId, settings, (index: number, data: string) => {
             responseText += data;
-            updateLastRecord({ role: ChatRole.AI, content: responseText });
+            // AI 流式文本渲染到独立新气泡（位于步骤气泡之后），
+            // 流完成后并入历史记录
+            setStreamingText(responseText);
             if (!mute && mode != InteractionMode.CHATBOT) {
                 // 按照标点符号断句处理
                 audioText += data;
@@ -213,6 +218,14 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
                     }
                 )
             }
+            // 流完成：把本轮回答并入历史记录（多轮顺序：用户→AI），
+            // 清除独立流式气泡与本轮步骤提示（步骤是流式过程提示，回答完成后
+            // 移除可避免其落在回答气泡下方造成视觉回跳；空回答不产生空气泡）
+            if (responseText) {
+                addChatRecord({ role: ChatRole.AI, content: responseText });
+            }
+            setStreamingText("");
+            setAgentSteps([]);
             setIsProcessing(false);
         }, (step: { tool: string; label: string }) => {
             // 工具调用步骤：追加到步骤提示列表（连续重复步骤去重，避免同一
@@ -465,6 +478,21 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
                                             </span>
                                         </div>
                                     ))}
+                                </div>
+                                <img src="/icons/ai_icon.svg" alt="" className="w-6 h-6 rounded-full order-1 self-start" />
+                            </div>
+                        </div>
+                        :
+                        <></>
+                }
+                {
+                    // AI 流式文本气泡：本轮回答逐字填充于此（位于步骤气泡之后），
+                    // 流完成后并入 chatRecord 历史记录；空文本不渲染
+                    streamingText ?
+                        <div className="chat-message">
+                            <div className="flex items-end">
+                                <div className="flex flex-col space-y-2 text-xs max-w-xs mx-2 order-2 items-start">
+                                    <div><Markdown className="px-4 py-2 rounded-lg inline-block rounded-bl-none bg-gray-300 text-gray-600">{streamingText}</Markdown></div>
                                 </div>
                                 <img src="/icons/ai_icon.svg" alt="" className="w-6 h-6 rounded-full order-1 self-start" />
                             </div>
