@@ -3,6 +3,8 @@
 > **历史文档**：本文为阶段0（2026-08-04）数据迁移盘点，描述当时状态；阶段4 起量化评估/推荐问句已本地化，Dify 依赖面见 `doc/dify-dependency-audit.md`。最新实现以根目录 `AGENTS.md`（项目记忆）与 `README.md` 为准。
 >
 > **2026-08-11 更新（RAG 数据源净化）**：多景区行为分析数据 `景点景区旅游数据行为分析数据_知识库版.md`（1.47MB，全国 152 景区）已移出 `doc/景区知识库/` 至 `doc/archive/`（船长决策方案A），`doc/景区知识库/` 现仅保留两份纯灵山文档，documents 命名空间检索面只含灵山内容；部署需执行一次 `POST /api/rag/index` 全量重建（结果 documents=2）清除旧 chunk。
+>
+> **2026-08-11 更新（Dify 用户访问记录迁移，任务 fm/dify-7b）**：旧 Dify 服务器（http://111.228.47.45）历史对话已实际迁移到本地库。**关键发现：Dify 侧确有数据，user 值为 `visitor`**（ADH LangChainAgent 默认 `LLM_API_USER` 的落地值；对话创建于 2026-08-05、晚于 08-04 盘点，故此前探测候选均为空）。迁移结果：5 个 conversation / 6 条 message → 本地 `dialogues` 表新增 12 行（每 message 拆 user+assistant 两行，assistant 行 `external_message_id` 加 `:answer` 后缀），`visitors` 表新增 `visitor` 记录；`DIFY_LIGHT4AI_USER` 已在本机 `.env` 配置为 `visitor`（polling 增量轮询生效）。迁移幂等可重跑（重跑 inserted=0/skipped=12）。验证：`GET /api/v1/admin/dashboard` total_conversations=28（含既有 16 行本地验证数据）、感受度报告 sentiment/concern 有数据。详见本文档末尾「6. 2026-08-11 迁移执行记录」。G1/G3 缺口已闭环（见第 3 节）。
 
 > 日期：2026-08-04 ｜ 任务：fm/sg-data-migration
 > 目标：盘点并迁移 Dify 侧历史数据（对话历史 + 知识库内容）到本地系统，为
@@ -95,9 +97,9 @@
 
 | # | 缺口 | 影响 | 处理 |
 |---|------|------|------|
-| G1 | Dify 对话 user 值不可枚举，无法 100% 确认「无对话」而非「user 不符」 | 可能漏迁历史对话 | 控制台「日志与标注」页核对实际 user；或请 light4ai 侧确认固定 user |
+| G1 | Dify 对话 user 值不可枚举，无法 100% 确认「无对话」而非「user 不符」 | 可能漏迁历史对话 | ✅ 已闭环（2026-08-11）：实测 user=`visitor` 存在 5 个 conversation（ADH 默认引擎落地值），已全量迁移本地 |
 | G2 | Dify 知识库内容未导出（无 Dataset Key / 管理员凭据） | 无法核对 Dify 侧文档与三份 md 的差异 | 船长提供控制台凭据或 Dataset Key 后补导出一版存档 |
-| G3 | `DIFY_LIGHT4AI_USER` 本地 .env 为空 | 增量 polling 与补拉默认不生效（需显式 `--user`） | 部署时在 `.env` 配置 `DIFY_LIGHT4AI_USER` 与 ADH 引擎 user 一致（默认 LangChainAgent `LLM_API_USER`；切回 DifyAgent 直连时为 `difyAgent.yaml` 的 `DIFY_API_USER`），详见 `doc/dify配置/README.md` |
+| G3 | `DIFY_LIGHT4AI_USER` 本地 .env 为空 | 增量 polling 与补拉默认不生效（需显式 `--user`） | ✅ 已闭环（2026-08-11）：本机 `.env` 已配置 `DIFY_LIGHT4AI_USER=visitor`（与 ADH LangChainAgent 默认 `LLM_API_USER` 一致），polling 增量轮询与无参补拉默认生效 |
 | G4 | 三份 md 未建本地 RAG 索引 | 本地检索不可用 | ✅ 已由 sg-kb-index 任务完成（`DEFAULT_DOC_DIR` 限定 `doc/景区知识库/`，`POST /api/rag/index` 全量重建，分块建议见下） |
 
 ## 4. 后续建议（供 sg-kb-index 参考）
@@ -123,12 +125,51 @@
 ## 5. 命令速查
 
 ```bash
-# 补拉全部配置用户（需 .env 配置 DIFY_LIGHT4AI_USER）
+# 补拉全部配置用户（.env 已配置 DIFY_LIGHT4AI_USER=visitor）
 cd digitalHumanApi && python -m app.tasks.backfill --interval 1.0
 
-# 指定 user 补拉
-python -m app.tasks.backfill --user adh --interval 1.0
+# 指定 user 补拉（幂等，重跑只补缺失）
+python -m app.tasks.backfill --user visitor --interval 1.0
+
+# 手动触发一次增量轮询（或等 polling_loop 30s 周期）
+python -c "import asyncio; from app.tasks.polling import poll_once; asyncio.run(poll_once())"
 
 # 测试
 python -m pytest tests/test_backfill.py -v
 ```
+
+## 6. 2026-08-11 迁移执行记录（fm/dify-7b）
+
+### 6.1 Dify 侧盘点（真实 API）
+
+- **连通性**：`GET /v1/parameters`（Bearer `DIFY_API_KEY`）HTTP 200；控制台 `/console/api/setup` 返回 `{"step":"finished","setup_at":"2026-07-14T08:35:27"}`（Dify 已安装）。
+- **user 枚举**：Dify API 无「列出全部 user」端点，对候选值逐一探测 `GET /v1/conversations?user=xxx`：`adh/light4ai/user/default/ADH/admin/1/...` 均空，**仅 `visitor` 有数据**（5 个 conversation，2026-08-05 创建，内容为灵山景区咨询：好玩项目/特色介绍/知识库咨询等）。
+- **数据量**：5 conversations / 6 messages（单页内，无分页需求；消息结构为 Dify 服务端 API 真实形态 `{id, query, answer, created_at}`）。
+
+### 6.2 迁移执行
+
+```bash
+cd digitalHumanApi && python -m app.tasks.backfill --user visitor --interval 0.5
+# user=visitor: conversations=5 messages=6 inserted=12 skipped=0（退出码 0）
+```
+
+- 每 message 拆 user/assistant 两行（assistant 行 `external_message_id` 加 `:answer` 后缀），与 polling 语义一致；`visitors` 表自动 upsert `visitor` 记录。
+- 迁移为遗留库（无 alembic_version），`run_migrations()` 自动 create_all 补表 + stamp 基线（`c5f1a2b3d4e5`），未丢既有数据。
+
+### 6.3 验证
+
+| 项 | 结果 |
+|----|------|
+| `dialogues` 计数 | 28（16 既有本地验证数据 + 12 迁移） |
+| `visitors` 记录 | `visitor` 行存在（first/last_visit 2026-08-11） |
+| 幂等重跑 | inserted=0 / skipped=12，计数不变 |
+| polling 增量 | `DIFY_LIGHT4AI_USER=visitor` 配置后 `poll_once()` 插入 0（无重复） |
+| Dashboard | `total_conversations=28`；satisfaction 分布/热点关注/景点热度有数据 |
+| 感受度报告 | sentiment stats（Positive/Negative/Neutral）与 concern_ranking 有数据 |
+| 量化评估 | `batch_evaluate` 已评估 3 条迁移行；含 `<think>`/RAG 噪声内容的行评估解析失败静默跳过（既有降级语义，analysis_loop 下轮重试） |
+| pytest | 739 passed |
+
+### 6.4 说明
+
+- 迁移仅涉及 `visitor` 用户；对话内容含 Dify RAG 注入的「【本地知识库检索结果】」查询文本与 `<think>` 思考块，为 Dify 侧原始数据形态，未做清洗（评估链路按既有降级语义处理，不阻断）。
+- `.env`（gitignored）为本机部署配置，不进仓库；仓库侧仅同步文档/AGENTS.md。

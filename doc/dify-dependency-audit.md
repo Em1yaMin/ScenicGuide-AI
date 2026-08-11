@@ -3,6 +3,7 @@
 > 日期：2026-08-06 ｜ 阶段3 收官 + 阶段4 退场前置（船长决策 2026-08-06 方案B）
 > 更新：2026-08-07 ｜ 阶段4 首项落地（船长决策 2026-08-06 方案A）：**Dify Workflow 量化评估已本地化**（见 §2 已完成清理面），剩余 Dify 依赖仅对话双轨回落 + 历史数据接口。
 > 收官（2026-08-07）：**全链路自检通过**——模拟 Dify 不可达（`DIFY_API_URL` 指向无效地址）后系统核心链路（对话双模式/流式/记忆、推荐问句、分析、量化评估、管理后台报告）全部正常，仅保留项（对话回落/历史接口）明确降级不崩溃，详见 [`doc/phase4-e2e-verification.md`](doc/phase4-e2e-verification.md)。**Dify 依赖面至此收敛定稿**：除对话双轨回落 + 历史数据接口（船长决策保留）外无任何 Dify 依赖。
+> 更新：2026-08-11 ｜ fm/dify-7b：本机部署 `.env` 已配置 `DIFY_LIGHT4AI_USER=visitor`（polling 增量轮询生效），旧 Dify 服务器（http://111.228.47.45）历史对话已全量迁入本地（详见 [`doc/dify-data-migration-report.md`](doc/dify-data-migration-report.md) §6）。
 > 原则：**对话双轨回落保留**（演示兜底）；**历史数据接口保留**（管理后台数据大屏数据源）；其余尽量清理。
 > 本报告为阶段4 最终退场提供依据：剩余依赖清单 + 用途 + 清理建议。
 
@@ -53,7 +54,7 @@
 
 - 当前 `DIFY_*` 剩余 `DIFY_API_URL`/`DIFY_API_KEY`/`DIFY_LIGHT4AI_USER`，均被保留模块（对话回落 + 历史数据接口）引用，**无需移除**；`DIFY_WORKFLOW_API_KEY` 已随阶段4 首项清理移除。
 - `.env.example` 注释已同步（§1 表格 + §2），明确各变量的用途与「对话回落/历史数据接口」归属。
-- `DIFY_LIGHT4AI_USER` 为空时轮询 `users=[]` 空转（当前主项目部署即为空；本地对话已由对话链路直接落库，管理后台大屏/报告数据来自本地链路，不再依赖轮询）
+- `DIFY_LIGHT4AI_USER` 为空时轮询 `users=[]` 空转；**2026-08-11（fm/dify-7b）起本机部署 `.env` 已配置 `DIFY_LIGHT4AI_USER=visitor`**，polling 增量轮询生效，旧 Dify 服务器历史对话已全量迁入本地（详见 `doc/dify-data-migration-report.md` §6）；本地对话仍由对话链路直接落库（主数据源），管理后台大屏/报告数据来自本地链路 + Dify 历史数据
 
 ### 3.4 非 digitalHumanApi 的 Dify 引用（不在本任务清理范围）
 
