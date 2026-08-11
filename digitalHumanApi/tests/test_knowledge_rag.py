@@ -16,12 +16,17 @@ from httpx import AsyncClient
 from app.core.rag import DEFAULT_DOC_DIR, NAMESPACE_KNOWLEDGE
 from app.services.rag_service import (
     _load_documents,
+    _split_documents,
     index_knowledge_entries,
 )
 from app.services.recommend_agent import search_knowledge
 
 ADMIN_TOKEN = "test-admin-token"
 ADMIN_HEADERS = {"X-Admin-Token": ADMIN_TOKEN}
+
+# 库外非灵山景区（全国多景区行为分析数据已移出 doc/景区知识库/ 至 doc/archive/），
+# 这些内容绝不进入 documents 命名空间检索面
+NON_LINGSHAN_SCENIC = ("南禅寺", "鼋头渚", "同里古镇", "周庄", "乌镇", "东湖")
 
 
 @pytest.fixture(autouse=True)
@@ -144,7 +149,8 @@ async def test_import_knowledge_updates_index(client: AsyncClient):
 # ---------------------------------------------------------------------------
 
 def test_default_doc_dir_limited_to_scenic_knowledge():
-    """默认文档目录限定到 doc/景区知识库/，不含 doc/ 下架构/设计文档。"""
+    """默认文档目录限定到 doc/景区知识库/ 两份纯灵山文档，不含 doc/ 下架构/设计文档
+    与已移出至 doc/archive/ 的多景区行为分析数据（2026-08-11 船长决策方案A）。"""
     assert DEFAULT_DOC_DIR.name == "景区知识库"
     assert DEFAULT_DOC_DIR.exists()
 
@@ -161,9 +167,62 @@ def test_default_doc_dir_limited_to_scenic_knowledge():
         assert "review" not in source
         assert "report" not in source
 
-    # 三份景区知识文档全部纳入
-    filenames = {doc.metadata["filename"] for doc in docs}
-    assert len(filenames) >= 3, f"应加载至少 3 份景区知识文档，实际: {filenames}"
+    # 仅两份纯灵山景区知识文档纳入索引（多景区行为分析数据已移出）
+    filenames = sorted(doc.metadata["filename"] for doc in docs)
+    assert filenames == [
+        "灵山胜境_历史文化景点特色与个性化游览指南_知识库版.md",
+        "灵山胜境_景点结构化数据集_知识库版.md",
+    ], f"doc/景区知识库/ 应仅含两份纯灵山文档，实际: {filenames}"
+
+    # 索引内容不含非灵山景区（南禅寺/鼋头渚等库外内容不进入检索面）
+    all_content = "\n".join(doc.page_content for doc in docs)
+    for name in NON_LINGSHAN_SCENIC:
+        assert name not in all_content, f"纯灵山文档不应包含非灵山景区内容: {name}"
+
+
+def test_doc_chunks_contain_only_lingshan_content():
+    """分块后 chunk 不包含非灵山景区内容；纯灵山内容正常索引。"""
+    docs = _load_documents()
+    assert docs
+
+    chunks = _split_documents(docs)
+    assert chunks, "纯灵山文档应切分出 chunk"
+
+    chunk_text = "\n".join(c.page_content for c in chunks)
+    for name in NON_LINGSHAN_SCENIC:
+        assert name not in chunk_text, f"chunk 不应包含非灵山景区内容: {name}"
+    assert "灵山" in chunk_text, "纯灵山内容应正常进入 chunk"
+
+
+async def test_rag_index_endpoint_indexes_only_lingshan_docs(client: AsyncClient):
+    """POST /api/rag/index 全量重建后 documents=2；南禅寺等库外内容不再命中，
+    灵山内容正常命中（验收标准：重新索引后 documents=2）。"""
+    index_resp = await client.post("/api/rag/index", json={})
+    assert index_resp.status_code == 200
+    index_data = index_resp.json()
+    assert index_data["status"] == "ok"
+    assert index_data["documents"] == 2, f"应索引 2 份纯灵山文档，实际: {index_data}"
+
+    # 库外内容（多景区行为分析数据已移出）不再命中
+    out_resp = await client.post(
+        "/api/rag/search",
+        json={"query": "南禅寺", "namespace": "documents"},
+    )
+    assert out_resp.status_code == 200
+    out_results = out_resp.json()["results"]
+    for result in out_results:
+        for name in NON_LINGSHAN_SCENIC:
+            assert name not in result["content"], f"库外内容不应命中: {name}"
+
+    # 灵山内容正常命中
+    in_resp = await client.post(
+        "/api/rag/search",
+        json={"query": "灵山胜境", "namespace": "documents"},
+    )
+    assert in_resp.status_code == 200
+    in_results = in_resp.json()["results"]
+    assert in_results, "灵山内容应可检索到"
+    assert any("灵山" in r["content"] for r in in_results)
 
 
 # ---------------------------------------------------------------------------
