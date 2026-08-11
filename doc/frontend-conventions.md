@@ -72,6 +72,7 @@ assets/main.css          — 入口：依次 @import design-tokens.css → varia
 - 成功返回解析后的 JSON body（泛型 `<T>` 透出类型）；失败抛 `FetchError`（含 `httpStatus`/`appCode`/`cause`）
 - 错误消息提取：FastAPI `{ detail }` 三形态兼容——字符串（401 "用户名或密码错误"）/ 422 校验数组（拼接 `loc: msg`）/ 不可解析回退通用消息
 - 默认 15s 超时（`AbortController`，`timeoutMs` 可配，0 禁用）
+- **长耗时特例**：AI 分析（`/api/v1/analysis/*`）与用量报表（usage）接口须显式传 `timeoutMs: ANALYSIS_TIMEOUT_MS`（300s，常量与依据见 `utils/fetchWithCodeEnvelope.ts`），否则默认 15s 会在后端调 LLM 慢时掐断报「请求超时 (15000ms)」
 - **端点常量集中**：`api/index.ts` 的 `API_*` 常量，组件内禁止硬编码 URL
 - **按域封装**：`api/auth.ts` / `api/memory.ts` / `api/usage.ts` 等导出类型化函数（`fetchWithCodeEnvelope<XxxResponse>(API_X, {...})`），调用方不直接碰 fetch
 - 鉴权头：登录用户 `Authorization: Bearer <token>`（authHeaders()）；管理端统一走 `utils/adminHeaders.ts`（批次9 起：同时携带管理员 JWT `Authorization: Bearer` 与旧 `X-Admin-Token`（localStorage `admin_api_token`），后端 deps 双路径任一放行，旧用法不受影响）
