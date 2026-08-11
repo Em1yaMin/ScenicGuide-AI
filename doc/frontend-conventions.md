@@ -32,12 +32,12 @@ src/
   utils/        # 纯函数工具（fetchWithCodeEnvelope.ts、uuid.ts）
   composables/  # 组合式函数（useApi 三态、useECharts 图表注册）
   components/   # 通用展示组件（EmptyStateGuide.vue 空态）
-  layouts/      # 布局壳（AdminLayout/VisitorLayout），父路由 component，消费 auth store
+  layouts/      # 布局壳（AdminLayout/VisitorLayout），父路由 component，消费 auth/adminAuth store
   views/        # 页面组件（含 admin/ 子目录），路由懒加载，自行管理数据获取
   router/       # 嵌套布局路由；认证页 /login /register 为顶层路由例外
 ```
 
-- **页面组件（views/）** 管理数据获取与状态；**通用组件（components/）** 只做展示、props 驱动；**布局（layouts/）** 不直接 fetch，只消费 auth store 渲染导航/登录态
+- **页面组件（views/）** 管理数据获取与状态；**通用组件（components/）** 只做展示、props 驱动；**布局（layouts/）** 不直接 fetch，只消费 store 渲染导航/登录态（VisitorLayout 用 auth、AdminLayout 用 adminAuth）
 - 新增领域能力时：`types/` 定义契约 → `api/` 封装请求 → view/store 消费（见文末「新增 API」速查）
 
 ## 样式方案（CSS token 体系 + scoped）
