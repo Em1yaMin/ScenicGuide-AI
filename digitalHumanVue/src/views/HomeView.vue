@@ -179,7 +179,7 @@ function scrollToRecommendedRoutes() {
 
 <template>
   <div class="home">
-    <!-- Hero Section：论点 = 数字人导览；右侧墨色山峦剪影 + 朱砂印章落款（签名元素） -->
+    <!-- Hero Section：论点 = 数字人导览；右侧墨色山峦剪影（支持元素） -->
     <section class="hero" :class="{ 'hero--visible': heroVisible }">
       <!-- 水墨山峦剪影（三层：远雾 → 青玉淡 → 墨青；支持元素，aria-hidden） -->
       <svg
@@ -227,12 +227,6 @@ function scrollToRecommendedRoutes() {
           景区管理者？
           <RouterLink to="/admin/login" class="admin-entry-link">进入管理后台 →</RouterLink>
         </p>
-      </div>
-
-      <!-- 签名元素：朱砂印章落款「AI 导览」（入场序列最后盖章落定） -->
-      <div class="hero-seal" role="img" aria-label="AI 导览印章">
-        <span class="hero-seal-ai">AI</span>
-        <span class="hero-seal-text">导览</span>
       </div>
     </section>
 
@@ -494,51 +488,6 @@ function scrollToRecommendedRoutes() {
 .btn-secondary:hover {
   border-color: var(--ink);
   text-decoration: none;
-}
-
-/* ── 签名元素：朱砂印章落款 ── */
-.hero-seal {
-  position: absolute;
-  right: var(--space-2xl);
-  bottom: var(--space-2xl);
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  width: 52px;
-  height: 52px;
-  background: var(--cinnabar);
-  color: var(--surface);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-card);
-  transform: rotate(-2deg);
-  opacity: 0;
-  scale: 1.35;
-  transition:
-    opacity 0.4s var(--ease-stamp),
-    scale 0.5s var(--ease-stamp) 0.06s;
-}
-
-.hero--visible .hero-seal {
-  opacity: 1;
-  scale: 1;
-}
-
-.hero-seal-ai {
-  font-family: var(--font-mono);
-  font-size: var(--text-tiny);
-  font-weight: 700;
-  letter-spacing: 0.08em;
-}
-
-.hero-seal-text {
-  font-family: var(--font-display);
-  font-size: var(--text-caption);
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  margin-left: 0.2em; /* 平衡字距视觉居中 */
 }
 
 /* ── Section 题跋（朱砂方点为印，标题为题字） ── */
@@ -825,11 +774,6 @@ function scrollToRecommendedRoutes() {
     height: 130px;
     max-height: none;
     opacity: 0.55 !important;
-  }
-
-  /* 印章仅在宽屏展示（窄屏下印章悬空无山峦依托） */
-  .hero-seal {
-    display: none;
   }
 
   .hero-title {

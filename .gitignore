@@ -10,6 +10,8 @@ htmlcov/
 
 # Environment (SECURITY)
 .env
+.env.bak*
+.env.*.bak*
 .venv/
 venv/
 

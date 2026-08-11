@@ -65,7 +65,9 @@ function adminLogout() {
             <button type="button" class="auth-btn" @click="adminLogout">退出</button>
           </template>
           <template v-else>
-            <RouterLink :to="{ path: '/admin/login', query: { redirect: route.fullPath } }" class="auth-link"
+            <RouterLink
+              :to="{ path: '/admin/login', query: { redirect: route.fullPath } }"
+              class="auth-link"
               >管理登录</RouterLink
             >
           </template>
@@ -118,7 +120,7 @@ function adminLogout() {
   height: 100vh;
 }
 
-/* 品牌区：朱砂印章式方块（母题同访客端印章落款，见 doc/redesign-v1.md §4） */
+/* 品牌区：朱砂印章式方块（印章母题，见 doc/redesign-v1.md §4） */
 .sidebar-brand {
   display: flex;
   align-items: center;
