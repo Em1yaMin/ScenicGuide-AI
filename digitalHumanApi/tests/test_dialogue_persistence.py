@@ -141,6 +141,37 @@ async def test_multi_turn_persists_each_round(client, db_session, monkeypatch):
     assert len(list(visitors.scalars().all())) == 1  # 不重复 upsert
 
 
+async def test_visitor_upsert_atomic_on_duplicate(db_session):
+    """visitor upsert 原子化：行不存在时重复插入（并发首条消息场景）不抛错。
+
+    旧实现 select 未命中后 db.add + flush，两个并发 /chat 请求（同一新
+    visitor）同时命中该路径时，后提交的 flush 触发重复主键 IntegrityError，
+    被 catch-all 吞掉并回滚——本轮 dialogues 两行一并静默丢失。现实现改用
+    SQLite INSERT ... ON CONFLICT DO NOTHING，重复插入为 no-op，随后
+    本轮对话仍正常落库。
+    """
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+    # 模拟两个并发请求在行不存在时都执行原子插入：第二次为重复主键
+    for _ in range(2):
+        await db_session.execute(
+            sqlite_insert(Visitor).values(id="visitor").on_conflict_do_nothing()
+        )
+    # 外键满足且不重复 upsert，随后对话仍正常落两行
+    await chat_agent.record_dialogue(
+        db_session,
+        user="visitor",
+        conversation_id="cid-race",
+        query="你好",
+        answer="回答",
+    )
+    rows = await _rows(db_session)
+    assert len(rows) == 2
+    assert all(r.visitor_id == "visitor" for r in rows)
+    visitors = await db_session.execute(select(Visitor))
+    assert len(list(visitors.scalars().all())) == 1
+
+
 # ── 流式落库 ─────────────────────────────────────────────────────────────
 
 

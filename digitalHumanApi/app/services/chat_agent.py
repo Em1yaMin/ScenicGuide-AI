@@ -59,6 +59,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 from langchain.agents import create_agent
 from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.messages import (
     AIMessage,
@@ -513,8 +514,9 @@ async def record_dialogue(
         # 1. 确保 visitors 记录存在（外键约束；参考 polling.py upsert 模式）
         existing = await db.execute(select(Visitor).where(Visitor.id == user))
         if existing.scalar_one_or_none() is None:
-            db.add(Visitor(id=user))
-            await db.flush()
+            await db.execute(
+                sqlite_insert(Visitor).values(id=user).on_conflict_do_nothing()
+            )
 
         # 2. 每轮问答两行（用户消息 + AI 回复），同轮共享前缀保证 external
         #    _message_id 唯一（unique 约束）且可辨识
