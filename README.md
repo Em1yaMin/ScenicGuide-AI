@@ -205,7 +205,7 @@
 |------|------|
 | `LLM_API_BASE` / `LLM_API_KEY` / `LLM_MODEL` | **对话 LLM**（主链路/推荐/评估共用，默认 opencode-go `https://opencode.ai/zen/go/v1` + `deepseek-v4-flash`）；未配置时对话走 Dify 回落 |
 | `LLM_FALLBACK_*` | 备用端点（部署默认同主端点 opencode-go；代码兜底默认官方 DeepSeek API） |
-| `EMBEDDING_API_KEY` / `EMBEDDING_MODEL` / `EMBEDDING_API_STYLE` | **RAG 向量化**（推荐 Qwen/DashScope：`EMBEDDING_API_STYLE=openai` + `qwen3.7-text-embedding`，端点 `https://dashscope.aliyuncs.com/compatible-mode/v1`；默认兼容旧 Minimax 配置 `embo-01`）；未配置自动降级本地 TF-IDF |
+| `EMBEDDING_API_KEY` / `EMBEDDING_MODEL` / `EMBEDDING_API_STYLE` / `EMBEDDING_BATCH_SIZE` | **RAG 向量化**（推荐 Qwen/DashScope：`EMBEDDING_API_STYLE=openai` + `qwen3.7-text-embedding`，端点 `https://dashscope.aliyuncs.com/compatible-mode/v1`；默认兼容旧 Minimax 配置 `embo-01`）；未配置自动降级本地 TF-IDF；批量上限默认 20（DashScope 单请求 input 硬上限，可覆盖） |
 | `OPENAI_API_KEY` / `OPENAI_API_BASE` / `OPENAI_MODEL` | **运营分析** LLM（当前部署与 `LLM_*` 同 opencode-go 端点）；未配置回退纯 DB 统计 |
 | `DIFY_API_URL` / `DIFY_API_KEY` / `DIFY_LIGHT4AI_USER` | **Dify 双轨回落 + 历史数据抓取**（config 校验器要求非空，dev 可填占位）；量化评估/推荐问句已本地化，不再需要 Workflow Key |
 | `AMAP_WEB_KEY` | **高德 Web 服务 Key**（GPS 地理编码/路径规划）；未配置时对话工具返回 `amap_not_configured` 错误码不阻断对话 |

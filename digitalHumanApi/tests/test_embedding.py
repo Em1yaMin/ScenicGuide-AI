@@ -651,3 +651,33 @@ async def test_rag_index_api_accepts_namespace(client, rag_persist_dir):
     )
     assert resp.status_code == 200
     assert resp.json()["namespace"] == "user_memory"
+
+
+# -- 批量上限（2026-08-11 船长调试修复：DashScope 单请求 input 上限 20） --
+
+def test_default_batch_size_matches_dashscope_limit():
+    """DEFAULT_BATCH_SIZE=20：DashScope embeddings 单请求 input 硬上限 20，21+ 返回 400。"""
+    from app.core.embedding import DEFAULT_BATCH_SIZE
+
+    assert DEFAULT_BATCH_SIZE == 20
+
+
+def test_batch_size_falls_back_to_settings(monkeypatch):
+    """构造函数 batch_size 未传时读取 settings.EMBEDDING_BATCH_SIZE（环境变量可覆盖）。"""
+    monkeypatch.setattr(settings, "EMBEDDING_BATCH_SIZE", 5)
+    emb = MinimaxEmbeddings(
+        api_key="k", api_base="https://api.minimaxi.com/v1", model="embo-01"
+    )
+    assert emb.batch_size == 5
+
+
+def test_explicit_batch_size_wins_over_settings(monkeypatch):
+    """显式传入 batch_size 优先于 settings.EMBEDDING_BATCH_SIZE。"""
+    monkeypatch.setattr(settings, "EMBEDDING_BATCH_SIZE", 20)
+    emb = MinimaxEmbeddings(
+        api_key="k",
+        api_base="https://api.minimaxi.com/v1",
+        model="embo-01",
+        batch_size=3,
+    )
+    assert emb.batch_size == 3

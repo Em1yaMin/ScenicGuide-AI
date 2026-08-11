@@ -19,6 +19,8 @@ Embedding 模型选择与 Embedding 客户端。
   `{"data": [{"embedding": [...]}]}`。DashScope compatible-mode 实测（2026-08-07）
   模型 qwen3.7-text-embedding（1024 维），端点 https://dashscope.aliyuncs.com/compatible-mode/v1。
   该格式无 query/db 区分，响应解析与 minimax 共用（兼容两种响应）。
+  **单请求 input 上限 20 条**（2026-08-11 船长实测：21+ 返回 400 "batch size is invalid"），
+  默认批量 `DEFAULT_BATCH_SIZE=20`（可用 EMBEDDING_BATCH_SIZE 覆盖，见 config.py）。
 
 Minimax Embedding 官方文档: https://platform.minimaxi.com/document/embeddings
 """
@@ -34,8 +36,12 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# 单次请求最大文本条数（Minimax 单请求支持批量 input）
-DEFAULT_BATCH_SIZE: int = 32
+# 单次请求最大文本条数。
+# 2026-08-11 船长实测：DashScope compatible-mode /embeddings 单请求 input 上限 20 条，
+# 21+ 返回 400 "batch size is invalid, it should not be larger than 20"（此前硬编码 32 导致
+# 批量向量化整体失败并静默降级 TF-IDF）。默认 20 即 DashScope 硬上限；可用环境变量
+# EMBEDDING_BATCH_SIZE 覆盖（见 config.py Settings），适配其他 Embedding 后端的批量限制。
+DEFAULT_BATCH_SIZE: int = 20
 # 请求超时（秒）
 DEFAULT_TIMEOUT: float = 30.0
 
@@ -63,7 +69,7 @@ class MinimaxEmbeddings(Embeddings):
         api_base: Optional[str] = None,
         model: Optional[str] = None,
         api_style: Optional[str] = None,
-        batch_size: int = DEFAULT_BATCH_SIZE,
+        batch_size: Optional[int] = None,
         timeout: float = DEFAULT_TIMEOUT,
         _transport: Optional[httpx.BaseTransport] = None,
     ):
@@ -74,7 +80,7 @@ class MinimaxEmbeddings(Embeddings):
             api_base: Embedding 端点基址，默认 https://api.minimaxi.com/v1
             model: Embedding 模型名，默认 embo-01
             api_style: 请求体格式 "minimax"|"openai"（EMBEDDING_API_STYLE，默认 minimax）
-            batch_size: 单次请求文本条数上限
+            batch_size: 单次请求文本条数上限（None 时取 EMBEDDING_BATCH_SIZE，默认 20）
             timeout: 请求超时秒数
             _transport: 仅供测试注入 httpx 传输层（如 MockTransport）
         """
@@ -88,7 +94,9 @@ class MinimaxEmbeddings(Embeddings):
                 self.api_style,
             )
             self.api_style = "minimax"
-        self.batch_size = batch_size
+        self.batch_size = (
+            batch_size if batch_size is not None else settings.EMBEDDING_BATCH_SIZE
+        )
         self.timeout = timeout
         self._transport = _transport
 
