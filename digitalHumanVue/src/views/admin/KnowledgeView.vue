@@ -39,7 +39,8 @@ const importFile = ref<File | null>(null)
 const importCategory = ref('景点资料')
 const isImporting = ref(false)
 const importError = ref<string | null>(null)
-const importResult = ref<string | null>(null)
+// 通用提示条：导入/保存成功后提示已同步前台检索（knowledge 命名空间向量索引）
+const notice = ref<string | null>(null)
 
 const showDelete = ref(false)
 const deletingItem = ref<KnowledgeItem | null>(null)
@@ -170,6 +171,7 @@ async function saveForm() {
     }
     showEditor.value = false
     await fetchList()
+    notice.value = '保存成功，已同步前台数字人知识检索'
   } catch (e) {
     editorError.value = e instanceof Error ? e.message : '保存失败'
   } finally {
@@ -227,7 +229,8 @@ async function doImport() {
     if (data.skipped_count > 0) {
       msg += `，跳过 ${data.skipped_count} 条无效数据`
     }
-    importResult.value = msg
+    msg += '，已同步前台数字人知识检索'
+    notice.value = msg
     await fetchList()
   } catch (e) {
     importError.value = e instanceof Error ? e.message : '导入失败'
@@ -275,9 +278,9 @@ onMounted(() => {
     </div>
 
     <!-- Import Result -->
-    <div v-if="importResult" class="import-result">
-      <span>{{ importResult }}</span>
-      <button class="icon-btn" @click="importResult = null">✕</button>
+    <div v-if="notice" class="import-result">
+      <span>{{ notice }}</span>
+      <button class="icon-btn" @click="notice = null">✕</button>
     </div>
 
     <!-- Error -->
