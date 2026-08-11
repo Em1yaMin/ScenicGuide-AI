@@ -55,8 +55,8 @@ async def geocode_location(description: str, city: Optional[str] = None) -> str:
     当用户给出一个位置描述（如"黄鹤楼""灵山景区东门""最近的停车场"）而
     当前对话中还没有对应坐标时调用；返回最多 5 个候选（含省/市/区县与
     formatted_address）。同名地点跨城市时高德会返回多个候选——请结合
-    景区上下文选择最匹配的一个（如景区在武汉就选城市为"武汉市"的候选），
-    或在 city 参数传入城市名/adcode 缩小范围。
+    景区上下文选择最匹配的一个（如景区在无锡就选城市为"无锡市"的候选，
+    灵山胜境位于无锡），或在 city 参数传入城市名/adcode 缩小范围。
 
     返回 JSON 成功信封：{"ok": true, "data": {"candidates": [{"location":
     "经度,纬度", "formatted_address": ..., "province": ..., "city": ...,
