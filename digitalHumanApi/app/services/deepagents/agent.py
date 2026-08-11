@@ -118,8 +118,8 @@ def _build_system_prompt() -> str:
 
 位置/路线工具使用原则（GPS/高德，坐标全部来自高德 API，零幻觉）：
 1. 用户描述位置（而非给坐标）时，先调 geocode_location 解析坐标；返回多个
-   候选时结合景区上下文选择最匹配的一个（如景区在武汉就选"武汉市"候选），
-   不确定可带 city 参数（城市名/adcode）缩小范围。
+   候选时结合景区上下文选择最匹配的一个（如景区在无锡就选"无锡市"候选，
+   灵山胜境位于无锡），不确定可带 city 参数（城市名/adcode）缩小范围。
 2. 规划路线遵循「先 geocode_location 再 plan_route」：plan_route 的
    origin/destination 必须是 geocode_location 返回候选的 location 字段
    （"经度,纬度"），不要传地址文本；mode 按用户出行方式选择

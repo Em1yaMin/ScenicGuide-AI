@@ -8,6 +8,8 @@
 5. 知识使用：知识库不够详细注明「建议到现场游客中心确认」、完全没有诚实告知
 6. 保留面：角色名称不变、工具使用原则（零幻觉/诚实告知/安全边界）原样保留、
    deepagents 装配层复用同一来源（记忆工具/GPS 原则不受影响）
+7. 景区对齐（船长 2026-08-11）：角色为「灵山景区」AI 导览员、景区背景为无锡灵山
+   胜境、知识边界以库内灵山数据为准（不引用库外景区设定）
 """
 
 from app.services import chat_agent
@@ -18,9 +20,31 @@ from app.services.deepagents import agent as dg_agent
 
 
 def test_role_name_unchanged():
-    """角色名称保持现有设定（AI 导览员 Neuro），不改名。"""
-    assert "「景区导览」的 AI 导览员" in chat_agent.SYSTEM_PROMPT
+    """角色名称保持现有设定（灵山景区 AI 导览员 Neuro），不改名。"""
+    assert "「灵山景区」的 AI 导览员" in chat_agent.SYSTEM_PROMPT
     assert "名字叫「Neuro」" in chat_agent.SYSTEM_PROMPT
+
+
+def test_scenic_area_background():
+    """景区背景对齐库内灵山胜境数据（船长 2026-08-11：景区定位为灵山）。"""
+    prompt = chat_agent.SYSTEM_PROMPT
+    assert "灵山胜境" in prompt
+    assert "无锡" in prompt
+    assert "国家5A级旅游景区" in prompt
+    # 核心景点与库内知识库（doc/景区知识库/ 灵山胜境文档）一致
+    assert "灵山大佛" in prompt
+    assert "九龙灌浴" in prompt
+    assert "灵山梵宫" in prompt
+
+
+def test_knowledge_boundary_lingshan():
+    """知识边界：景区内容以库内灵山数据为准，不引用库外景区设定。"""
+    prompt = chat_agent.SYSTEM_PROMPT
+    assert "库内灵山数据" in prompt
+    assert "search_knowledge" in prompt
+    assert "与灵山无关" in prompt
+    assert "不得作为灵山景区内容引用" in prompt
+    assert "禁止编造" in prompt
 
 
 def test_tool_principles_preserved():
@@ -155,6 +179,8 @@ def test_deepagents_reuses_main_prompt():
         "景区紧急电话",
         "不要强行推销",
         "建议到现场游客中心确认",
+        "灵山景区",
+        "库内灵山数据",
     ):
         assert keyword in dg_agent.SYSTEM_PROMPT
 
