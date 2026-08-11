@@ -5,7 +5,10 @@
 - 列表/详情：灵山数据（10 景点 / 8 路线）、404
 - 新增：id 自动生成（spot_011）、名称唯一 422、难度非法 422
 - 更新：部分更新、404
-- 删除：admin 放行（404 目标不存在）、operator 403（RBAC 删除类敏感操作）
+- 删除：admin 放行（404 目标不存在）、operator 403（RBAC 删除类敏感操作）、
+  **被路线引用删除 422（detail 列出引用路线 id 与名称，不执行删除）**、
+  解除引用后可删除
+- 字段校验：纯空白串（name/description/location/recommend_reason）422
 - 路线：spot_ids 引用校验（未知景点 id 422）
 - **与 agent 工具数据一致**：页面写入后 search_spots 等 agent 工具实时读到新数据
   （单一来源 = app/data JSON，agent 工具零改动）
@@ -321,23 +324,131 @@ async def test_operator_can_query_and_create(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_admin_delete_spot(client: AsyncClient):
-    """admin 删除景点：成功 True；目标不存在 404（证明过了 RBAC）。"""
+async def test_delete_referenced_spot_422(client: AsyncClient):
+    """删除被路线引用的景点 422，detail 列出引用路线（防悬挂 spot_ids）。"""
+    # spot_010（曼飞龙塔）被 route_002/route_005/route_007 引用
+    resp = await client.delete(
+        "/api/admin/scenic/spots/spot_010", headers=_auth(ADMIN_TOKEN)
+    )
+    assert resp.status_code == 422
+    detail = resp.json()["detail"]
+    assert "被路线" in detail
+    assert "请先在路线编辑中取消勾选后再删除" in detail
+    for route_id in ("route_002", "route_005", "route_007"):
+        assert route_id in detail
+    assert "自然风光全景游" in detail  # route_002 名称
+    assert "佛教艺术精品游" in detail  # route_005 名称
+    assert "浪漫情侣甜蜜游" in detail  # route_007 名称
+    # 未执行删除：景点与引用路线均保持原状
+    resp = await client.get(
+        "/api/admin/scenic/spots/spot_010", headers=_auth(ADMIN_TOKEN)
+    )
+    assert resp.status_code == 200
+    resp = await client.get(
+        "/api/admin/scenic/routes/route_002", headers=_auth(ADMIN_TOKEN)
+    )
+    assert "spot_010" in resp.json()["spot_ids"]
+
+
+@pytest.mark.asyncio
+async def test_delete_spot_after_unreferencing(client: AsyncClient):
+    """解除路线引用（取消勾选）后景点可正常删除。"""
+    resp = await client.get("/api/admin/scenic/routes", headers=_auth(ADMIN_TOKEN))
+    assert resp.status_code == 200
+    for r in resp.json():
+        if "spot_010" not in r["spot_ids"]:
+            continue
+        new_ids = [sid for sid in r["spot_ids"] if sid != "spot_010"]
+        resp = await client.put(
+            f"/api/admin/scenic/routes/{r['id']}",
+            json={"spot_ids": new_ids},
+            headers=_auth(ADMIN_TOKEN),
+        )
+        assert resp.status_code == 200
     resp = await client.delete(
         "/api/admin/scenic/spots/spot_010", headers=_auth(ADMIN_TOKEN)
     )
     assert resp.status_code == 200
     assert resp.json() == {"success": True}
+
+
+@pytest.mark.asyncio
+async def test_admin_delete_spot(client: AsyncClient):
+    """admin 删除景点：成功 True；目标不存在 404（证明过了 RBAC）。"""
+    # 既有 10 个景点均被路线引用，先新建一个未引用景点再删除
+    resp = await client.post(
+        "/api/admin/scenic/spots",
+        json={"name": "待删除景点", "description": "x"},
+        headers=_auth(ADMIN_TOKEN),
+    )
+    assert resp.status_code == 201
+    spot_id = resp.json()["id"]
+    resp = await client.delete(
+        f"/api/admin/scenic/spots/{spot_id}", headers=_auth(ADMIN_TOKEN)
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"success": True}
     # 删除生效
     resp = await client.get(
-        "/api/admin/scenic/spots/spot_010", headers=_auth(ADMIN_TOKEN)
+        f"/api/admin/scenic/spots/{spot_id}", headers=_auth(ADMIN_TOKEN)
     )
     assert resp.status_code == 404
     # 已删除的 id 不复活
     resp = await client.delete(
-        "/api/admin/scenic/spots/spot_010", headers=_auth(ADMIN_TOKEN)
+        f"/api/admin/scenic/spots/{spot_id}", headers=_auth(ADMIN_TOKEN)
     )
     assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_blank_strings_422(client: AsyncClient):
+    """纯空白串 422（防绕过 min_length 写入空名称/介绍等）。"""
+    # 空白名称/介绍
+    resp = await client.post(
+        "/api/admin/scenic/spots",
+        json={"name": "   ", "description": "x"},
+        headers=_auth(ADMIN_TOKEN),
+    )
+    assert resp.status_code == 422
+    resp = await client.post(
+        "/api/admin/scenic/spots",
+        json={"name": "空白介绍景点", "description": "   "},
+        headers=_auth(ADMIN_TOKEN),
+    )
+    assert resp.status_code == 422
+    # 可选字段显式传纯空白串同样拒绝
+    resp = await client.post(
+        "/api/admin/scenic/spots",
+        json={"name": "空白位置景点", "description": "x", "location": "  "},
+        headers=_auth(ADMIN_TOKEN),
+    )
+    assert resp.status_code == 422
+    resp = await client.post(
+        "/api/admin/scenic/routes",
+        json={"name": "空白理由路线", "description": "x", "recommend_reason": "  "},
+        headers=_auth(ADMIN_TOKEN),
+    )
+    assert resp.status_code == 422
+    # 更新路径同样拒绝
+    resp = await client.put(
+        "/api/admin/scenic/spots/spot_001",
+        json={"name": "   "},
+        headers=_auth(ADMIN_TOKEN),
+    )
+    assert resp.status_code == 422
+    # 可选字段空串/省略仍允许（前端表单 location/recommend_reason 可为空）
+    resp = await client.post(
+        "/api/admin/scenic/spots",
+        json={"name": "无位置景点", "description": "x", "location": ""},
+        headers=_auth(ADMIN_TOKEN),
+    )
+    assert resp.status_code == 201
+    resp = await client.post(
+        "/api/admin/scenic/routes",
+        json={"name": "无理由路线", "description": "x", "spot_ids": ["spot_001"]},
+        headers=_auth(ADMIN_TOKEN),
+    )
+    assert resp.status_code == 201
 
 
 @pytest.mark.asyncio

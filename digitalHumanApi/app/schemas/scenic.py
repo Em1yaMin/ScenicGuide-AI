@@ -13,9 +13,6 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-# 难度可选值（与既有数据/工具提示词约定一致）
-DIFFICULTY_VALUES = ("轻松", "中等", "挑战")
-
 
 class ScenicSpot(BaseModel):
     """景点数据结构（字段与 app/data/spots.json 对齐，另见 schemas/home.HomeSpot）。"""
@@ -42,10 +39,6 @@ class ScenicSpotCreate(BaseModel):
     difficulty: str = Field(default="轻松", description="难度：轻松/中等/挑战")
     location: str = Field(default="", description="具体位置")
     highlights: list[str] = Field(default_factory=list, description="游玩亮点")
-
-    def validate_difficulty(self) -> None:
-        if self.difficulty not in DIFFICULTY_VALUES:
-            raise ValueError(f"difficulty 仅支持 {'/'.join(DIFFICULTY_VALUES)}")
 
 
 class ScenicSpotUpdate(BaseModel):
@@ -87,10 +80,6 @@ class ScenicRouteCreate(BaseModel):
     total_duration_minutes: int = Field(default=180, ge=1, le=1440, description="总时长（分钟）")
     difficulty: str = Field(default="轻松", description="难度：轻松/中等/挑战")
     recommend_reason: str = Field(default="", description="推荐理由")
-
-    def validate_difficulty(self) -> None:
-        if self.difficulty not in DIFFICULTY_VALUES:
-            raise ValueError(f"difficulty 仅支持 {'/'.join(DIFFICULTY_VALUES)}")
 
 
 class ScenicRouteUpdate(BaseModel):

@@ -56,7 +56,9 @@ filter_by_tags / recommend_routes）、首页活数据（`/api/v1/home/highlight
 ```
 
 - `id`：服务端自动生成（`route_009`）
-- `spot_ids`：必须引用已存在景点 id（后端校验，未知 id 返回 422）
+- `spot_ids`：必须引用已存在景点 id（后端校验，未知 id 返回 422）；删除被
+  路线引用的景点会被拒绝（422，detail 列出引用路线 id 与名称，需先在路线
+  编辑中取消勾选）
 
 ## 端点
 
@@ -68,7 +70,7 @@ filter_by_tags / recommend_routes）、首页活数据（`/api/v1/home/highlight
 | GET | `/api/admin/scenic/spots/{spot_id}` | 按 id 查询（不存在 404） |
 | POST | `/api/admin/scenic/spots` | 新建（201；名称重复 422） |
 | PUT | `/api/admin/scenic/spots/{spot_id}` | 部分更新（仅更新传入非 None 字段；不存在 404） |
-| DELETE | `/api/admin/scenic/spots/{spot_id}` | 删除（**要求 admin**；不存在 404；成功 `{"success": true}`） |
+| DELETE | `/api/admin/scenic/spots/{spot_id}` | 删除（**要求 admin**；不存在 404；**被路线引用 422**；成功 `{"success": true}`） |
 
 ### 路线
 
@@ -120,7 +122,7 @@ PUT 仅需携带要更新的字段（未传字段保持原值）。
 | 401 | 未认证/错 token | 未授权访问 |
 | 403 | operator 调删除类接口 | 需要 admin 角色 |
 | 404 | 目标 id 不存在 | 景点/路线不存在: {id} |
-| 422 | 业务校验失败 | 名称已存在 / 引用了不存在的景点 id / difficulty 仅支持… |
+| 422 | 业务校验失败 | 名称已存在 / 引用了不存在的景点 id / 删除被路线引用的景点（detail 列出引用路线） / 字段纯空白 / difficulty 仅支持… |
 | 200 | 全局异常兜底 | code=500 服务器内部错误（FastAPI catch-all，与全站一致） |
 
 ## 数据一致性保证
@@ -144,8 +146,10 @@ PUT 仅需携带要更新的字段（未传字段保持原值）。
 
 ## 测试
 
-`digitalHumanApi/tests/test_scenic_data_api.py`（22 用例）：鉴权 401 /
+`digitalHumanApi/tests/test_scenic_data_api.py`（25 用例）：鉴权 401 /
 RBAC（operator 删除 403）/ 灵山数据列表 / CRUD / 名称唯一 / spot_ids 引用 /
-**agent 工具实时读到页面写入数据** / 数据文件原子性 / 工具缓存失效联动。
+删除被路线引用景点 422（detail 列出引用路线）/ 解除引用后可删除 / 纯空白
+字段 422 / **agent 工具实时读到页面写入数据** / 数据文件原子性 / 工具缓存
+失效联动。
 测试通过 monkeypatch 重定向 `_DATA_DIR`（service + recommend_agent +
 home_service 三处同源）到临时目录，不污染工作区数据文件。

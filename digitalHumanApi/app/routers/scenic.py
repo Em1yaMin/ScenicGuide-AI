@@ -99,8 +99,11 @@ async def delete_spot(
     spot_id: str,
     _: str = Depends(require_role("admin")),
 ) -> dict[str, bool]:
-    """删除景点（删除类敏感操作，要求 admin 角色）。"""
-    deleted = scenic_data_service.delete_spot(spot_id)
+    """删除景点（删除类敏感操作，要求 admin 角色；被路线引用时 422）。"""
+    try:
+        deleted = scenic_data_service.delete_spot(spot_id)
+    except ValueError as exc:
+        raise _value_error_422(exc) from exc
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

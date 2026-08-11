@@ -155,6 +155,30 @@ def _validate_difficulty(value: str) -> None:
         raise ValueError("difficulty 仅支持 轻松/中等/挑战")
 
 
+def _validate_non_blank(value: str, field: str, *, allow_empty: bool = False) -> None:
+    """strip 后非空校验：纯空白串拒绝（防空白绕过 Pydantic min_length 落库）。
+
+    allow_empty=True 用于可选字段（location/recommend_reason，默认空串合法）：
+    仅拒绝显式传入的纯空白串，空串/省略仍放行（前端表单可为空）。
+    """
+    if not value.strip() and (not allow_empty or value):
+        raise ValueError(f"{field} 不能为空")
+
+
+def _validate_spot_not_referenced(spot_id: str) -> None:
+    """删除校验：被路线引用的景点禁止删除（防悬挂 spot_ids 破坏业务不变量）。"""
+    referencing = [
+        r for r in _load_json(_ROUTES_FILE) if spot_id in (r.get("spot_ids") or [])
+    ]
+    if referencing:
+        routes_desc = "、".join(
+            f"{r.get('id')}（{r.get('name')}）" for r in referencing
+        )
+        raise ValueError(
+            f"该景点被路线 {routes_desc} 引用，请先在路线编辑中取消勾选后再删除"
+        )
+
+
 def _validate_unique_name(
     items: List[Dict[str, Any]], name: str, exclude_id: Optional[str] = None
 ) -> None:
@@ -185,6 +209,9 @@ def get_spot(spot_id: str) -> Optional[ScenicSpot]:
 def create_spot(request: ScenicSpotCreate) -> ScenicSpot:
     """新建景点（id 服务端生成；名称唯一校验；原子写入 + 工具缓存失效）。"""
     _validate_difficulty(request.difficulty)
+    _validate_non_blank(request.name, "name")
+    _validate_non_blank(request.description, "description")
+    _validate_non_blank(request.location, "location", allow_empty=True)
     with _write_lock:
         items = _load_json(_SPOTS_FILE)
         _validate_unique_name(items, request.name)
@@ -216,10 +243,11 @@ def update_spot(spot_id: str, request: ScenicSpotUpdate) -> Optional[ScenicSpot]
         if target is None:
             return None
         if request.name is not None:
+            _validate_non_blank(request.name, "name")
             _validate_unique_name(items, request.name, exclude_id=spot_id)
-        if request.name is not None:
             target["name"] = request.name.strip()
         if request.description is not None:
+            _validate_non_blank(request.description, "description")
             target["description"] = request.description.strip()
         if request.tags is not None:
             target["tags"] = _normalize_string_list(request.tags)
@@ -228,6 +256,7 @@ def update_spot(spot_id: str, request: ScenicSpotUpdate) -> Optional[ScenicSpot]
         if request.difficulty is not None:
             target["difficulty"] = request.difficulty
         if request.location is not None:
+            _validate_non_blank(request.location, "location", allow_empty=True)
             target["location"] = request.location.strip()
         if request.highlights is not None:
             target["highlights"] = _normalize_string_list(request.highlights)
@@ -238,12 +267,13 @@ def update_spot(spot_id: str, request: ScenicSpotUpdate) -> Optional[ScenicSpot]
 
 
 def delete_spot(spot_id: str) -> bool:
-    """删除景点（成功 True，不存在 False）。"""
+    """删除景点（成功 True，不存在 False；被路线引用时抛 ValueError）。"""
     with _write_lock:
         items = _load_json(_SPOTS_FILE)
-        remaining = [s for s in items if s.get("id") != spot_id]
-        if len(remaining) == len(items):
+        if not any(s.get("id") == spot_id for s in items):
             return False
+        _validate_spot_not_referenced(spot_id)
+        remaining = [s for s in items if s.get("id") != spot_id]
         _atomic_write_json(_SPOTS_FILE, remaining)
     _invalidate_agent_tool_cache()
     logger.info("景区数据-景点删除: id=%s", spot_id)
@@ -279,6 +309,9 @@ def get_route(route_id: str) -> Optional[ScenicRoute]:
 def create_route(request: ScenicRouteCreate) -> ScenicRoute:
     """新建路线（id 服务端生成；名称唯一 + spot_ids 引用校验；原子写入）。"""
     _validate_difficulty(request.difficulty)
+    _validate_non_blank(request.name, "name")
+    _validate_non_blank(request.description, "description")
+    _validate_non_blank(request.recommend_reason, "recommend_reason", allow_empty=True)
     spot_ids = _normalize_string_list(request.spot_ids)
     with _write_lock:
         items = _load_json(_ROUTES_FILE)
@@ -316,10 +349,11 @@ def update_route(route_id: str, request: ScenicRouteUpdate) -> Optional[ScenicRo
         if target is None:
             return None
         if request.name is not None:
+            _validate_non_blank(request.name, "name")
             _validate_unique_name(items, request.name, exclude_id=route_id)
-        if request.name is not None:
             target["name"] = request.name.strip()
         if request.description is not None:
+            _validate_non_blank(request.description, "description")
             target["description"] = request.description.strip()
         if spot_ids is not None:
             _validate_route_spot_ids(spot_ids)
@@ -333,6 +367,9 @@ def update_route(route_id: str, request: ScenicRouteUpdate) -> Optional[ScenicRo
         if request.difficulty is not None:
             target["difficulty"] = request.difficulty
         if request.recommend_reason is not None:
+            _validate_non_blank(
+                request.recommend_reason, "recommend_reason", allow_empty=True
+            )
             target["recommend_reason"] = request.recommend_reason.strip()
         _atomic_write_json(_ROUTES_FILE, items)
     _invalidate_agent_tool_cache()

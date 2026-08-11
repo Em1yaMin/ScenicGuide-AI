@@ -1033,7 +1033,7 @@ onMounted(() => {
           <div class="modal-body">
             <p>
               确定要删除景点 <strong>{{ deletingSpot?.name }}</strong> 吗？删除后数字人导览 Agent
-              将无法回答该景点问题。
+              将无法回答该景点问题。被路线引用时无法删除，请先在路线编辑中解除引用。
             </p>
           </div>
           <div class="modal-footer">
