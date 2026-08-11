@@ -53,6 +53,23 @@ test.describe('管理端', () => {
     expect(errors).toEqual([])
   })
 
+  test('管理员登录页：返回首页入口存在且可导航回首页', async ({ page }) => {
+    const errors = attachPageErrorCollector(page)
+    await mockApiRoutes(page)
+    await page.goto('/admin/login')
+
+    // 游客误入可随时退出：返回首页入口可见（页头描边按钮）
+    const backHome = page.getByRole('link', { name: /返回首页/ })
+    await expect(backHome).toBeVisible()
+
+    // 点击 → 导航回首页（/ 重定向 /visitor，hero 渲染）
+    await backHome.click()
+    await expect(page).toHaveURL(/\/visitor$/)
+    await expect(page.locator('.hero-title')).toContainText('AI 数字人')
+
+    expect(errors).toEqual([])
+  })
+
   test('用户登录流程：mock 登录成功跳转访客首页', async ({ page }) => {
     const errors = attachPageErrorCollector(page)
     await mockApiRoutes(page)

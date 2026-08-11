@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAdminAuthStore } from '@/stores/adminAuth'
 
 const route = useRoute()
@@ -47,13 +47,20 @@ async function handleLogin() {
 
 <template>
   <div class="admin-login">
+    <!-- 页头返回入口（游客误入可随时退出回首页，批次修复） -->
+    <div class="login-back">
+      <RouterLink to="/" class="back-home-btn">← 返回首页</RouterLink>
+    </div>
+
     <div class="login-card">
       <div class="login-brand">
         <span class="brand-seal">管</span>
         <span class="brand-text">景区管理后台</span>
       </div>
       <h1 class="login-title">管理员登录</h1>
-      <p class="login-desc">使用管理员账号密码登录后进入管理后台</p>
+      <p class="login-desc">
+        管理员专用入口：使用管理员账号密码登录后进入管理后台，访客请返回首页使用数字人导览服务
+      </p>
 
       <form class="login-form" @submit.prevent="handleLogin">
         <div class="form-row">
@@ -89,8 +96,7 @@ async function handleLogin() {
       </form>
 
       <p class="login-hint">
-        默认演示账号见 README（环境变量 <code>ADMIN_USERNAME</code> /
-        <code>ADMIN_PASSWORD</code>）
+        默认演示账号见 README（环境变量 <code>ADMIN_USERNAME</code> / <code>ADMIN_PASSWORD</code>）
       </p>
     </div>
   </div>
@@ -100,11 +106,48 @@ async function handleLogin() {
 .admin-login {
   min-height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: var(--space-lg);
   color: var(--ink);
   background: var(--paper);
+}
+
+/* 页头返回入口：与登录卡片同宽、左对齐，描边按钮 token 规范（见 doc/redesign-v1.md §2.1 色彩） */
+.login-back {
+  width: 100%;
+  max-width: 400px;
+  margin-bottom: var(--space-md);
+}
+
+.back-home-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-md);
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--text-small);
+  font-weight: 500;
+  text-decoration: none;
+  transition:
+    background var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.back-home-btn:hover {
+  background: var(--overlay);
+  border-color: var(--mist-strong);
+  color: var(--jade);
+}
+
+.back-home-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--jade-soft);
 }
 
 .login-card {
