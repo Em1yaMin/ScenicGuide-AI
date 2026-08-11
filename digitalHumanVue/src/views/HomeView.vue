@@ -179,7 +179,7 @@ function scrollToRecommendedRoutes() {
 
 <template>
   <div class="home">
-    <!-- Hero Section：论点 = 数字人导览；右侧墨色山峦剪影 + 朱砂印章落款（签名元素） -->
+    <!-- Hero Section：论点 = 数字人导览；右侧墨色山峦剪影（支持元素） -->
     <section class="hero" :class="{ 'hero--visible': heroVisible }">
       <!-- 水墨山峦剪影（三层：远雾 → 青玉淡 → 墨青；支持元素，aria-hidden） -->
       <svg
