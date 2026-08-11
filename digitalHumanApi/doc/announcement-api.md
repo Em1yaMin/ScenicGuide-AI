@@ -130,9 +130,10 @@ GET /api/v1/announcements?limit=20
 
 ## 二、首页活数据接口（公开，无鉴权）
 
-背景：首页「热门景点 / 推荐路线」卡片原先写死在前端，现改为数据库/数据文件驱动。
-数据源仍为后端 `digitalHumanApi/app/data/spots.json` 与 `routes.json`（**每次请求实时读取**，
-管理员改数据 → 首页刷新即变化；后续如需管理端在线编辑，可在此接口链路加数据表）。
+背景：首页「热门景点 / 推荐路线」卡片原先写死在前端，现改为数据文件驱动。
+数据源为后端 `digitalHumanApi/app/data/spots.json` 与 `routes.json`（**每次请求实时读取**），
+与导览 agent 结构化工具同源；管理端在线编辑走 `/api/admin/scenic`（管理后台知识库页「景点数据/路线数据」页签，契约见 `doc/scenic-data-api.md`），
+改数据后首页刷新即变化。
 
 ```
 GET /api/v1/home/highlights?spots_limit=3&routes_limit=3
@@ -149,21 +150,21 @@ GET /api/v1/home/highlights?spots_limit=3&routes_limit=3
 {
   "spots": [
     {
-      "id": "spot_001", "name": "翠微峰",
-      "description": "景区最高峰，海拔1200米…",
-      "tags": ["自然风光", "登山"], "duration_minutes": 120,
-      "difficulty": "中等", "location": "景区北部",
-      "highlights": ["云海观景台", "日出平台"]
+      "id": "spot_001", "name": "灵山大照壁",
+      "description": "进入灵山胜境的第一道视觉屏障，长39.8米、高7米的青石照壁…",
+      "tags": ["历史人文", "地标", "拍照打卡"], "duration_minutes": 30,
+      "difficulty": "轻松", "location": "景区入口处，面朝太湖",
+      "highlights": ["华夏第一壁", "赵朴初题字"]
     }
   ],
   "routes": [
     {
-      "id": "route_001", "name": "经典自然风光一日游",
-      "description": "涵盖景区最精华的自然景观…",
-      "spot_ids": ["spot_001", "spot_004"],
-      "tags": ["自然风光", "经典"], "suitable_for": ["情侣", "摄影爱好者"],
-      "total_duration_minutes": 225, "difficulty": "中等",
-      "recommend_reason": "这条路线集中了景区三大核心自然景观…"
+      "id": "route_001", "name": "历史文化深度游",
+      "description": "从华夏第一壁到千年古刹再到佛教艺术巅峰…",
+      "spot_ids": ["spot_001", "spot_006", "spot_007", "spot_008", "spot_009"],
+      "tags": ["历史人文", "文化体验", "深度游"], "suitable_for": ["文化爱好者", "老年人"],
+      "total_duration_minutes": 360, "difficulty": "中等",
+      "recommend_reason": "这条路线串联千年佛教文化脉络…"
     }
   ]
 }

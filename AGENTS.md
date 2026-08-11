@@ -94,10 +94,10 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 船长决策 2026-08-11 灵山化：管理后台知识库页能查看/管理导览 agent 的景区数据（spots/routes），**页面数据 = agent 数据单一来源**。选定方案②（页面管理直接读写 app/data JSON 并同步 agent 工具），理由：agent 结构化工具每次调用实时读文件（零改动即生效）；home_service/推荐问句降级/管理端首页数据工具同源联动；方案①（导入 knowledge_base）会破坏结构化字段或需重构同步工具读 DB（违反「不重构对话链路」约束）。权威契约 `doc/scenic-data-api.md`。
 
-- **后端**：`app/routers/scenic.py`（前缀 `/api/admin/scenic`，X-Admin-Token 鉴权，RBAC 同知识库：删除类要求 admin）+ `app/services/scenic_data_service.py`（文件 CRUD：**原子写入** 临时文件+os.replace+fsync、模块级写锁；id 服务端自增 `spot_011`/`route_009` 编号=max+1 不复用）+ `app/schemas/scenic.py`（字段与 app/data JSON 对齐，extra=allow）；端点：`GET/POST /spots`、`GET/PUT/DELETE /spots/{id}`、routes 同构；**业务校验**：景点/路线名称唯一 422（防 agent 工具按名检索歧义）、路线 spot_ids 必须引用已存在景点 id 422（防「未知景点」）、难度仅 轻松/中等/挑战
+- **后端**：`app/routers/scenic.py`（前缀 `/api/admin/scenic`，X-Admin-Token 鉴权，RBAC 同知识库：删除类要求 admin）+ `app/services/scenic_data_service.py`（文件 CRUD：**原子写入** 临时文件+os.replace+fsync、模块级写锁；id 服务端自增 `spot_011`/`route_009` 编号=max+1 不复用）+ `app/schemas/scenic.py`（字段与 app/data JSON 对齐，extra=allow）；端点：`GET/POST /spots`、`GET/PUT/DELETE /spots/{id}`、routes 同构；**业务校验**：景点/路线名称唯一 422（防 agent 工具按名检索歧义）、路线 spot_ids 必须引用已存在景点 id 422（防「未知景点」）、删除被路线引用的景点 422（detail 列出引用路线，防悬挂 spot_ids）、字段纯空白 422、难度仅 轻松/中等/挑战
 - **与 agent 工具数据一致（核心验收）**：写入即 `_invalidate_agent_tool_cache` → `tool_cache.invalidate_scenic()`（新增方法，清除 search_spots/search_routes/get_spot_detail/get_route_detail/filter_by_tags/recommend_routes 缓存条目）——静态数据工具 TTL 1h，不失效则管理端改完数据 agent 最长 1 小时读到旧结果；`_STATIC_DATA_TOOLS` 与 agent.py `_CACHEABLE_TOOLS` 同源（新增工具须两边同步）
 - **前端**：`src/api/scenic.ts` + `src/types/scenic.ts` + `api/index.ts` 端点常量（API_ADMIN_SCENIC_SPOTS/ROUTES）；KnowledgeView 三页签（知识文档=既有 CRUD/景点数据/路线数据），景点表单（名称/介绍/标签/时长/难度/位置/亮点）、路线表单（名称/介绍/**途经景点勾选**（从景点数据加载）/标签/适合人群/时长/难度/推荐理由），保存提示「数字人导览 Agent 实时生效」
-- 测试：`tests/test_scenic_data_api.py`（22：鉴权/RBAC/灵山数据列表/CRUD/名称唯一/spot_ids 引用/agent 工具实时读到页面写入数据/数据文件原子性/工具缓存失效联动）
+- 测试：`tests/test_scenic_data_api.py`（25：鉴权/RBAC/灵山数据列表/CRUD/名称唯一/spot_ids 引用/删除被引用景点 422 与解除引用后可删/纯空白字段 422/agent 工具实时读到页面写入数据/数据文件原子性/工具缓存失效联动）
 - 首页静态兜底（`digitalHumanVue/src/views/HomeView.vue` FALLBACK_SPOTS/FALLBACK_ROUTES）已替换为灵山地标（灵山大佛/九龙灌浴/灵山梵宫 + 三条灵山路线）
 
 ## 公告模块 + 首页活数据（批次4 B2：首个真实 Alembic 迁移）
