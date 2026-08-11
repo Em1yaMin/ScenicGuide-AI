@@ -6,7 +6,7 @@
 
 景区导览 AI 数字人系统 — Python FastAPI 后端 + Vue 3 前端单体应用，通过 Docker Compose 部署。后端集成 Dify AI 平台仅提供对话双轨回落与历史数据抓取（阶段4 起量化评估等分析链路已本地 LLM 化，见「Dify 依赖面」专节），另含纯本地推荐引擎、本地 RAG 知识库和 AI 运营分析。前端提供访客端（数字人对话）和管理后台（数据大屏 + 报告 + 知识库管理）。
 
-**景区定位（船长 2026-08-11 决策，覆盖 2026-08-07 旧记录「演示数据为翠微峰/碧波湖、不引入灵山胜境」）**：景区为灵山景区（无锡灵山胜境），对话系统提示词/角色设定/知识库均以灵山为准（角色行「你是「灵山景区」的 AI 导览员」+ 景区背景 + 知识边界「以库内灵山数据为准，不引用库外景区设定」），RAG 文档源 doc/景区知识库/ 含三份 md：灵山胜境_景点结构化数据集_知识库版.md、灵山胜境_历史文化景点特色与个性化游览指南_知识库版.md 为灵山文档，景点景区旅游数据行为分析数据_知识库版.md 为全国 152 个景区的多景区行为分析数据集（仅少数章节与灵山相关）、非灵山文档（该文件在 RAG 索引中的排除已另派任务处理，不在此变更内处理）；注意 app/data/spots.json（翠微峰等 10 景点）与 routes.json（8 路线）仍为早期演示数据、与灵山知识库不同源，知识库 CRUD/导入的 knowledge 命名空间与 app/data 结构化工具（search_spots 等）是两套数据，提示词不可声称结构化工具返回即灵山数据（数据迁移另行评估）。
+**景区定位（船长 2026-08-11 决策，覆盖 2026-08-07 旧记录「演示数据为翠微峰/碧波湖、不引入灵山胜境」）**：景区为灵山景区（无锡灵山胜境），对话系统提示词/角色设定/知识库均以灵山为准（角色行「你是「灵山景区」的 AI 导览员」+ 景区背景 + 知识边界「以库内灵山数据为准，不引用库外景区设定」），RAG 文档源 doc/景区知识库/ 含三份 md：灵山胜境_景点结构化数据集_知识库版.md、灵山胜境_历史文化景点特色与个性化游览指南_知识库版.md 为灵山文档，景点景区旅游数据行为分析数据_知识库版.md 为全国 152 个景区的多景区行为分析数据集（仅少数章节与灵山相关）、非灵山文档（该文件在 RAG 索引中的排除已另派任务处理，不在此变更内处理）；**批次 e3（2026-08-11 灵山化）已完成：app/data/spots.json（10 景点）与 routes.json（8 路线）已从翠微峰等演示数据替换为灵山胜境数据**（核心景点：灵山大照壁/佛足坛/菩提大道/九龙灌浴/百子戏弥勒/祥符禅寺/灵山大佛/灵山梵宫/五印坛城/曼飞龙塔；8 条路线：历史文化深度游/自然风光全景游/亲子家庭轻松游/祈福朝圣一日游/佛教艺术精品游/银发康养慢游/浪漫情侣甜蜜游/灵山全景经典游），schema 未变（spot_001…/route_001…），结构化工具（search_spots 等）与首页活数据自动基于灵山；管理后台知识库页（KnowledgeView）新增「景点数据/路线数据」页签可直接管理该 JSON（见「景区数据管理」专节），知识库 CRUD/导入的 knowledge 命名空间与 app/data 结构化工具仍是两套数据但内容同源（灵山）。
 
 # Architecture
 
@@ -87,8 +87,18 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - `app/models/knowledge.py` + `app/services/knowledge_service.py` + `app/routers/knowledge.py` — `/api/admin/knowledge*` CRUD + `/import`
 - **CRUD/导入变更后自动同步向量索引**：增/删/改/导入后 `knowledge_service._sync_knowledge_index` 以 DB 全量条目重建 knowledge 命名空间（`index_knowledge_entries`，条目量小、全量重建开销可忽略）；索引失败仅告警日志不阻断 CRUD（下次变更/手动索引自愈）；批量导入仅最后统一同步一次
 - 认证：`X-Admin-Token` 请求头，token 来自 `ADMIN_API_TOKEN` 环境变量（`app/core/config.py`；校验实现公共依赖 `app/routers/deps.py::verify_admin_token`，公告管理同源复用）；**RBAC 角色分级（批次6 C3）**见下方「安全加固」专节——删除类敏感操作（本模块 `DELETE /{kb_id}`）要求 admin 角色
-- 前端：`digitalHumanVue/src/views/admin/KnowledgeView.vue`（管理端鉴权头统一走 `src/utils/adminHeaders.ts`，双凭据见「管理员账号密码登录」专节）
+- 前端：`digitalHumanVue/src/views/admin/KnowledgeView.vue`（管理端鉴权头统一走 `src/utils/adminHeaders.ts`，双凭据见「管理员账号密码登录」专节；批次 e3 起为三页签：知识文档/景点数据/路线数据，见下方「景区数据管理」专节）
 - 导入支持 `.json` 数组和按 `# ` 标题切分的 `.md` 文件
+
+## 景区数据管理（批次 e3：知识库页与导览 agent 景区数据同步，方案②）
+
+船长决策 2026-08-11 灵山化：管理后台知识库页能查看/管理导览 agent 的景区数据（spots/routes），**页面数据 = agent 数据单一来源**。选定方案②（页面管理直接读写 app/data JSON 并同步 agent 工具），理由：agent 结构化工具每次调用实时读文件（零改动即生效）；home_service/推荐问句降级/管理端首页数据工具同源联动；方案①（导入 knowledge_base）会破坏结构化字段或需重构同步工具读 DB（违反「不重构对话链路」约束）。权威契约 `doc/scenic-data-api.md`。
+
+- **后端**：`app/routers/scenic.py`（前缀 `/api/admin/scenic`，X-Admin-Token 鉴权，RBAC 同知识库：删除类要求 admin）+ `app/services/scenic_data_service.py`（文件 CRUD：**原子写入** 临时文件+os.replace+fsync、模块级写锁；id 服务端自增 `spot_011`/`route_009` 编号=max+1 不复用）+ `app/schemas/scenic.py`（字段与 app/data JSON 对齐，extra=allow）；端点：`GET/POST /spots`、`GET/PUT/DELETE /spots/{id}`、routes 同构；**业务校验**：景点/路线名称唯一 422（防 agent 工具按名检索歧义）、路线 spot_ids 必须引用已存在景点 id 422（防「未知景点」）、删除被路线引用的景点 422（detail 列出引用路线，防悬挂 spot_ids）、字段纯空白 422、难度仅 轻松/中等/挑战
+- **与 agent 工具数据一致（核心验收）**：写入即 `_invalidate_agent_tool_cache` → `tool_cache.invalidate_scenic()`（新增方法，清除 search_spots/search_routes/get_spot_detail/get_route_detail/filter_by_tags/recommend_routes 缓存条目）——静态数据工具 TTL 1h，不失效则管理端改完数据 agent 最长 1 小时读到旧结果；`_STATIC_DATA_TOOLS` 与 agent.py `_CACHEABLE_TOOLS` 同源（新增工具须两边同步）
+- **前端**：`src/api/scenic.ts` + `src/types/scenic.ts` + `api/index.ts` 端点常量（API_ADMIN_SCENIC_SPOTS/ROUTES）；KnowledgeView 三页签（知识文档=既有 CRUD/景点数据/路线数据），景点表单（名称/介绍/标签/时长/难度/位置/亮点）、路线表单（名称/介绍/**途经景点勾选**（从景点数据加载）/标签/适合人群/时长/难度/推荐理由），保存提示「数字人导览 Agent 实时生效」
+- 测试：`tests/test_scenic_data_api.py`（25：鉴权/RBAC/灵山数据列表/CRUD/名称唯一/spot_ids 引用/删除被引用景点 422 与解除引用后可删/纯空白字段 422/agent 工具实时读到页面写入数据/数据文件原子性/工具缓存失效联动）
+- 首页静态兜底（`digitalHumanVue/src/views/HomeView.vue` FALLBACK_SPOTS/FALLBACK_ROUTES）已替换为灵山地标（灵山大佛/九龙灌浴/灵山梵宫 + 三条灵山路线）
 
 ## 公告模块 + 首页活数据（批次4 B2：首个真实 Alembic 迁移）
 

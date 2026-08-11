@@ -94,11 +94,37 @@ test.describe('管理端', () => {
 
     // 侧栏导航
     await expect(page.locator('.sidebar-nav')).toContainText('知识库')
-    // mock 数据行渲染（标题 + 分类）
+    // 默认「知识文档」页签，mock 数据行渲染（标题 + 分类）
+    await expect(page.locator('.scenic-tab.active')).toContainText('知识文档')
     const rows = page.locator('.data-table tbody tr')
     await expect(rows).toHaveCount(2)
-    await expect(rows.first()).toContainText('黄鹤楼讲解词')
+    await expect(rows.first()).toContainText('灵山大佛讲解词')
     await expect(rows.nth(1)).toContainText('FAQ')
+
+    expect(errors).toEqual([])
+  })
+
+  test('知识库页：景点/路线数据页签渲染（导览 agent 数据单一来源）', async ({ page }) => {
+    const errors = attachPageErrorCollector(page)
+    await presetAdminLogin(page)
+    await mockApiRoutes(page)
+    await page.goto('/admin/knowledge')
+
+    // 景点数据页签：mock 3 条灵山景点
+    await page.getByRole('button', { name: '景点数据' }).click()
+    await expect(page.locator('.scenic-tab.active')).toContainText('景点数据')
+    const spotRows = page.locator('.data-table tbody tr')
+    await expect(spotRows).toHaveCount(3)
+    await expect(spotRows.first()).toContainText('灵山大照壁')
+    await expect(spotRows.first()).toContainText('spot_001')
+
+    // 路线数据页签：mock 1 条灵山路线（含途经景点展示）
+    await page.getByRole('button', { name: '路线数据' }).click()
+    await expect(page.locator('.scenic-tab.active')).toContainText('路线数据')
+    const routeRows = page.locator('.data-table tbody tr')
+    await expect(routeRows).toHaveCount(1)
+    await expect(routeRows.first()).toContainText('历史文化深度游')
+    await expect(routeRows.first()).toContainText('灵山大照壁')
 
     expect(errors).toEqual([])
   })

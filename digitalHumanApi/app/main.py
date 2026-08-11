@@ -23,6 +23,7 @@ from app.routers import (
     memory_admin,
     rag,
     recommend,
+    scenic,
     usage,
     visitor,
 )
@@ -144,6 +145,7 @@ app.include_router(announcement.public_router)
 app.include_router(memory_admin.router)
 app.include_router(admin_agent.router)
 app.include_router(home.router)
+app.include_router(scenic.router)
 app.include_router(rag.router)
 app.include_router(usage.router)
 

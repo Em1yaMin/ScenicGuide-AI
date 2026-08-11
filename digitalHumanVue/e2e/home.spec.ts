@@ -19,14 +19,14 @@ test.describe('访客首页', () => {
     await expect(page.locator('.announcement-card')).toHaveCount(1)
     await expect(page.locator('.announcement-card-title h3')).toContainText('开放时间调整')
 
-    // 热门景点活数据（3 条；mock 数据含静态兜底没有的「晴川阁」，证明活数据生效）
+    // 热门景点活数据（3 条；mock 数据含静态兜底没有的「祥符禅寺」，证明活数据生效）
     await expect(page.locator('.spot-card')).toHaveCount(3)
-    await expect(page.locator('.spot-card h3').first()).toContainText('黄鹤楼')
-    await expect(page.getByRole('heading', { name: '晴川阁' })).toBeVisible()
+    await expect(page.locator('.spot-card h3').first()).toContainText('灵山大照壁')
+    await expect(page.getByRole('heading', { name: '祥符禅寺' })).toBeVisible()
 
-    // 推荐路线活数据（3 条；mock 数据含静态兜底没有的「东湖环湖一日游」）
+    // 推荐路线活数据（3 条；mock 数据含静态兜底没有的「历史文化深度游」）
     await expect(page.locator('.route-card')).toHaveCount(3)
-    await expect(page.locator('.route-card h3').first()).toContainText('东湖环湖一日游')
+    await expect(page.locator('.route-card h3').first()).toContainText('历史文化深度游')
 
     expect(errors).toEqual([])
   })

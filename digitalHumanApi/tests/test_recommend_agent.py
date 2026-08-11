@@ -192,7 +192,7 @@ class TestTools:
     def test_get_route_detail_valid(self):
         result = get_route_detail.invoke({"route_id": "route_001"})
         data = json.loads(result)
-        assert data["name"] == "经典自然风光一日游"
+        assert data["name"] == "历史文化深度游"
         assert "spots_detail" in data
 
     def test_get_route_detail_invalid(self):
@@ -203,7 +203,7 @@ class TestTools:
     def test_get_spot_detail_valid(self):
         result = get_spot_detail.invoke({"spot_id": "spot_001"})
         data = json.loads(result)
-        assert data["name"] == "翠微峰"
+        assert data["name"] == "灵山大照壁"
 
     def test_get_spot_detail_invalid(self):
         result = get_spot_detail.invoke({"spot_id": "spot_nonexist"})
@@ -246,10 +246,10 @@ class TestSearchQueryFallback:
 
     def test_specific_existing_name_still_matches(self):
         """具体存在的名称/标签/ID 精确匹配行为不变。"""
-        data = json.loads(search_spots.invoke({"query": "翠微峰"}))
+        data = json.loads(search_spots.invoke({"query": "百子戏弥勒"}))
         assert isinstance(data, list)
         assert len(data) == 1
-        assert data[0]["name"] == "翠微峰"
+        assert data[0]["name"] == "百子戏弥勒"
         # 标签匹配不变
         data = json.loads(search_spots.invoke({"query": "自然"}))
         assert isinstance(data, list)

@@ -45,6 +45,20 @@ logger = logging.getLogger(__name__)
 # 缓存条目数上限（防内存无限增长；超出后 LRU 淘汰最久未命中条目）
 _DEFAULT_CACHE_LIMIT = 512
 
+# 静态景区数据工具集（与 deepagents/agent.py `_CACHEABLE_TOOLS` 同源）——
+# 以 app/data/（spots.json/routes.json）为数据源，景区数据变更后整体失效
+# （见 `invalidate_scenic()`，由 scenic_data_service 写文件后调用）
+_STATIC_DATA_TOOLS = frozenset(
+    {
+        "search_spots",
+        "search_routes",
+        "get_spot_detail",
+        "get_route_detail",
+        "filter_by_tags",
+        "recommend_routes",
+    }
+)
+
 # 归一化用标点/空白集合（中英文标点 + 空白符，统一剔除）
 _PUNCT_RE = re.compile(r"[\s，。！？；：、,\.!?;:'\"`~～@#\$%^&\*()（）\[\]【】\{\}<>《》\|\\/_\-\—–]+")
 
@@ -160,6 +174,24 @@ class ToolResultCache:
                     "知识库索引重建，已失效 search_knowledge 缓存: entries=%d epoch=%d",
                     len(stale),
                     self._knowledge_epoch,
+                )
+
+    def invalidate_scenic(self) -> None:
+        """景区数据（app/data/ spots.json/routes.json）变更后的缓存失效。
+
+        由 scenic_data_service 在景点/路线 CRUD 写文件后调用——静态数据工具
+        （search_spots / search_routes / get_spot_detail / get_route_detail /
+        filter_by_tags / recommend_routes）以 app/data/ 为数据源且 TTL 1h，
+        不失效则管理端改完数据后 agent 最长 1 小时读到旧结果，破坏
+        「页面数据 = agent 数据」一致性承诺。
+        """
+        with self._lock:
+            stale = [k for k in self._entries if k[0] in _STATIC_DATA_TOOLS]
+            for k in stale:
+                del self._entries[k]
+            if stale:
+                logger.info(
+                    "景区数据变更，已失效静态数据工具缓存: entries=%d", len(stale)
                 )
 
     def invalidate_all(self) -> None:

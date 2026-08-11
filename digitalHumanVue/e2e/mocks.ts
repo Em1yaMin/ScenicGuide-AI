@@ -13,66 +13,66 @@ export const homeHighlights = {
   spots: [
     {
       id: 'spot-1',
-      name: '黄鹤楼',
-      description: '天下绝景，千年诗楼，登高望远尽览江城风貌',
-      tags: ['历史古迹'],
-      duration_minutes: 120,
+      name: '灵山大照壁',
+      description: '华夏第一壁，景区入口标志性景观，赵朴初题写鎏金「灵山胜境」',
+      tags: ['历史人文'],
+      duration_minutes: 30,
       difficulty: 'easy',
-      location: '武昌区',
-      highlights: ['登楼远眺', '历史碑刻'],
+      location: '景区入口处',
+      highlights: ['赵朴初题字'],
     },
     {
       id: 'spot-2',
-      name: '晴川阁',
-      description: '晴川历历汉阳树，芳草萋萋鹦鹉洲',
-      tags: ['历史古迹'],
+      name: '祥符禅寺',
+      description: '始建于唐贞观年间的千年古刹，江南千年禅宗祖庭',
+      tags: ['历史人文'],
       duration_minutes: 90,
       difficulty: 'easy',
-      location: '汉阳区',
-      highlights: ['临江观景', '禹碑亭'],
+      location: '中轴核心',
+      highlights: ['祥符禅钟'],
     },
     {
       id: 'spot-3',
-      name: '古琴台',
-      description: '俞伯牙钟子期高山流水遇知音之地',
-      tags: ['文化博览'],
+      name: '五印坛城',
+      description: '香水海中央的藏式建筑，藏传佛教文化核心区',
+      tags: ['历史人文'],
       duration_minutes: 60,
       difficulty: 'easy',
-      location: '汉阳区',
-      highlights: ['高山流水', '琴台碑廊'],
+      location: '香水海中央',
+      highlights: ['转经筒'],
     },
   ],
   routes: [
     {
       id: 'route-1',
-      name: '东湖环湖一日游',
-      description: '磨山 → 湖心岛 → 落雁景区',
-      spot_ids: ['spot-2'],
-      tags: ['经典'],
-      suitable_for: ['初次到访'],
+      name: '历史文化深度游',
+      description: '大照壁 → 祥符禅寺 → 灵山大佛 → 梵宫 → 五印坛城',
+      spot_ids: ['spot-1'],
+      tags: ['历史人文'],
+      suitable_for: ['文化爱好者'],
       total_duration_minutes: 360,
-      difficulty: 'easy',
-      recommend_reason: '环湖精华一网打尽',
+      difficulty: 'medium',
+      recommend_reason: '灵山文化精华一站式体验',
     },
     {
       id: 'route-2',
-      name: '博物馆文化深度游',
-      description: '省博物馆 → 归元寺 → 古琴台',
-      spot_ids: ['spot-3'],
-      tags: ['文化'],
-      suitable_for: ['文化爱好者'],
-      total_duration_minutes: 480,
+      name: '自然风光全景游',
+      description: '佛足坛 → 菩提大道 → 九龙灌浴 → 灵山大佛 → 曼飞龙塔',
+      spot_ids: ['spot-2'],
+      tags: ['自然风光'],
+      suitable_for: ['摄影爱好者'],
+      total_duration_minutes: 300,
       difficulty: 'medium',
-      recommend_reason: '深度感受楚文化',
+      recommend_reason: '俯瞰太湖全景',
     },
     {
       id: 'route-3',
-      name: '亲子露营半日游',
-      description: '东湖绿道骑行 → 草坪露营',
-      spot_ids: [],
+      name: '亲子家庭轻松游',
+      description: '九龙灌浴 → 百子戏弥勒 → 梵宫 → 五印坛城',
+      spot_ids: ['spot-3'],
       tags: ['亲子'],
       suitable_for: ['家庭出游'],
-      total_duration_minutes: 300,
+      total_duration_minutes: 240,
       difficulty: 'easy',
       recommend_reason: '寓教于乐',
     },
@@ -134,19 +134,19 @@ export const knowledgeList = {
   items: [
     {
       id: 1,
-      title: '黄鹤楼讲解词',
+      title: '灵山大佛讲解词',
       category: '讲解词',
-      content: '黄鹤楼位于湖北省武汉市长江南岸的武昌蛇山之巅……',
-      tags: ['黄鹤楼', '历史'],
+      content: '灵山大佛通高88米，是世界最高露天青铜释迦牟尼立像……',
+      tags: ['灵山大佛', '历史'],
       created_at: '2026-06-01T10:00:00',
       updated_at: '2026-06-01T10:00:00',
     },
     {
       id: 2,
-      title: '东湖绿道骑行须知',
+      title: '九龙灌浴演出时间',
       category: 'FAQ',
-      content: '东湖绿道全长 101.98 公里，骑行需注意……',
-      tags: ['东湖', '骑行'],
+      content: '九龙灌浴平日演出时间为 10:00、11:30、13:30、15:00……',
+      tags: ['九龙灌浴', '演出'],
       created_at: '2026-06-02T10:00:00',
       updated_at: '2026-06-02T10:00:00',
     },
@@ -155,6 +155,55 @@ export const knowledgeList = {
   page: 1,
   page_size: 10,
 }
+
+/** 景点数据（GET /api/admin/scenic/spots，导览 agent 数据单一来源） */
+export const scenicSpots = [
+  {
+    id: 'spot_001',
+    name: '灵山大照壁',
+    description: '华夏第一壁，景区入口标志性景观',
+    tags: ['历史人文', '拍照打卡'],
+    duration_minutes: 30,
+    difficulty: '轻松',
+    location: '景区入口处，面朝太湖',
+    highlights: ['赵朴初题字'],
+  },
+  {
+    id: 'spot_002',
+    name: '九龙灌浴',
+    description: '花开见佛的音乐动态群雕景观',
+    tags: ['历史人文', '演艺'],
+    duration_minutes: 60,
+    difficulty: '轻松',
+    location: '菩提大道北端',
+    highlights: ['圣水祈福'],
+  },
+  {
+    id: 'spot_003',
+    name: '灵山大佛',
+    description: '世界最高露天青铜释迦牟尼立像',
+    tags: ['历史人文', '地标'],
+    duration_minutes: 120,
+    difficulty: '中等',
+    location: '秦履峰南麓',
+    highlights: ['抱佛脚祈福'],
+  },
+]
+
+/** 路线数据（GET /api/admin/scenic/routes，导览 agent 数据单一来源） */
+export const scenicRoutes = [
+  {
+    id: 'route_001',
+    name: '历史文化深度游',
+    description: '灵山文化精华一站式路线',
+    spot_ids: ['spot_001', 'spot_003'],
+    tags: ['历史人文', '深度游'],
+    suitable_for: ['文化爱好者'],
+    total_duration_minutes: 360,
+    difficulty: '中等',
+    recommend_reason: '精华一站式体验',
+  },
+]
 
 /** 公告列表（GET /api/admin/announcements） */
 export const announcementList = {
@@ -314,6 +363,10 @@ export async function mockApiRoutes(page: Page): Promise<void> {
       // ── 管理端 ──
       case 'GET /api/admin/knowledge':
         return respond(knowledgeList)
+      case 'GET /api/admin/scenic/spots':
+        return respond(scenicSpots)
+      case 'GET /api/admin/scenic/routes':
+        return respond(scenicRoutes)
       case 'GET /api/admin/announcements':
         return respond(announcementList)
       case 'GET /api/admin/usage/overview':

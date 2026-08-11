@@ -30,47 +30,47 @@ const ROUTE_NUMERALS = ['一', '二', '三', '四', '五']
 /** 静态兜底数据：首页活数据接口不可用时的热门景点（原写死卡片内容） */
 const FALLBACK_SPOTS: SpotCard[] = [
   {
-    name: '黄鹤楼',
-    tag: '历史古迹',
-    description: '天下绝景，千年诗楼，登高望远尽览江城风貌',
+    name: '灵山大佛',
+    tag: '佛教地标',
+    description: '世界最高露天青铜佛像，登顶抱佛脚俯瞰太湖全景',
     icon: '🏯',
-    meta: '武昌区 · 约 2 小时',
+    meta: '无锡 · 约 2 小时',
   },
   {
-    name: '东湖绿道',
-    tag: '自然风光',
-    description: '城中湖泊，四季皆景，骑行漫步的绝佳去处',
-    icon: '🏞',
-    meta: '东湖风景区 · 约 3 小时',
+    name: '九龙灌浴',
+    tag: '动态景观',
+    description: '花开见佛的音乐动态群雕，九龙吐水可接圣水祈福',
+    icon: '💦',
+    meta: '无锡 · 约 1 小时',
   },
   {
-    name: '省博物馆',
-    tag: '文化博览',
-    description: '曾侯乙编钟，千年楚文化的璀璨见证',
+    name: '灵山梵宫',
+    tag: '艺术殿堂',
+    description: '东方卢浮宫，琉璃华藏世界与星空穹顶的艺术震撼',
     icon: '🏛',
-    meta: '武昌区 · 约 3 小时',
+    meta: '无锡 · 约 2 小时',
   },
 ]
 
 /** 静态兜底数据：首页活数据接口不可用时的推荐路线 */
 const FALLBACK_ROUTES: RouteCard[] = [
   {
-    name: '经典一日游',
-    description: '黄鹤楼 → 户部巷 → 东湖绿道',
+    name: '灵山全景一日游',
+    description: '灵山大佛 → 九龙灌浴 → 灵山梵宫',
     meta: '约 6 小时 · 适合初次到访',
-    reason: '经典行程一次看遍江城精华',
+    reason: '经典行程一次看遍灵山精华',
   },
   {
-    name: '文化深度游',
-    description: '省博物馆 → 归元寺 → 古琴台',
-    meta: '约 8 小时 · 适合文化爱好者',
-    reason: '让历史爱好者不虚此行',
-  },
-  {
-    name: '亲子欢乐行',
-    description: '东湖海洋世界 → 植物园 → 磨山',
-    meta: '约 5 小时 · 适合家庭出游',
+    name: '亲子家庭轻松游',
+    description: '九龙灌浴 → 百子戏弥勒 → 灵山梵宫',
+    meta: '约 4 小时 · 适合家庭出游',
     reason: '寓教于乐，孩子玩得开心',
+  },
+  {
+    name: '银发康养慢游',
+    description: '祥符禅寺 → 菩提大道 → 五印坛城',
+    meta: '约 3.5 小时 · 适合老年人',
+    reason: '节奏舒缓，祈福静心两相宜',
   },
 ]
 
