@@ -30,6 +30,17 @@ TTS「说话说一半就终止」修复（2026-08-11 船长反馈，偶发）：
 - 失败统一重试 RETRIES 次（新建 synthesizer，TTS 幂等；掩盖偶发网络
   抖动）；均失败返回 None，由前端按序队列跳过该句继续播放
   （chatbot.tsx 已同步修复：失败/超时句不再卡死后续句子）。
+
+「大量句子被跳过」修复（2026-08-11 船长反馈，与前端回归一起派发）：
+- 根因一（并发触发限流）：前端按标点断句后多句并发请求合成——长回答
+  十几句同时打到 DashScope 触发 Throttling.RateQuota，且并发 WebSocket
+  连接风暴导致 SDK 高频报「WebSocket connection is not established or
+  has been closed」（连接刚建就被服务端关闭/拒绝）。修复：模块级
+  asyncio.Lock 串行化合成（同刻最多一个在途连接，与前端 promise 链
+  串行化配合，彻底消除并发）。
+- 根因二（重试连接未正确重建）：回调流式路径下每次尝试必须独立新建
+  synthesizer 并重新连接（旧代码已每次新建，本版显式保证 + 重试前
+  增加 RETRY_BACKOFF 退避，给服务端限流/连接恢复留时间）。
 '''
 
 import os
@@ -60,6 +71,17 @@ DEFAULT_TIMEOUT_MS = 60000
 DEFAULT_STALL_TIMEOUT = 20.0
 # 失败重试次数（TTS 幂等；掩盖偶发网络抖动）
 DEFAULT_RETRIES = 1
+# 重试退避秒数：重试前等待，给 DashScope 限流/连接恢复留时间（配合
+# 合成串行化，避免重试风暴再次触发限流）
+DEFAULT_RETRY_BACKOFF = 0.5
+
+# 合成串行化锁（模块级，跨引擎实例共享）：DashScope WebSocket 合成
+# 并发会触发 Throttling.RateQuota 限流与「connection is not established」
+# 高频报错（#70-5b 实测）；串行化后同刻最多一个在途连接，偶发失败由
+# 重试掩盖（与前端 TTS promise 链串行化配合）。用 asyncio.Lock 而非
+# threading.Lock：持锁期间 await to_thread 挂起任务而非阻塞事件循环
+# （threading.Lock 的阻塞 acquire 会卡死整条事件循环 → 死锁）。
+_TTS_SYNTH_LOCK = asyncio.Lock()
 
 
 @TTSEngines.register("QwenAPI")
@@ -107,6 +129,11 @@ class QwenAPI(BaseEngine):
             RETRIES = (
                 int(self.cfg.RETRIES) if "RETRIES" in self.cfg else DEFAULT_RETRIES
             )
+            RETRY_BACKOFF = (
+                float(self.cfg.RETRY_BACKOFF)
+                if "RETRY_BACKOFF" in self.cfg
+                else DEFAULT_RETRY_BACKOFF
+            )
 
             text = input.data
             if not text:
@@ -121,6 +148,11 @@ class QwenAPI(BaseEngine):
                 返回完整 mp3 bytes；失败（task-failed / 停滞 / 超时 / 空音频）
                 抛异常由上层重试/降级。SDK 初始化要求先设全局 dashscope.api_key
                 （None 会抛 InputRequired，实测 2026-08-07）。
+
+                每次调用独立新建 synthesizer（新 WebSocket 连接）——重试
+                前连接已由 finally 关闭，重试即重新建连（修复「重试时连接未
+                正确重建」）；整个合成过程持 _TTS_SYNTH_LOCK 串行化（并发
+                连接风暴触发限流/连接错误，见模块注释）。
                 """
                 import dashscope
                 from dashscope.audio.tts_v2 import ResultCallback
@@ -223,8 +255,14 @@ class QwenAPI(BaseEngine):
 
             mp3_bytes = None
             for attempt in range(RETRIES + 1):
+                if attempt > 0:
+                    # 重试前退避：给 DashScope 限流/连接恢复留时间（配合串行化）
+                    await asyncio.sleep(RETRY_BACKOFF)
                 try:
-                    mp3_bytes = await asyncio.to_thread(_synthesize_once)
+                    # 串行化：同刻最多一个 DashScope WebSocket 合成连接
+                    # （模块级 asyncio 锁，跨引擎实例共享；不阻塞事件循环）
+                    async with _TTS_SYNTH_LOCK:
+                        mp3_bytes = await asyncio.to_thread(_synthesize_once)
                     break
                 except Exception as e:
                     logger.error(

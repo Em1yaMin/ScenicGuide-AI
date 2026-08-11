@@ -105,8 +105,14 @@ export class Comm {
     callbackStep?: (step: { tool: string; label: string }) => void,
     callbackRoute?: (route: any) => void
   ): Promise<void> {
+    // 流式对话结束回调兜底：无论正常 EOF 还是中途异常（网络错误/服务端
+    // 中断），都必须触发 callbackEnd——前端据此固化已收到的部分文本并恢复
+    // 输入（不永久卡死）。修复「工具调用后文字气泡不显示」（#70-5b）：
+    // 旧逻辑 catch 吞掉异常后直接返回，callbackEnd 永不触发，isProcessing
+    // 保持 true → 输入框永远禁用，且已流出的文本不固化进聊天记录。
+    let reader: ReadableStreamDefaultReader | null = null;
     try {
-      const reader = await API.agent_infer_streaming_api(data, engine, conversationId, settings);
+      reader = await API.agent_infer_streaming_api(data, engine, conversationId, settings);
       const decoder = new TextDecoder("utf-8");
       // 步骤/路线帧协议（agentApi 编码）：\x02{json}\x03。
       // json 为步骤帧（{tool, label}）或路线帧（{type: "route", data}，
@@ -167,9 +173,20 @@ export class Comm {
           }
         }
       }
-      reader.releaseLock();
     } catch (error) {
+      // 流中断（网络错误/服务端异常/连接被切断）：已收到的部分文本由
+      // callbackEnd 固化（flushFragment），输入框恢复可用；不重新抛错
+      // （旧行为即吞错，保持兼容）。
       console.error(error);
+      if (typeof callbackEnd === "function") {
+        callbackEnd(0);
+      }
+    } finally {
+      try {
+        reader?.releaseLock();
+      } catch (e) {
+        // 忽略释放异常（流已损坏时 releaseLock 可能抛错）
+      }
     }
   }
 
