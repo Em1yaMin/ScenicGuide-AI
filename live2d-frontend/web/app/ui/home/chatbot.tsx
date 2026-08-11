@@ -142,6 +142,9 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
         // 当前文本片段（按 step/route 事件边界切分）：token 回调实时累积并
         // 渲染（逐字可见）；step/route 回调到达时先把当前片段固化（append 为
         // text 消息）再 append 该 step/route，开始新片段；流完成时固化最后片段
+        // （#70-5b 回归修复：流中断/异常时 comm.ts 仍会触发 done 回调，此处
+        // 固化已收到的部分文本并恢复输入——不再出现「工具调用后文字气泡不显示」
+        // 或输入框永久禁用；text/step/route 保持发生顺序，多轮保留不清空）
         let fragment = "";
         // 上一条已提交的步骤（连续重复步骤去重用；文本片段固化后重置）
         let lastStep: { tool: string; label: string } | null = null;
@@ -160,33 +163,41 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
         if (audioAutoStop) {
             CharacterManager.getInstance().clearAudioQueue();
         }
-        // 单句 TTS 入队（修复「说话说一半就终止」2026-08-11 船长反馈，偶发）：
-        // 后端 qwenTTS WebSocket 偶发中断会导致单句合成失败/悬挂，旧逻辑在该句
-        // 索引处永久卡死（audioRecorderDict 空洞）→ 后续句子音频全部不出队，
-        // 整段语音中途停摆。现改为：失败/超时句记为 null 出队跳过，后续句子
-        // 照常播放；另有兜底超时（30s，长于后端停滞检测 20s，正常合成不受影响），
-        // 后端彻底悬挂时本句最多等 30s 即继续。
-        const ttsSegmentTimeoutMs = 30000;
+        // 单句 TTS 入队（#77 修复 + #70-5b 回归修复）：
+        // - 后端 qwenTTS WebSocket 偶发中断会导致单句合成失败/悬挂，失败/超时
+        //   句记为 null 出队跳过，后续句子照常播放（不卡死队列）；
+        // - 旧逻辑按标点断句后所有句子立即并发请求——长回答十几句同时打到
+        //   DashScope 触发限流（Throttling.RateQuota）+ WebSocket 连接风暴
+        //   （高频「connection is not established」），实际大量句子被跳过。
+        //   现改为 promise 链串行化：前一句合成完成后再发起下一句（与后端
+        //   qwenTTS 串行化配合，同刻最多一个在途连接）；超时兜底（45s，长于
+        //   后端停滞检测 20s × 重试 + 退避，正常合成不受影响），后端彻底悬挂
+        //   时本句最多等 45s 即继续；单句失败不连跳后续（链式 catch 记 null）。
+        const ttsSegmentTimeoutMs = 45000;
+        let ttsChain: Promise<void> = Promise.resolve();
         const enqueueTTS = (index: number, sentence: string) => {
             console.log("tts:", sentence);
-            const ttsPromise = Comm.getInstance().tts(sentence, settings);
-            const timeoutPromise = new Promise<null>((resolve) => {
-                setTimeout(() => resolve(null), ttsSegmentTimeoutMs);
-            });
-            Promise.race([ttsPromise, timeoutPromise]).then(
-                (data: ArrayBuffer | null) => {
-                    // 成功/失败/超时都落记录：失败为 null，出队推进不卡后续句子
-                    audioRecorderDict.set(index, data || null);
-                    while (true) {
-                        if (!audioRecorderDict.has(audioRecorderIndex)) break;
-                        const audio = audioRecorderDict.get(audioRecorderIndex);
-                        if (audio) {
-                            CharacterManager.getInstance().pushAudioQueue(audio);
-                        }
-                        audioRecorderIndex++;
+            ttsChain = ttsChain.then(() => {
+                const ttsPromise = Comm.getInstance().tts(sentence, settings);
+                const timeoutPromise = new Promise<null>((resolve) => {
+                    setTimeout(() => resolve(null), ttsSegmentTimeoutMs);
+                });
+                return Promise.race([ttsPromise, timeoutPromise]);
+            }).then((data: ArrayBuffer | null) => {
+                // 成功/失败/超时都落记录：失败为 null，出队推进不卡后续句子
+                audioRecorderDict.set(index, data || null);
+                while (true) {
+                    if (!audioRecorderDict.has(audioRecorderIndex)) break;
+                    const audio = audioRecorderDict.get(audioRecorderIndex);
+                    if (audio) {
+                        CharacterManager.getInstance().pushAudioQueue(audio);
                     }
+                    audioRecorderIndex++;
                 }
-            );
+            }).catch(() => {
+                // 单句异常兜底：记 null 跳过，不影响后续句子（链路不断）
+                audioRecorderDict.set(index, null);
+            });
         };
         Comm.getInstance().streamingChat(message, agentEngine, conversationId, settings, (index: number, data: string) => {
             fragment += data;

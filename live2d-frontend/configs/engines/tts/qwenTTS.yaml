@@ -16,3 +16,5 @@ TIMEOUT_MS: 60000
 STALL_TIMEOUT: 20.0
 # 失败重试次数（TTS 幂等，掩盖偶发网络抖动）
 RETRIES: 1
+# 重试退避秒数：重试前等待，给 DashScope 限流/连接恢复留时间
+RETRY_BACKOFF: 0.5

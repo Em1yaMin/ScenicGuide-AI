@@ -18,6 +18,8 @@ QwenAPI TTS 引擎单测（mock dashscope SpeechSynthesizer，不发真实请求
 5. 引擎注册名 QwenAPI、checkKeys 要求 API_KEY
 '''
 import base64
+import asyncio
+import time
 
 import pytest
 
@@ -441,3 +443,95 @@ def test_qwen_api_registered_and_checks_keys():
     # 缺 API_KEY 的 cfg 在 BaseEngine.__init__ 即报 KeyError
     with pytest.raises(KeyError):
         QwenAPI(CN({"NAME": "QwenAPI"}, new_allowed=True))
+
+
+@pytest.mark.asyncio
+async def test_qwen_api_serializes_concurrent_synthesis(monkeypatch, clean_env):
+    """并发合成串行化：两个并发 run() 同刻最多一个在途 DashScope 连接。
+
+    修复「大量句子被跳过」（#70-5b 回归）：前端按标点断句后多句并发请求，
+    后端无串行化时十几条 WebSocket 同时连 DashScope 触发 Throttling.
+    RateQuota 限流与「connection is not established」高频报错。现由模块级
+    _TTS_SYNTH_LOCK 保证同刻最多一个合成在途（与前端 promise 链串行化配合）。
+    """
+    import sys
+    import types
+
+    state = {"active": 0, "max_active": 0}
+
+    class FakeAudioFormat:
+        MP3_24000HZ_MONO_256KBPS = "mp3-24000-mono-256kbps"
+
+    class FakeResultCallback:
+        def on_open(self):
+            pass
+
+        def on_complete(self):
+            pass
+
+        def on_error(self, message):
+            pass
+
+        def on_close(self):
+            pass
+
+        def on_event(self, message):
+            pass
+
+        def on_data(self, data):
+            pass
+
+    class FakeSpeechSynthesizer:
+        def __init__(self, **kwargs):
+            self._kwargs = kwargs
+
+        def call(self, text, timeout_millis=None):
+            callback = self._kwargs.get("callback")
+            state["active"] += 1
+            state["max_active"] = max(state["max_active"], state["active"])
+            try:
+                # 模拟合成耗时：制造并发窗口（若未串行化会同时进入）
+                time.sleep(0.2)
+                if callback:
+                    callback.on_data(MINI_MP3)
+                    callback.on_complete()
+            finally:
+                state["active"] -= 1
+            return None
+
+        def close(self):
+            pass
+
+    fake_parent = types.ModuleType("dashscope")
+    fake_parent.api_key = None
+    fake_module = types.ModuleType("dashscope.audio.tts_v2")
+    fake_module.SpeechSynthesizer = FakeSpeechSynthesizer
+    fake_module.AudioFormat = FakeAudioFormat
+    fake_module.ResultCallback = FakeResultCallback
+    monkeypatch.setitem(sys.modules, "dashscope", fake_parent)
+    monkeypatch.setitem(sys.modules, "dashscope.audio.tts_v2", fake_module)
+
+    engine = QwenAPI(_make_cfg())
+    # 两个并发合成请求（修复前会同时进入 call() → 连接风暴）
+    results = await asyncio.gather(
+        engine.run(TextMessage(data="第一句")),
+        engine.run(TextMessage(data="第二句")),
+    )
+    assert all(r is not None for r in results)
+    # 串行化：同刻最多一个合成在途（否则并发触发限流/连接错误）
+    assert state["max_active"] == 1
+
+
+@pytest.mark.asyncio
+async def test_qwen_api_retry_backoff(monkeypatch, clean_env):
+    """重试退避：失败后重试前等待 RETRY_BACKOFF（给限流/连接恢复留时间）。"""
+    captured = {}
+    _fake_synthesizer_factory(monkeypatch, captured, mode="error")
+    engine = QwenAPI(_make_cfg(RETRIES=2, RETRY_BACKOFF=0.15))
+    start = time.monotonic()
+    msg = await engine.run(TextMessage(data="测试"))
+    elapsed = time.monotonic() - start
+    assert msg is None
+    # 共 3 次尝试、2 次退避（各 0.15s）；退避期间不发起新连接
+    assert elapsed >= 0.25
+    assert captured["closed"] >= 3
