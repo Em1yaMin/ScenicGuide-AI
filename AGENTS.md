@@ -161,7 +161,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 1. **对话双轨回落（保留，演示兜底）**：`dialogue.py` 的 `_call_dify_chat`/`_call_dify_chat_stream` + `app/services/dify_stream.py`（SSE 消费 + ThinkFilter）；`DIFY_API_URL`/`DIFY_API_KEY`
 2. **历史数据接口（保留，数据源之一）**：`tasks/polling.py`（30s 轮询拉 **Dify 对话**入库；本地对话已由对话链路直接落库，轮询不再是唯一来源）、`tasks/backfill.py`（一次性补拉 CLI）、`services/dify_client.py` 的 `get_conversations`/`get_conversation_messages`；`DIFY_LIGHT4AI_USER`（空则轮询空转）
-  - **2026-08-11 历史数据已迁移（fm/dify-7b）**：旧 Dify 服务器（http://111.228.47.45）实测 user=`visitor` 下有 5 conversation/6 message（此前盘点候选 `adh` 等均空，实为 user 不符），已用 `python -m app.tasks.backfill --user visitor` 全量迁入本地（dialogues 新增 12 行 + visitors 新增 `visitor` 记录，幂等可重跑）；本机 `.env` 已配置 `DIFY_LIGHT4AI_USER=visitor`（polling 增量生效）；验证 Dashboard total_conversations>0、感受度报告有数据、pytest 739 绿；详见 `doc/dify-data-migration-report.md` §6
+  - **2026-08-11 历史数据已迁移（fm/dify-7b）**：旧 Dify 服务器（http://111.228.47.45）实测 user=`visitor` 下有 5 conversation/6 message（此前盘点候选均空——对话创建于 2026-08-05 盘点次日，08-11 复探才命中），已用 `python -m app.tasks.backfill --user visitor` 全量迁入本地（dialogues 新增 12 行 + visitors 新增 `visitor` 记录，幂等可重跑）；本机 `.env` 已配置 `DIFY_LIGHT4AI_USER=visitor`（polling 增量生效）；验证 Dashboard total_conversations>0、感受度报告有数据、pytest 739 绿；详见 `doc/dify-data-migration-report.md` §6
 
 已清理面：推荐问句（#30，`DIFY_RECOMMEND_WORKFLOW_API_KEY` 已移除）、运营分析接口（#31，`analytics_service.py` 纯本地 LLM + DB 兜底，`llm_analysis` 降级标记）、推荐 Agent 的 dify_helpers 依赖（#30）、**Dify Workflow 量化评估（阶段4 首项：`evaluate_dialogue` 改本地 LLM——`app/services/evaluation_service.py`，移除 `trigger_workflow`/`dify_helpers.py`/`DIFY_WORKFLOW_API_KEY`（config 校验器/docker-compose/CI/.env.example 同步））**。联调全链路验证与规划路径偶发空响应修复记录见 `doc/phase3-e2e-verification.md`。
 

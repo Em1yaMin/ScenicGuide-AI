@@ -4,7 +4,7 @@
 >
 > **2026-08-11 更新（RAG 数据源净化）**：多景区行为分析数据 `景点景区旅游数据行为分析数据_知识库版.md`（1.47MB，全国 152 景区）已移出 `doc/景区知识库/` 至 `doc/archive/`（船长决策方案A），`doc/景区知识库/` 现仅保留两份纯灵山文档，documents 命名空间检索面只含灵山内容；部署需执行一次 `POST /api/rag/index` 全量重建（结果 documents=2）清除旧 chunk。
 >
-> **2026-08-11 更新（Dify 用户访问记录迁移，任务 fm/dify-7b）**：旧 Dify 服务器（http://111.228.47.45）历史对话已实际迁移到本地库。**关键发现：Dify 侧确有数据，user 值为 `visitor`**（ADH 默认 `LLM_API_USER`/DifyAgent `DIFY_API_USER` 的落地值，此前盘点用 `adh` 等候选未命中）。迁移结果：5 个 conversation / 6 条 message → 本地 `dialogues` 表新增 12 行（每 message 拆 user+assistant 两行，assistant 行 `external_message_id` 加 `:answer` 后缀），`visitors` 表新增 `visitor` 记录；`DIFY_LIGHT4AI_USER` 已在本机 `.env` 配置为 `visitor`（polling 增量轮询生效）。迁移幂等可重跑（重跑 inserted=0/skipped=12）。验证：`GET /api/v1/admin/dashboard` total_conversations=28（含既有 16 行本地验证数据）、感受度报告 sentiment/concern 有数据。详见本文档末尾「6. 2026-08-11 迁移执行记录」。G1/G3 缺口已闭环（见第 3 节）。
+> **2026-08-11 更新（Dify 用户访问记录迁移，任务 fm/dify-7b）**：旧 Dify 服务器（http://111.228.47.45）历史对话已实际迁移到本地库。**关键发现：Dify 侧确有数据，user 值为 `visitor`**（ADH LangChainAgent 默认 `LLM_API_USER` 的落地值；对话创建于 2026-08-05、晚于 08-04 盘点，故此前探测候选均为空）。迁移结果：5 个 conversation / 6 条 message → 本地 `dialogues` 表新增 12 行（每 message 拆 user+assistant 两行，assistant 行 `external_message_id` 加 `:answer` 后缀），`visitors` 表新增 `visitor` 记录；`DIFY_LIGHT4AI_USER` 已在本机 `.env` 配置为 `visitor`（polling 增量轮询生效）。迁移幂等可重跑（重跑 inserted=0/skipped=12）。验证：`GET /api/v1/admin/dashboard` total_conversations=28（含既有 16 行本地验证数据）、感受度报告 sentiment/concern 有数据。详见本文档末尾「6. 2026-08-11 迁移执行记录」。G1/G3 缺口已闭环（见第 3 节）。
 
 > 日期：2026-08-04 ｜ 任务：fm/sg-data-migration
 > 目标：盘点并迁移 Dify 侧历史数据（对话历史 + 知识库内容）到本地系统，为
