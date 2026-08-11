@@ -156,10 +156,38 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
         let audioText = "";
         // 保证顺序执行
         let audioRecorderIndex = 0;
-        let audioRecorderDict = new Map<number, ArrayBuffer>();
+        let audioRecorderDict = new Map<number, ArrayBuffer | null>();
         if (audioAutoStop) {
             CharacterManager.getInstance().clearAudioQueue();
         }
+        // 单句 TTS 入队（修复「说话说一半就终止」2026-08-11 船长反馈，偶发）：
+        // 后端 qwenTTS WebSocket 偶发中断会导致单句合成失败/悬挂，旧逻辑在该句
+        // 索引处永久卡死（audioRecorderDict 空洞）→ 后续句子音频全部不出队，
+        // 整段语音中途停摆。现改为：失败/超时句记为 null 出队跳过，后续句子
+        // 照常播放；另有兜底超时（30s，长于后端停滞检测 20s，正常合成不受影响），
+        // 后端彻底悬挂时本句最多等 30s 即继续。
+        const ttsSegmentTimeoutMs = 30000;
+        const enqueueTTS = (index: number, sentence: string) => {
+            console.log("tts:", sentence);
+            const ttsPromise = Comm.getInstance().tts(sentence, settings);
+            const timeoutPromise = new Promise<null>((resolve) => {
+                setTimeout(() => resolve(null), ttsSegmentTimeoutMs);
+            });
+            Promise.race([ttsPromise, timeoutPromise]).then(
+                (data: ArrayBuffer | null) => {
+                    // 成功/失败/超时都落记录：失败为 null，出队推进不卡后续句子
+                    audioRecorderDict.set(index, data || null);
+                    while (true) {
+                        if (!audioRecorderDict.has(audioRecorderIndex)) break;
+                        const audio = audioRecorderDict.get(audioRecorderIndex);
+                        if (audio) {
+                            CharacterManager.getInstance().pushAudioQueue(audio);
+                        }
+                        audioRecorderIndex++;
+                    }
+                }
+            );
+        };
         Comm.getInstance().streamingChat(message, agentEngine, conversationId, settings, (index: number, data: string) => {
             fragment += data;
             // AI 流式文本：当前片段实时渲染（用户可见逐字），切分时固化进历史
@@ -190,40 +218,16 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
                 if (lastPuncIndex !== -1) {
                     let firstPart = audioText.slice(0, lastPuncIndex + 1);
                     let secondPart = audioText.slice(lastPuncIndex + 1);
-                    console.log("tts:", firstPart);
-                    Comm.getInstance().tts(firstPart, settings).then(
-                        (data: ArrayBuffer) => {
-                            if (data) {
-                                audioRecorderDict.set(index, data);
-                                while (true) {
-                                    if (!audioRecorderDict.has(audioRecorderIndex)) break;
-                                    CharacterManager.getInstance().pushAudioQueue(audioRecorderDict.get(audioRecorderIndex)!);
-                                    audioRecorderIndex++;
-                                }
-                            }
-                        }
-                    )
+                    enqueueTTS(index, firstPart);
                     audioText = secondPart;
                 } else {
                     audioRecorderDict.set(index, null)
                 }
             }
         }, (index: number) => {
-            // 处理剩余tts
+            // 处理剩余tts（流结束时的最后一段文本；失败/超时同样跳过不阻塞）
             if (!mute && audioText) {
-                console.log("tts:", audioText);
-                Comm.getInstance().tts(audioText, settings).then(
-                    (data: ArrayBuffer) => {
-                        if (data) {
-                            audioRecorderDict.set(index, data);
-                            while (true) {
-                                if (!audioRecorderDict.has(audioRecorderIndex)) break;
-                                CharacterManager.getInstance().pushAudioQueue(audioRecorderDict.get(audioRecorderIndex)!);
-                                audioRecorderIndex++;
-                            }
-                        }
-                    }
-                )
+                enqueueTTS(index, audioText);
             }
             // 流完成：固化最后文本片段（若为空说明前面均已按序提交），
             // 多轮顺序：用户 → [文本片段1][步骤][文本片段2]... → AI
