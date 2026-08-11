@@ -245,3 +245,55 @@ async def test_recommend_agent_search_knowledge_uses_unified_entry():
     assert data, "工具应返回知识库检索结果"
     assert data[0]["namespace"] == NAMESPACE_KNOWLEDGE
     assert "灵山大佛" in data[0]["content"]
+
+
+# ---------------------------------------------------------------------------
+# deepagents 装配层（缓存包装版）命中 knowledge 命名空间
+# ---------------------------------------------------------------------------
+
+async def test_deepagents_search_knowledge_hits_imported_entry(client):
+    """管理后台导入知识 → 前台 deepagents search_knowledge 工具检索命中（验收链路）。
+
+    deepagents 装配层经 chat_agent._select_tools(use_rag=True) 复用
+    recommend_agent.search_knowledge，并用 tool_cache.wrap_tool 包装为
+    归一化缓存版本（同 query 不重查）——本测试覆盖真实装配路径：
+    管理后台导入 1 条知识（HTTP /api/admin/knowledge/import）→ 前台
+    search_knowledge 工具默认检索面（knowledge+documents）能命中该条目。
+    """
+    from app.services.deepagents import tool_cache
+
+    # 清理模块级缓存单例（wrap_tool 写入条目，防跨测试污染）
+    tool_cache.get_cache().invalidate_all()
+    try:
+        content = "# 灵山梵宫简介\n\n灵山梵宫是灵山胜境的核心建筑，金碧辉煌，值得一看。\n"
+        resp = await client.post(
+            "/api/admin/knowledge/import",
+            params={"default_category": "景点资料"},
+            files={"file": ("lingshan.md", content, "text/markdown")},
+            headers=ADMIN_HEADERS,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["imported_count"] == 1
+
+        # deepagents 装配层实际装配路径：_select_tools(use_rag=True) + wrap_tool
+        from app.services.chat_agent import _select_tools as main_select
+
+        tools = main_select(use_rag=True)
+        sk = next(t for t in tools if t.name == "search_knowledge")
+        wrapped = tool_cache.wrap_tool(sk, ttl_seconds=300)
+
+        out = wrapped.invoke({"query": "灵山梵宫有什么看头"})
+        data = json.loads(out)
+        assert data, "前台 search_knowledge 工具应检索到导入条目"
+        hit = next(
+            (x for x in data if x["namespace"] == NAMESPACE_KNOWLEDGE and "梵宫" in x["content"]),
+            None,
+        )
+        assert hit, f"应命中 knowledge 命名空间条目: {data}"
+        assert hit["source"].startswith("知识库条目#")
+
+        # 命中后再次调用走缓存（同 query 不重查，结果不变）
+        out2 = wrapped.invoke({"query": "灵山梵宫有什么看头"})
+        assert json.loads(out2) == data
+    finally:
+        tool_cache.get_cache().invalidate_all()
