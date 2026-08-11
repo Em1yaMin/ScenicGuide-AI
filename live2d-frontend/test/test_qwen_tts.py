@@ -17,9 +17,7 @@ QwenAPI TTS 引擎单测（mock dashscope SpeechSynthesizer，不发真实请求
 4. 未配置 API Key → 返回 None
 5. 引擎注册名 QwenAPI、checkKeys 要求 API_KEY
 '''
-import asyncio
 import base64
-import os
 
 import pytest
 
