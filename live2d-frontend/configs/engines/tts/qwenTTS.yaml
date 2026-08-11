@@ -10,3 +10,9 @@ MODEL: "qwen-audio-3.0-tts-flash"
 VOICE: "qwen-audio-3.0-tts-flash-longtongxuxian"
 BASE_WEBSOCKET_API_URL: "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
 SAMPLE_RATE: 24000
+# 单次合成总超时（毫秒）：WebSocket 偶发中断时把无界阻塞变成有界失败（可重试）
+TIMEOUT_MS: 60000
+# 无音频帧到达的停滞判定秒数：半开连接快速失败（正常合成帧持续到达不误判）
+STALL_TIMEOUT: 20.0
+# 失败重试次数（TTS 幂等，掩盖偶发网络抖动）
+RETRIES: 1

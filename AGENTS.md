@@ -332,7 +332,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 | **TencentAPI** | ASR | `configs/engines/asr/tencentAPI.yaml` | 引擎可用，麦克风录音链路调试中 |
 | **LangChainAgent** | Agent | `configs/agents/langchainAgent.yaml` | **默认引擎**，走本后端 `/api/v1/dialogue/chat`（deepagents 装配层主链路，A3 起；后端侧异常自动回落 Dify）；SSE 流式正常；工具调用步骤可视化（见下） |
 | **DifyAgent** | Agent | `configs/agents/difyAgent.yaml` | 保留可切换（fallback 不丢），直连 Dify Chat Agent |
-| **QwenAPI** | TTS | `configs/engines/tts/qwenTTS.yaml` | **默认引擎（2026-08-07 从 MiniMax 迁移，DashScope WebSocket）**：dashscope SDK `SpeechSynthesizer`，模型 `qwen-audio-3.0-tts-flash`、音色 `qwen-audio-3.0-tts-flash-longtongxuxian`（龙彤旭弦，活泼灵动女声），mp3→wav 输出；key 优先读环境变量 `QWEN_API_KEY`（yaml 留空占位不入库）；SDK 初始化要求先设全局 `dashscope.api_key`（实测）；真实调用与 mock 单测均通过（`test/test_qwen_tts.py` 8 用例） |
+| **QwenAPI** | TTS | `configs/engines/tts/qwenTTS.yaml` | **默认引擎（2026-08-07 从 MiniMax 迁移，DashScope WebSocket）**：dashscope SDK `SpeechSynthesizer`，模型 `qwen-audio-3.0-tts-flash`、音色 `qwen-audio-3.0-tts-flash-longtongxuxian`（龙彤旭弦，活泼灵动女声），mp3→wav 输出；key 优先读环境变量 `QWEN_API_KEY`（yaml 留空占位不入库）；SDK 初始化要求先设全局 `dashscope.api_key`（实测）；真实调用与 mock 单测均通过（`test/test_qwen_tts.py` 15 用例）。**「说话说一半就终止」修复（2026-08-11）**：改走 SDK 回调流式路径（ResultCallback）自研等待循环——`STALL_TIMEOUT`（默认 20s，无音频帧停滞即快速失败，半开连接不再无限阻塞）+ `TIMEOUT_MS`（默认 60s）总超时兜底 + task-failed 部分音频整体丢弃 + `RETRIES`（默认 1）重试 + finally 兜底 close；前端 `chatbot.tsx` 按序音频队列同步改为失败/超时句记 null 出队跳过（不再卡死后续句子，另加 30s 段级兜底超时）。三参数可在 yaml 调优 |
 | **MiniMaxAPI** | TTS | `configs/engines/tts/minimaxTTS.yaml` | 保留可切换（`Chinese_sweet_girl_nv1` 音色，替代 difyTTSWorkflow） |
 
 ### 凭证位置（不存真实值）
