@@ -44,7 +44,6 @@ function withRedirect(path: string) {
 
     <footer class="visitor-footer">
       <div class="footer-inner">
-        <span class="footer-seal" aria-hidden="true">导</span>
         <span class="footer-brand">景区导览 AI 数字人</span>
         <span class="footer-divider">·</span>
         <span class="footer-copy">© 2026 智慧导览系统</span>
@@ -175,21 +174,6 @@ nav a.router-link-exact-active {
   gap: var(--space-sm);
   font-size: var(--text-small);
   color: var(--slate);
-}
-
-/* 页脚微缩印章：签名元素「导」的母题回响 */
-.footer-seal {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  background: var(--cinnabar);
-  color: var(--surface);
-  font-family: var(--font-display);
-  font-size: var(--text-tiny);
-  font-weight: 700;
-  border-radius: 3px;
 }
 
 .footer-brand {
