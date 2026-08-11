@@ -1,16 +1,9 @@
 <script setup lang="ts">
 import { RouterLink, RouterView, useRoute } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
 import { useAdminAuthStore } from '@/stores/adminAuth'
 
-const auth = useAuthStore()
 const adminAuth = useAdminAuthStore()
 const route = useRoute()
-
-/** 登录链接携带当前路径，登录后可跳回原页面。 */
-function withRedirect(path: string) {
-  return { path, query: { redirect: route.fullPath } }
-}
 
 /** 管理员退出登录（批次9：账号密码登录替代 X-Admin-Token 输入形式）。 */
 function adminLogout() {
@@ -70,17 +63,6 @@ function adminLogout() {
               class="auth-link"
               >管理登录</RouterLink
             >
-          </template>
-        </div>
-        <div class="auth-area">
-          <template v-if="auth.isLoggedIn">
-            <span class="auth-user">{{ auth.displayName }}</span>
-            <button type="button" class="auth-btn" @click="auth.logout()">退出</button>
-          </template>
-          <template v-else>
-            <span v-if="auth.isGuest" class="auth-user">游客</span>
-            <RouterLink :to="withRedirect('/login')" class="auth-link">登录</RouterLink>
-            <RouterLink :to="withRedirect('/register')" class="auth-link">注册</RouterLink>
           </template>
         </div>
         <span class="version">v0.2</span>
@@ -206,15 +188,7 @@ function adminLogout() {
   margin-top: auto;
 }
 
-.auth-area {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-xs);
-  flex-wrap: wrap;
-}
-
-/* 管理身份区（批次9）：与用户登录区分开的独立行 */
+/* 管理身份区（批次9）：侧栏底部仅保留管理登录/退出 */
 .admin-area {
   display: flex;
   align-items: center;
