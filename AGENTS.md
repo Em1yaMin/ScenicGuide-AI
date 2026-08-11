@@ -402,7 +402,7 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 ## 测试质量门（批次7 C6：覆盖率门禁 + 前端 E2E）
 
 - **后端覆盖率门禁**：`pytest-cov`（requirements-dev.txt）；CI Backend job 跑 `pytest -q --cov=app --cov-report=term:skip-covered --cov-fail-under=75`——阈值 75% 基于当前基线实测（84.31%，2026-08 批次7 收官时）留余量设定，低于阈值 CI 失败；本地同样命令可复现（约 3 分钟）。
-- **前端 Playwright E2E 冒烟**（`digitalHumanVue/`，dev 依赖 `@playwright/test`）：`npm run e2e`（`npx playwright install --with-deps chromium` 装浏览器；webServer 自动拉起 vite dev server 端口 5199）——8 用例覆盖核心路径：首页（hero/活数据卡片/公告区 + 「浏览推荐」滚动）、对话页（游客兜底 + 推荐问句浮层展开/收起/重开）、管理端（登录跳转 + 知识库/公告/用量页基础渲染）。**稳定可重复的关键：后端接口全部在浏览器层 `page.route('http://localhost:5199/api/**')` mock**（`e2e/mocks.ts`，响应形状对齐后端契约）——不依赖真实后端；**坑：路由模式必须带 origin，不能写 `**/api/**`**（会误伤源码模块 `/src/api/*.ts` 导致 404）；E2E 文件不在 tsconfig.app.json include 内，`vue-tsc` 仅检查 `playwright.config.*`（tsconfig.node.json 已含）。
+- **前端 Playwright E2E 冒烟**（`digitalHumanVue/`，dev 依赖 `@playwright/test`）：`npm run e2e`（`npx playwright install --with-deps chromium` 装浏览器；webServer 自动拉起 vite dev server 端口 5199）——11 用例覆盖核心路径：首页（hero/活数据卡片/公告区 + 「浏览推荐」滚动）、对话页（游客兜底 + 推荐问句浮层展开/收起/重开）、管理端（登录流程/守卫 + 管理员登录页返回首页入口 + 知识库/公告/用量页基础渲染）。**稳定可重复的关键：后端接口全部在浏览器层 `page.route('http://localhost:5199/api/**')` mock**（`e2e/mocks.ts`，响应形状对齐后端契约）——不依赖真实后端；**坑：路由模式必须带 origin，不能写 `**/api/**`**（会误伤源码模块 `/src/api/*.ts` 导致 404）；E2E 文件不在 tsconfig.app.json include 内，`vue-tsc` 仅检查 `playwright.config.*`（tsconfig.node.json 已含）。
 
 ## Testing (pytest)
 

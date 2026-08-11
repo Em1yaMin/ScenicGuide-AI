@@ -114,7 +114,7 @@ async function handleLogin() {
   background: var(--paper);
 }
 
-/* 页头返回入口：与登录卡片同宽、左对齐，描边按钮规范（见 doc/redesign-v1.md §3.3） */
+/* 页头返回入口：与登录卡片同宽、左对齐，描边按钮 token 规范（见 doc/redesign-v1.md §2.1 色彩） */
 .login-back {
   width: 100%;
   max-width: 400px;
