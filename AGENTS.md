@@ -33,7 +33,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 ```
 
 请求流: Vue → fetch(/api/*) → Vite proxy → FastAPI → SQLite
-数据流: Dify API ← polling task → SQLite → analysis task → 本地 LLM 量化评估 → SQLite（Evaluation 表，阶段4 起不再经 Dify Workflow）
+数据流: 对话（deepagents 本地链路）→ dialogues 表（每轮两行直接落库，2026-08-11 起）→ analysis task → 本地 LLM 量化评估 → Evaluation 表（阶段4 起不再经 Dify Workflow）；Dify 历史对话 ← polling task（数据源之一，见「Dify 依赖面」）
 
 ## 个性化推荐（纯本地，无外部 API）
 
@@ -133,6 +133,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - **意图分类双模式挂载（船长决策：planning=prompt 指令）**：复用 `intent_classifier`——简单问答不注入规划指令（零开销）；复杂任务注入 `_PLAN_INSTRUCTION`（prompt 级规划，A1 实测回答结构化分节）；轻量用户摘要（昵称 + 记忆条数，`_build_light_summary`，DB 查询失败静默降级）每轮注入 system prompt 侧（防"忘记调用"记忆工具）
 - **记忆工具化四工具（船长决策，user_id 隔离）**：`recall_user_memory(关键词)`/`save_user_memory(事实)`/`list_user_memories()`/`delete_user_memory(id)`，全部经 InjectedState 注入当前用户（模型看不到注入参数，无法经文本指定他人）；游客读写全部跳过；`memory_service` 新增公开接口 `list_user_memories`/`delete_user_memory`，Document metadata 增 `memory_id`（uuid，T3 契约 to_dict 键集合不变；旧条目派生 id `legacy:{归一化 content}` 兼容删除），详见 `doc/long-term-memory.md`
 - **SSE 契约映射（A1 报告 §5，A3 已验证与 ADH 前端契约一致，前端零改动）**：step 经 AIMessageChunk.tool_call_chunks 按 call id 去重、token 为 AI chunk 内容增量、done 提取 search_knowledge 的 ToolMessage 作 RAG 来源（done 携带 conversation_id + intent 观测字段）；**必须保留 suppress_tokens 语义**（模型在调用工具前会输出正文 token，工具调用消息的内联 content 需抑制，实测必现）
+- **对话落库（dialogues 表，2026-08-11 船长调试修复）**：本地对话历史上从不写 dialogues 表（仅 Dify 轮询/回填写入）→ 管理后台大屏/感受度报告永远为空；现由路由层（`routers/dialogue.py` 的 `/api/v1/dialogue/chat`，注入 `Depends(get_db)`）在 deepagents 链路正常完成后调 `chat_agent.record_dialogue` 落库——会话层单一数据源（deepagents 装配层与弃用链路共用）：每轮问答写两行（用户消息 + AI 回复），`visitor_id` 用对话用户标识（登录用户 id / 游客 id / visitor），visitors 记录按需 upsert（**原子 `ON CONFLICT DO NOTHING`**，防同一新 visitor 并发首条消息 IntegrityError 整轮回滚丢库）；`external_message_id` 生成 `local:{uuid}:{user|answer}`（unique 约束可去重，与 Dify 消息 id 前缀不冲突）；写入时机：非流式成功后、流式 done 事件处（yield done 前 await，客户端断开也不丢；与会话存储 `_append_history` 的 done 前落盘同策略）；**主链路异常回落 Dify 时不落库**（数据源在 Dify 侧，由轮询/回填负责）；失败仅告警不阻断对话（双保险 try/except）；评估链路零改动——本地落库的 dialogue 自动进入 `analysis_loop` 的 `batch_evaluate`（LEFT JOIN 未评估 + content 非空）→ Evaluation 写入，大屏/报告数据源恢复；测试 `tests/test_dialogue_persistence.py`（8：游客/登录用户/游客 token 落库、多轮每轮两行且 visitor 不重复、原子 upsert 并发重复、流式 done 落库、落库失败不阻断、回落 Dify 不落库）
 
 ## deepagents 成本/速度调优（A4，批次3 收官：组合拳实测定参）
 
@@ -159,7 +160,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 船长决策 2026-08-06 方案B：阶段4 Dify 退场工作并入阶段3 顺手推进——盘点并清理 Dify 依赖面，**除对话双轨回落保留外其余尽量清理**。阶段4 首项（2026-08-07 方案A）已落地：**量化评估已本地化**。阶段4 收官（2026-08-07）：**模拟 Dify 不可达全链路自检通过**（对话双模式/流式/记忆、推荐问句、分析、量化评估→Evaluation→管理后台报告全部正常；仅保留项明确降级不崩溃，自检无代码缺陷），详见 `doc/phase4-e2e-verification.md`。**Dify 依赖面定稿**——当前 Dify 依赖仅剩两类（推荐问句、分析接口、量化评估均已脱离 Dify）：
 
 1. **对话双轨回落（保留，演示兜底）**：`dialogue.py` 的 `_call_dify_chat`/`_call_dify_chat_stream` + `app/services/dify_stream.py`（SSE 消费 + ThinkFilter）；`DIFY_API_URL`/`DIFY_API_KEY`
-2. **历史数据接口（保留）**：`tasks/polling.py`（30s 轮询拉对话入库）、`tasks/backfill.py`（一次性补拉 CLI）、`services/dify_client.py` 的 `get_conversations`/`get_conversation_messages`；`DIFY_LIGHT4AI_USER`（空则轮询空转）
+2. **历史数据接口（保留，数据源之一）**：`tasks/polling.py`（30s 轮询拉 **Dify 对话**入库；本地对话已由对话链路直接落库，轮询不再是唯一来源）、`tasks/backfill.py`（一次性补拉 CLI）、`services/dify_client.py` 的 `get_conversations`/`get_conversation_messages`；`DIFY_LIGHT4AI_USER`（空则轮询空转）
 
 已清理面：推荐问句（#30，`DIFY_RECOMMEND_WORKFLOW_API_KEY` 已移除）、运营分析接口（#31，`analytics_service.py` 纯本地 LLM + DB 兜底，`llm_analysis` 降级标记）、推荐 Agent 的 dify_helpers 依赖（#30）、**Dify Workflow 量化评估（阶段4 首项：`evaluate_dialogue` 改本地 LLM——`app/services/evaluation_service.py`，移除 `trigger_workflow`/`dify_helpers.py`/`DIFY_WORKFLOW_API_KEY`（config 校验器/docker-compose/CI/.env.example 同步））**。联调全链路验证与规划路径偶发空响应修复记录见 `doc/phase3-e2e-verification.md`。
 
@@ -292,9 +293,9 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 # Business Context
 
-- **Visitor 端**: 访客通过数字人 iframe 对话（Dify Chat Agent），系统后台轮询抓取对话内容；用户体系（注册/登录/游客）见上方「用户认证」专节，登录用户享**长期记忆**（阶段2 T2 已实现：对话后提取用户事实/偏好写入 user_memory 向量库，按 user 隔离；游客不写，见「长期记忆」专节与 doc/long-term-memory.md）
+- **Visitor 端**: 访客通过数字人 iframe 对话（deepagents 本地链路，对话直接落库 dialogues 表）；Dify 历史对话由轮询抓取（数据源之一）；用户体系（注册/登录/游客）见上方「用户认证」专节，登录用户享**长期记忆**（阶段2 T2 已实现：对话后提取用户事实/偏好写入 user_memory 向量库，按 user 隔离；游客不写，见「长期记忆」专节与 doc/long-term-memory.md）
 - **Admin 端**: 管理后台展示情感趋势、满意度、热点关注和景点热度（数据来自本地 LLM 量化评估——Evaluation 表，阶段4 起不再依赖 Dify Workflow），以及知识库管理（讲解词/FAQ/资料 CRUD + 批量导入）
-- **数据隔离**: 轮询/量化仍仅跟踪单一虚拟访客（`DIFY_LIGHT4AI_USER`），无多租户、无按用户的数据隔离（JWT 认证仅标记对话 user，不隔离数据，见上方「用户体系」）
+- **数据隔离**: 量化评估覆盖**所有未评估对话**（`batch_evaluate` LEFT JOIN 无 visitor 过滤，本地链路落库的游客/登录用户对话均入评估），无多租户、无按用户的数据隔离（JWT 认证仅标记对话 user，不隔离数据，见上方「用户体系」）
 
 # 开发指南
 

@@ -129,8 +129,10 @@
 请求流：Vue → fetch(/api/*) → Vite proxy → FastAPI → SQLite
 对话流：ADH → SSE(/api/v1/dialogue/chat) → deepagents 装配层
         （意图分类 → 工具调用(本地 JSON/RAG/记忆/GPS) → LLM 总结）→ SSE 回 ADH
-数据流：Dify API ← polling task(30s) → SQLite → analysis task(300s)
+        → 本地对话直接落库 dialogues 表（record_dialogue，每轮两行）
+数据流：对话链路 → dialogues 表 → analysis task(300s)
         → 本地 LLM 量化评估 → Evaluation 表 → 管理后台大屏/报告
+        （Dify 历史对话 ← polling task(30s)，数据源之一）
 记忆流：对话 done 后 → 记忆提取钩子(后台任务) → user_memory 向量库
         → 新会话轻量摘要注入 + 记忆四工具按需检索
 ```

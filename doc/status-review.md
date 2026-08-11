@@ -117,7 +117,7 @@ src/
 | 表 | 用途 | 来源 |
 |----|------|------|
 | visitors | 游客身份 | POST /visitor/register |
-| dialogues | 对话记录 | polling_loop 抓取 |
+| dialogues | 对话记录 | 对话链路直接落库（`record_dialogue`，deepagents 本地对话）+ polling_loop（Dify 历史） |
 | evaluations | 量化评分 | analysis_loop 产出 |
 | stats | 聚合统计（预留，当前未使用） | — |
 

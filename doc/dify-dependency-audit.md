@@ -14,7 +14,7 @@
 |------|-----------|------|------|
 | **对话双轨回落** | `app/routers/dialogue.py`（`_call_dify_chat`/`_call_dify_chat_stream`） | 对话主链路（deepagents 装配层，A3 起）异常时的 Dify Chat Agent 兜底（演示不翻车） | **保留**（船长决策，必须） |
 | **对话双轨回落** | `app/services/dify_stream.py` | 回落链路的 SSE 流式消费 + ThinkFilter 过滤 | **保留**（同上） |
-| **历史数据接口** | `app/tasks/polling.py` | 30s 轮询 Dify `/conversations`、`/messages` 拉对话入库（管理后台数据大屏数据源） | **保留**（历史数据接口，如需要） |
+| **历史数据接口** | `app/tasks/polling.py` | 30s 轮询 Dify `/conversations`、`/messages` 拉对话入库（数据源之一；本地对话已由对话链路直接落库，见 AGENTS.md「对话落库」） | **保留**（历史数据接口，如需要） |
 | **历史数据接口** | `app/tasks/backfill.py` | 一次性补拉 CLI（历史迁移工具，自带分页节流） | **保留**（历史数据接口） |
 | **历史数据接口** | `app/services/dify_client.py`（`get_conversations`/`get_conversation_messages`） | 轮询/补拉的 Dify API 客户端 | **保留**（同上） |
 | ~~管理后台评估数据源~~ | ~~`app/tasks/analysis.py`（`analysis_loop`/`batch_evaluate`/`evaluate_dialogue`）~~ | ~~每 300s 调 Dify Workflow 对未评估对话做量化评估~~ | ✅ **已清理（阶段4 首项）**：改本地 LLM 评估（`app/services/evaluation_service.py`，`LLM_*` 配置 opencode-go），Evaluation 表与管理后台消费不变（详见 §2） |
@@ -53,7 +53,7 @@
 
 - 当前 `DIFY_*` 剩余 `DIFY_API_URL`/`DIFY_API_KEY`/`DIFY_LIGHT4AI_USER`，均被保留模块（对话回落 + 历史数据接口）引用，**无需移除**；`DIFY_WORKFLOW_API_KEY` 已随阶段4 首项清理移除。
 - `.env.example` 注释已同步（§1 表格 + §2），明确各变量的用途与「对话回落/历史数据接口」归属。
-- `DIFY_LIGHT4AI_USER` 为空时轮询 `users=[]` 空转（当前主项目部署即为空，管理后台无新对话数据，属已知部署现状，非代码缺陷）。
+- `DIFY_LIGHT4AI_USER` 为空时轮询 `users=[]` 空转（当前主项目部署即为空；本地对话已由对话链路直接落库，管理后台大屏/报告数据来自本地链路，不再依赖轮询）
 
 ### 3.4 非 digitalHumanApi 的 Dify 引用（不在本任务清理范围）
 
