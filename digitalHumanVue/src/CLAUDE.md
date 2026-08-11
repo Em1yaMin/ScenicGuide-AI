@@ -51,7 +51,7 @@ export const useVisitorStore = defineStore('visitor', () => {
     { path: '',       component: () => import('@/views/HomeView.vue') },  // 视图懒加载
     { path: 'chat',   component: () => import('@/views/ChatView.vue') },
   ]}
-// 例外：认证页 /login /register 为顶层路由（不挂布局），访客端与管理后台均可直达（见 views/CLAUDE.md）
+// 例外：认证页 /login /register 为顶层路由（不挂布局），访客端布局直达（管理后台侧栏无用户登录/注册入口，见 layouts/CLAUDE.md）
 // 批次9：/admin/login 挂在 AdminLayout 下；router.beforeEach 守卫未登录（无管理员 JWT）访问
 // /admin 重定向 /admin/login?redirect=（X-Admin-Token 旧用法不受影响，见 utils/adminHeaders.ts）
 ```

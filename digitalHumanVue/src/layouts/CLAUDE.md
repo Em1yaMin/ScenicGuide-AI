@@ -2,12 +2,12 @@
 
 ## Responsibility
 
-页面布局壳组件。作为 Vue Router 的父路由 `component`，提供导航 + `<RouterView />` 内容出口。不直接 fetch 数据，但消费 auth store 渲染登录态（昵称显示、登录/注册入口、退出按钮）。
+页面布局壳组件。作为 Vue Router 的父路由 `component`，提供导航 + `<RouterView />` 内容出口。不直接 fetch 数据，但消费 store 渲染登录态：VisitorLayout 消费 auth store（昵称显示、登录/注册入口、退出按钮），AdminLayout 消费 adminAuth store（管理身份区）。
 
 ## Dependencies
 
 - **vue-router**: `RouterLink`、`RouterView`、`useRoute`（登录/注册链接携带 `redirect` 回跳参数）
-- **stores/auth**: `useAuthStore`（渲染 auth 区域；登录态判定、`logout()`）
+- **stores/auth**: `useAuthStore`（仅 VisitorLayout 渲染 auth 区域；登录态判定、`logout()`）
 - **stores/adminAuth**: `useAdminAuthStore`（批次9：AdminLayout 侧栏管理身份区——管理员 JWT 登录态、账号显示、退出登录、管理登录入口链接）
 
 ## Consumers
@@ -33,8 +33,7 @@
         <RouterLink to="/admin/agent">管理员 Agent</RouterLink>
         <RouterLink to="/admin/usage">成本仪表盘</RouterLink>
       </nav>
-      <!-- 管理身份区（批次9）：useAdminAuthStore 渲染管理员登录态/账号/退出 + 管理登录入口（见下方 Dependencies） -->
-      <!-- auth 区域：useAuthStore 渲染登录态 + 登录/注册链接 + 退出（见下方 Dependencies） -->
+      <!-- 管理身份区（批次9）：useAdminAuthStore 渲染管理员登录态/账号/退出 + 管理登录入口（见下方 Dependencies）；侧栏不含用户登录区（2026-08-11 移除） -->
     </aside>
     <main class="admin-main">
       <RouterView />
