@@ -21,7 +21,7 @@ assets/main.css          — #app { min-height: 100vh } 入口（依次 import d
 
 ## API Client Pattern
 
-统一走 `src/utils/fetchWithCodeEnvelope.ts` 封装（双向错误检查 + 默认 15s 超时 + FastAPI detail 三形态解析），按域封装见 `api/auth.ts` / `api/memory.ts` / `api/usage.ts` / `api/adminAgent.ts`；端点常量集中于 `api/index.ts`（禁止组件内硬编码 URL）。**权威约定见 [`doc/frontend-conventions.md`](../../doc/frontend-conventions.md)「API 封装模式」**，此处不重复全文。
+统一走 `src/utils/fetchWithCodeEnvelope.ts` 封装（双向错误检查 + 默认 15s 超时 + FastAPI detail 三形态解析），按域封装见 `api/auth.ts` / `api/adminAuth.ts`（批次9 管理员账号密码登录）/ `api/memory.ts` / `api/usage.ts` / `api/adminAgent.ts`；端点常量集中于 `api/index.ts`（禁止组件内硬编码 URL）。**权威约定见 [`doc/frontend-conventions.md`](../../doc/frontend-conventions.md)「API 封装模式」**，此处不重复全文。
 **不使用 axios** — 全部用原生 `fetch()`（经 fetchWithCodeEnvelope 封装）。Vite dev proxy（`vite.config.ts`）将 `/api` 转发到后端。
 
 ## Pinia Store Pattern
@@ -52,6 +52,8 @@ export const useVisitorStore = defineStore('visitor', () => {
     { path: 'chat',   component: () => import('@/views/ChatView.vue') },
   ]}
 // 例外：认证页 /login /register 为顶层路由（不挂布局），访客端与管理后台均可直达（见 views/CLAUDE.md）
+// 批次9：/admin/login 挂在 AdminLayout 下；router.beforeEach 守卫未登录（无管理员 JWT）访问
+// /admin 重定向 /admin/login?redirect=（X-Admin-Token 旧用法不受影响，见 utils/adminHeaders.ts）
 ```
 
 ## Naming Conventions

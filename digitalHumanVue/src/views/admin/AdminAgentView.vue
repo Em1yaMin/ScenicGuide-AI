@@ -11,16 +11,18 @@
  *   待确认项约 120s 自动过期失效）
  * - 会话管理：conversation_id 保存在页面状态跨轮透传（后端仅回显，
  *   连续性由前端携带）
- * - X-Admin-Token 鉴权：token 存 localStorage 的 admin_api_token，
- *   与知识库/公告/记忆管理页一致；未设置/失效时引导打开 Token 弹窗
+ * - 鉴权：管理员 JWT（Authorization Bearer，批次9 账号密码登录）或
+ *   X-Admin-Token（localStorage admin_api_token，向后兼容），见 utils/adminHeaders.ts；
+ *   登录失效时提示重新登录（路由守卫拦截 /admin 未登录访问）
  */
 import { nextTick, onMounted, ref } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { streamAdminAgentChat } from '@/api/adminAgent'
 import type { AdminAgentStreamHandlers } from '@/api/adminAgent'
+import { useAdminAuthStore } from '@/stores/adminAuth'
 
-const TOKEN_KEY = 'admin_api_token'
+const adminAuth = useAdminAuthStore()
 
 /** 演示引导示例（点击填入输入框，由用户确认后发送） */
 const SUGGESTIONS: string[] = [
@@ -63,10 +65,10 @@ const conversationId = ref('')
 let nextId = 1
 const messageListRef = ref<HTMLElement | null>(null)
 
-// ── Token 状态（与知识库/公告页一致的 Token 弹窗模式） ──
-const hasToken = ref(Boolean(localStorage.getItem(TOKEN_KEY)))
-const showToken = ref(false)
-const tokenInput = ref(localStorage.getItem(TOKEN_KEY) ?? '')
+// ── 鉴权状态（批次9：管理员 JWT 登录；兼容旧 X-Admin-Token） ──
+const hasToken = ref(
+  adminAuth.isLoggedIn || Boolean(localStorage.getItem('admin_api_token')),
+)
 
 // ── 空态欢迎语 ──
 const welcomeText =
@@ -175,13 +177,12 @@ async function send(text?: string): Promise<void> {
   try {
     await streamAdminAgentChat({ query: content, conversation_id: conversationId.value }, handlers)
   } catch (e) {
-    // 网络/HTTP 层错误：展示消息并引导设置 Token（401）
+    // 网络/HTTP 层错误：展示消息并提示重新登录（401 登录失效）
     const message = e instanceof Error ? e.message : '请求失败'
     assistantMsg.streaming = false
     assistantMsg.error = message
     if (isUnauthorized(e)) {
       hasToken.value = false
-      showToken.value = true
     }
     await scrollToBottom()
   } finally {
@@ -190,7 +191,7 @@ async function send(text?: string): Promise<void> {
   }
 }
 
-/** 判断错误是否为 401（X-Admin-Token 缺失/无效） */
+/** 判断错误是否为 401（管理员登录失效） */
 function isUnauthorized(e: unknown): boolean {
   return typeof e === 'object' && e !== null && 'httpStatus' in e && e.httpStatus === 401
 }
@@ -229,20 +230,6 @@ function resetConversation(): void {
   conversationId.value = ''
 }
 
-// ── Token 弹窗（与知识库/公告页一致） ──
-function openTokenModal(): void {
-  tokenInput.value = localStorage.getItem(TOKEN_KEY) ?? ''
-  showToken.value = true
-}
-
-function saveToken(): void {
-  const trimmed = tokenInput.value.trim()
-  if (!trimmed) return
-  localStorage.setItem(TOKEN_KEY, trimmed)
-  hasToken.value = true
-  showToken.value = false
-}
-
 /** Markdown 渲染（DOM 净化，与知识库页同模式） */
 function renderMarkdown(text: string): string {
   if (!text) return ''
@@ -266,17 +253,16 @@ onMounted(() => {
         </p>
       </div>
       <div class="header-actions">
-        <button class="secondary-btn" @click="openTokenModal">Token 设置</button>
         <button class="primary-btn" :disabled="isStreaming" @click="resetConversation">
           新会话
         </button>
       </div>
     </div>
 
-    <!-- Token 未设置提示条 -->
+    <!-- 登录失效提示条（批次9：管理员登录替代 X-Admin-Token 输入形式） -->
     <div v-if="!hasToken" class="token-hint">
-      <span>⚠ 未设置管理员 Token（X-Admin-Token），管理员 Agent 不可用。</span>
-      <button class="token-hint-btn" @click="openTokenModal">立即设置</button>
+      <span>⚠ 管理员登录已失效，请重新登录后使用管理员 Agent。</span>
+      <RouterLink class="token-hint-btn" to="/admin/login">重新登录</RouterLink>
     </div>
 
     <!-- 对话卡片 -->
@@ -373,33 +359,6 @@ onMounted(() => {
         </div>
       </div>
     </div>
-
-    <!-- Token 设置弹窗 -->
-    <Teleport to="body">
-      <div v-if="showToken" class="modal-overlay" @click.self="showToken = false">
-        <div class="modal-panel">
-          <div class="modal-header">
-            <h2>管理员 Token</h2>
-            <button class="icon-btn" @click="showToken = false">✕</button>
-          </div>
-          <div class="modal-body">
-            <div class="form-row">
-              <label>X-Admin-Token</label>
-              <input
-                v-model="tokenInput"
-                type="password"
-                :placeholder="hasToken ? '已设置' : '请输入 Token'"
-              />
-              <p class="form-hint">Token 保存在浏览器本地，用于调用管理接口。</p>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button class="secondary-btn" @click="showToken = false">取消</button>
-            <button class="primary-btn" @click="saveToken">保存</button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
   </div>
 </template>
 

@@ -1,6 +1,22 @@
 from typing import Dict, List
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+
+class AdminLoginRequest(BaseModel):
+    """管理员登录请求（账号密码来自 ADMIN_USERNAME / ADMIN_PASSWORD 环境变量）。"""
+
+    username: str = Field(..., description="管理员账号")
+    password: str = Field(..., description="管理员密码")
+
+
+class AdminLoginResponse(BaseModel):
+    """管理员登录成功响应：JWT（typ=admin，sub=账号）+ 账号。"""
+
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int = Field(..., description="token 有效期（秒）")
+    username: str
 
 
 class SentimentTrendItem(BaseModel):

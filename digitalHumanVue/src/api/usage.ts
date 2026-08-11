@@ -1,8 +1,8 @@
 /**
  * 管理端 LLM 用量报表 API 封装（对齐后端 PR #54 /api/admin/usage 契约，
  * 权威文档见 digitalHumanApi/doc/usage-tracking.md）。
- * 全部接口需 X-Admin-Token 鉴权（token 存 localStorage 的 admin_api_token，
- * 与知识库/记忆管理页一致）。
+ * 鉴权：管理员 JWT（Authorization Bearer，批次9 账号密码登录）或
+ * X-Admin-Token（localStorage admin_api_token，向后兼容），见 utils/adminHeaders.ts。
  */
 import { API_ADMIN_USAGE_DETAILS, API_ADMIN_USAGE_EXPORT, API_ADMIN_USAGE_OVERVIEW } from '@/api'
 import type {
@@ -12,17 +12,8 @@ import type {
   UsageOverviewResponse,
 } from '@/types/usage'
 import { FetchError, fetchWithCodeEnvelope } from '@/utils/fetchWithCodeEnvelope'
+import { adminApiHeaders } from '@/utils/adminHeaders'
 
-const TOKEN_KEY = 'admin_api_token'
-
-/** 构造带 X-Admin-Token 的请求头（json=true 时附带 Content-Type） */
-function adminHeaders(json = true): Record<string, string> {
-  const headers: Record<string, string> = {
-    'X-Admin-Token': localStorage.getItem(TOKEN_KEY) ?? '',
-  }
-  if (json) headers['Content-Type'] = 'application/json'
-  return headers
-}
 
 /** 查询参数 → querystring（空值忽略；page/page_size 为数字） */
 function buildQuery(params: UsageDetailsParams): string {
@@ -44,7 +35,7 @@ export function fetchUsageOverview(
 ): Promise<UsageOverviewResponse> {
   return fetchWithCodeEnvelope<UsageOverviewResponse>(
     `${API_ADMIN_USAGE_OVERVIEW}?${buildQuery(params)}`,
-    { headers: adminHeaders(false) },
+    { headers: adminApiHeaders(false) },
   )
 }
 
@@ -52,7 +43,7 @@ export function fetchUsageOverview(
 export function fetchUsageDetails(params: UsageDetailsParams = {}): Promise<UsageDetailResponse> {
   return fetchWithCodeEnvelope<UsageDetailResponse>(
     `${API_ADMIN_USAGE_DETAILS}?${buildQuery(params)}`,
-    { headers: adminHeaders(false) },
+    { headers: adminApiHeaders(false) },
   )
 }
 
@@ -63,7 +54,7 @@ export function fetchUsageDetails(params: UsageDetailsParams = {}): Promise<Usag
  */
 export async function exportUsageCsv(params: UsageDetailsParams = {}): Promise<Blob> {
   const response = await fetch(`${API_ADMIN_USAGE_EXPORT}?${buildQuery(params)}`, {
-    headers: adminHeaders(false),
+    headers: adminApiHeaders(false),
   })
   if (!response.ok) {
     let message = `导出失败（HTTP ${response.status}）`

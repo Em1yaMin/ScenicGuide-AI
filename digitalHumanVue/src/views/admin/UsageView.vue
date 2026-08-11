@@ -13,7 +13,6 @@ import type { UsageDetailResponse, UsageGranularity, UsageOverviewResponse } fro
 registerECharts()
 
 // ── 常量 ──
-const TOKEN_KEY = 'admin_api_token'
 const PAGE_SIZE = 20
 const DETAIL_MAX_PAGES = 1000 // 兜底上限，防止异常 total 撑爆分页渲染
 
@@ -69,11 +68,6 @@ const page = ref(1)
 const isExporting = ref(false)
 const exportMessage = ref<string | null>(null)
 let exportMessageTimer: ReturnType<typeof setTimeout> | null = null
-
-// ── State：Token 设置 ──
-const showToken = ref(false)
-const adminToken = ref(localStorage.getItem(TOKEN_KEY) ?? '')
-const tokenInput = ref('')
 
 // ── 时间工具 ──
 function pad2(n: number): string {
@@ -327,23 +321,6 @@ async function downloadCsv() {
   }
 }
 
-// ── Token 设置（与记忆管理页一致） ──
-function openToken() {
-  tokenInput.value = adminToken.value
-  showToken.value = true
-}
-
-function saveToken() {
-  const trimmed = tokenInput.value.trim()
-  if (trimmed) {
-    localStorage.setItem(TOKEN_KEY, trimmed)
-    adminToken.value = trimmed
-  }
-  showToken.value = false
-  // Token 可能刚生效/被修正，重拉数据
-  loadAll()
-}
-
 onMounted(() => {
   loadAll()
 })
@@ -369,7 +346,6 @@ onMounted(() => {
           {{ isExporting ? '导出中…' : '导出 CSV' }}
         </button>
         <span v-if="exportMessage" class="export-msg">{{ exportMessage }}</span>
-        <button class="secondary-btn" @click="openToken">Token 设置</button>
       </div>
     </div>
 
@@ -632,31 +608,6 @@ onMounted(() => {
     </template>
 
     <!-- Token 设置弹窗 -->
-    <Teleport to="body">
-      <div v-if="showToken" class="modal-overlay" @click.self="showToken = false">
-        <div class="modal-panel modal-small">
-          <div class="modal-header">
-            <h2>管理员 Token</h2>
-            <button class="icon-btn" @click="showToken = false">✕</button>
-          </div>
-          <div class="modal-body">
-            <div class="form-row">
-              <label>X-Admin-Token</label>
-              <input
-                v-model="tokenInput"
-                type="password"
-                :placeholder="adminToken ? '已设置' : '请输入 Token'"
-              />
-              <p class="form-hint">Token 保存在浏览器本地，用于调用管理接口。</p>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button class="secondary-btn" @click="showToken = false">取消</button>
-            <button class="primary-btn" @click="saveToken">保存</button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
   </div>
 </template>
 

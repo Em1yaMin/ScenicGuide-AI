@@ -71,12 +71,21 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - 错误提示：`fetchWithCodeEnvelope` 解析 FastAPI `detail`（401 "用户名或密码错误"、409 "用户名已存在"、422 校验字段）
 - 无需新增前端环境变量（后端 JWT 配置见 `digitalHumanApi/.env.example`）
 
+## 管理员账号密码登录（批次9，2026-08-10 船长指示：替代 X-Admin-Token 输入形式）
+
+管理后台登录改为「主页账号密码登录 → 跳转 /admin」，旧 X-Admin-Token 完全保留向后兼容。
+
+- **后端**：`POST /api/v1/admin/login`（`app/routers/admin.py`，前缀 `/api/v1/admin`）——凭据来自 `ADMIN_USERNAME`/`ADMIN_PASSWORD` 环境变量（`config.py`，默认演示值 `admin`/`admin123456`，README 已注明；生产必须修改）；错误凭据 401；成功签发管理员 JWT（`create_access_token(token_type="admin")`，载荷 `typ=admin` 区分普通用户/游客 token）；登录端点复用 `AuthRateLimiter` 限流（同 auth.py 模式，`_admin_login_limiter`，失败 5 次/60s 进冷却 429，成功清零）
+- **鉴权双路径**：`app/routers/deps.py::verify_admin_token` 新增 `authorization` Header 参数——① X-Admin-Token（既有 ADMIN_TOKENS/ADMIN_API_TOKEN 映射，向后兼容）② Authorization Bearer 管理员 JWT（`decode_bearer` + `typ=="admin"` → 恒为 admin 角色）；任一命中放行；`require_role` 同型透传；管理员 agent（ADMIN_TOOLS）内部调用方式不变
+- **前端**：`src/stores/adminAuth.ts`（Pinia，`admin_jwt`/`admin_username` 持久化）+ `src/api/adminAuth.ts` + `src/views/admin/AdminLoginView.vue`（路由 `/admin/login`）+ 路由守卫（router beforeEach：未登录访问 /admin 重定向 `/admin/login?redirect=`）+ 主页 Hero 区「进入管理后台」入口；管理端 API 请求头统一走 `src/utils/adminHeaders.ts`（同时带 JWT 与旧 X-Admin-Token，旧用法不受影响）；管理页 Token 弹窗已移除（AdminLayout 侧栏显示管理身份 + 退出登录，AdminAgentView 登录失效提示条）
+- **配置**：`ADMIN_USERNAME`/`ADMIN_PASSWORD` 需同步三处（digitalHumanApi/.env.example + 根目录 .env.example + docker-compose.yml 透传，默认 `admin`/`admin123456`）；测试 `tests/test_admin_login.py`（10：签发/401/双路径/RBAC/JWT 载荷区分/限流重置 fixture）
+
 ## 知识库管理（X-Admin-Token 认证）
 
 - `app/models/knowledge.py` + `app/services/knowledge_service.py` + `app/routers/knowledge.py` — `/api/admin/knowledge*` CRUD + `/import`
 - **CRUD/导入变更后自动同步向量索引**：增/删/改/导入后 `knowledge_service._sync_knowledge_index` 以 DB 全量条目重建 knowledge 命名空间（`index_knowledge_entries`，条目量小、全量重建开销可忽略）；索引失败仅告警日志不阻断 CRUD（下次变更/手动索引自愈）；批量导入仅最后统一同步一次
 - 认证：`X-Admin-Token` 请求头，token 来自 `ADMIN_API_TOKEN` 环境变量（`app/core/config.py`；校验实现公共依赖 `app/routers/deps.py::verify_admin_token`，公告管理同源复用）；**RBAC 角色分级（批次6 C3）**见下方「安全加固」专节——删除类敏感操作（本模块 `DELETE /{kb_id}`）要求 admin 角色
-- 前端：`digitalHumanVue/src/views/admin/KnowledgeView.vue`，token 存 `localStorage` 的 `admin_api_token`
+- 前端：`digitalHumanVue/src/views/admin/KnowledgeView.vue`（管理端鉴权头统一走 `src/utils/adminHeaders.ts`，双凭据见「管理员账号密码登录」专节）
 - 导入支持 `.json` 数组和按 `# ` 标题切分的 `.md` 文件
 
 ## 公告模块 + 首页活数据（批次4 B2：首个真实 Alembic 迁移）
@@ -85,7 +94,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - **管理端** `/api/admin/announcements`（X-Admin-Token 鉴权）：列表（status/keyword 筛选 + 分页）/创建（默认草稿）/部分更新 PUT /{id}/状态切换 PATCH /{id}/status/删除；**访客端** `/api/v1/announcements`（公开，仅已发布，置顶优先 + 时间倒序）
 - **鉴权依赖提取**：`app/routers/deps.py` 的 `verify_admin_token` 为公共实现（knowledge.py 同源复用，行为不变）
 - **首页活数据**：`GET /api/v1/home/highlights`（公开）——`app/routers/home.py` + `app/services/home_service.py` 每次请求实时读 `app/data/{spots,routes}.json`（默认各 3 条，spots_limit/routes_limit 可调），前端首页卡片不再写死（HomeView 活数据渲染 + 接口失败静态兜底）；文件缺失/损坏降级空数组不报错
-- **前端（批次4 B2 前端任务）**：管理端 `digitalHumanVue/src/views/admin/AnnouncementView.vue`（列表/新建编辑/删除/发布下架/置顶，X-Admin-Token 存 `localStorage` 的 `admin_api_token`，与知识库页一致）；首页 `HomeView.vue` 公告区（仅已发布、置顶优先、无公告时隐藏）
+- **前端（批次4 B2 前端任务）**：管理端 `digitalHumanVue/src/views/admin/AnnouncementView.vue`（列表/新建编辑/删除/发布下架/置顶，鉴权头同知识库页走 `adminHeaders.ts`）；首页 `HomeView.vue` 公告区（仅已发布、置顶优先、无公告时隐藏）
 - **契约文档**：`doc/announcement-api.md`（路径/请求响应 schema/鉴权/排序约定，前端已按此实现）
 - 测试：`tests/test_announcement.py`（12）+ `tests/test_home.py`（6）+ `tests/test_migrations.py` 新增 announcements 升级/回退用例；**坑：`config.py` 的 `load_dotenv(override=True)` 使 .env 优先于环境变量，临时改配置需直接改 .env 或用 pytest monkeypatch**
 
@@ -206,7 +215,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - **输入校验（schema 层先 strip）**：`content`/`user` 纯空白 422、首尾空白自动归一化（`" 1 "` → `"1"`，查询参数同规）；保证修改「先删后建」在任何删除前完成校验（防空白内容先删后失败的数据丢失与带空白 user 孤儿条目）
 - **memory_service 新增公开接口**（复用不重实现）：`memory_id_of(entry)`（对外 memory_id 单一派生规则：uuid，旧条目 `legacy:{归一化 content}`，deepagents `_entry_to_json` 同规则）、`find_memory_by_id(memory_id)`（跨用户查找，含 legacy 兼容）、`count_memories_per_user()`（单次持锁批量统计）；`_save_user_memory_sync` 透传传入 memory_id（管理端预生成 uuid 落库，既有调用方行为不变）；`_delete_user_memory_sync` 匹配改为 `_doc_matches_memory_id` 统一走 memory_id_of（原 legacy 匹配逻辑等价）
 - 测试：`tests/test_memory_admin.py`（21：鉴权 401 全端点/用户列表含 memory_count/按用户列记忆/游客空/legacy 派生 id 删除/新增校验 422/游客 400/未注册 404/空白内容 422 拒绝（含修改先删后建不丢数据）/user 空白归一化/修改部分更新/修改后旧 id 失效/跨用户删除/404/审计日志）
-- **前端（批次5 B5 前端任务）**：`digitalHumanVue/src/api/memory.ts`（API 封装：fetchMemoryUsers/fetchUserMemories/createMemory/updateMemory/deleteMemory，X-Admin-Token 读 localStorage `admin_api_token`）+ `src/types/memory.ts`（AdminUserItem/AdminMemoryItem 等）+ `src/views/admin/MemoryView.vue`（路由 `/admin/memories`，菜单「记忆管理」）：双栏布局——左栏用户列表（keyword 搜索防抖 + 分页，memory_count 徽标），右栏选中用户记忆列表（fact_type 徽标/content/时间/来源会话，编辑/删除确认）；新增/编辑共用弹窗（fact_type 下拉 + content textarea，maxlength 200 + 前端校验）；空态「该用户暂无记忆（游客/匿名用户无长期记忆）」；保存后刷新记忆列表与用户条数统计
+- **前端（批次5 B5 前端任务）**：`digitalHumanVue/src/api/memory.ts`（API 封装：fetchMemoryUsers/fetchUserMemories/createMemory/updateMemory/deleteMemory，鉴权头走 `adminHeaders.ts` 双凭据）+ `src/types/memory.ts`（AdminUserItem/AdminMemoryItem 等）+ `src/views/admin/MemoryView.vue`（路由 `/admin/memories`，菜单「记忆管理」）：双栏布局——左栏用户列表（keyword 搜索防抖 + 分页，memory_count 徽标），右栏选中用户记忆列表（fact_type 徽标/content/时间/来源会话，编辑/删除确认）；新增/编辑共用弹窗（fact_type 下拉 + content textarea，maxlength 200 + 前端校验）；空态「该用户暂无记忆（游客/匿名用户无长期记忆）」；保存后刷新记忆列表与用户条数统计
 
 ## 管理员 agent（批次6 B4：deepagents 装配模式管理端变体，X-Admin-Token 鉴权）
 
@@ -251,7 +260,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - **llm_usage 表**：model/input/output/total_tokens（本地求和）/duration_ms/chain/user/cost/created_at；迁移 `c5f1a2b3d4e5`（升级建表+索引/回退删表）；`MODEL_PRICES` 单价表（"模型:输入价,输出价" 元/百万 tokens，分号分隔多项；留空 cost=NULL）
 - **报表 API**（`app/routers/usage.py`，前缀 /api/admin/usage，X-Admin-Token，operator 可查）：`GET /overview`（start/end ISO + granularity=day|week|month → totals + 趋势 series + by_model/by_chain，cost 未配置单价为 null）、`GET /details`（分页 + model/chain/user 筛选，created_at 倒序）、`GET /export`（CSV 导出，UTF-8 BOM 兼容 Excel）；时间统一 UTC naive；参数非法 422
 - 测试：`tests/test_usage_tracker.py`（19：队列/上下文/flush/开关/队列满兜底/关闭/单价表）+ `tests/test_llm_usage.py`（14：MockTransport 非流式/流式埋点、无 usage 不记、请求体不变、stream_options 开关、deepagents 端到端对话/流式记账）+ `tests/test_usage_api.py`（17：聚合正确性/分页筛选/CSV/鉴权 401/operator 放行/422）；conftest autouse `_reset_usage_tracker` 每测试重置队列；全量 618 绿（基线 566 + 52）
-- **前端（批次7 C5 前端任务，2026-08-09）**：`digitalHumanVue/src/views/admin/UsageView.vue`（路由 `/admin/usage`，菜单「成本仪表盘」）+ `src/api/usage.ts`（fetchUsageOverview/fetchUsageDetails/exportUsageCsv，X-Admin-Token 读 localStorage `admin_api_token`；导出用原生 fetch 取 Blob + 隐藏 `<a>` 触发下载，不走 JSON 封装）+ `src/types/usage.ts`；页面：时间范围预设（今天/近7天/近30天/自定义日期输入）+ ECharts 双 Y 轴趋势（Token 柱状 + 调用折线，日/周/月粒度，复用 registerECharts 零新依赖）+ KPI 卡片（次数/Token 总量含输入输出拆分/平均耗时/费用，cost=null 显示—）+ 按模型/按链路聚合表（占比条形）+ 分页明细（模型/链路筛选下拉由 overview 聚合派生）+ CSV 导出（文件名带日期范围）；**时间语义**：请求参数带本地时区偏移 ISO datetime（`toLocalISO`），预设取「明日 00:00」为 end 覆盖当天全天（后端 end 开区间）；created_at 为 UTC naive，展示前补 `Z` 转本地；空数据态优雅（各区块空态文案，图表区显示「暂无趋势数据」）；联调实测（真实后端+真实浏览器）：6-11 条记录全链路可用、CSV 下载 BOM 正常、空态不崩
+- **前端（批次7 C5 前端任务，2026-08-09）**：`digitalHumanVue/src/views/admin/UsageView.vue`（路由 `/admin/usage`，菜单「成本仪表盘」）+ `src/api/usage.ts`（fetchUsageOverview/fetchUsageDetails/exportUsageCsv，鉴权头走 `adminHeaders.ts` 双凭据；导出用原生 fetch 取 Blob + 隐藏 `<a>` 触发下载，不走 JSON 封装）+ `src/types/usage.ts`；页面：时间范围预设（今天/近7天/近30天/自定义日期输入）+ ECharts 双 Y 轴趋势（Token 柱状 + 调用折线，日/周/月粒度，复用 registerECharts 零新依赖）+ KPI 卡片（次数/Token 总量含输入输出拆分/平均耗时/费用，cost=null 显示—）+ 按模型/按链路聚合表（占比条形）+ 分页明细（模型/链路筛选下拉由 overview 聚合派生）+ CSV 导出（文件名带日期范围）；**时间语义**：请求参数带本地时区偏移 ISO datetime（`toLocalISO`），预设取「明日 00:00」为 end 覆盖当天全天（后端 end 开区间）；created_at 为 UTC naive，展示前补 `Z` 转本地；空数据态优雅（各区块空态文案，图表区显示「暂无趋势数据」）；联调实测（真实后端+真实浏览器）：6-11 条记录全链路可用、CSV 下载 BOM 正常、空态不崩
 
 ## 数据库迁移（Alembic，批次2 地基 C1）
 

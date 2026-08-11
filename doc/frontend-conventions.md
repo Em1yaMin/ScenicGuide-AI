@@ -56,7 +56,7 @@ assets/main.css          — 入口：依次 @import design-tokens.css → varia
 ## 状态管理（Pinia）
 
 - 统一 **Composition API（setup store）** 语法：`export const useXxxStore = defineStore('xxx', () => { ... })`
-- 持久化：`localStorage` 直接读写（无 persist 插件）；键名沿用 snake_case（`auth_token`、`auth_user`、`visitor_id`、`admin_api_token`）
+- 持久化：`localStorage` 直接读写（无 persist 插件）；键名沿用 snake_case（`auth_token`、`auth_user`、`visitor_id`、`admin_api_token`、`admin_jwt`/`admin_username`）
 - 参考实现：
   - `stores/visitor.ts` — `generateUUID()`（非安全上下文降级 Math.random + Date.now）生成 visitorId
   - `stores/auth.ts` — token/JWT 持久化、`enterGuestMode()` 游客兜底、`restoreSession()` 启动校验 `/auth/me`（401 清登录态、网络失败保留本地缓存）、`authHeaders()` 注入请求头（未登录返回空对象向后兼容）
@@ -74,7 +74,7 @@ assets/main.css          — 入口：依次 @import design-tokens.css → varia
 - 默认 15s 超时（`AbortController`，`timeoutMs` 可配，0 禁用）
 - **端点常量集中**：`api/index.ts` 的 `API_*` 常量，组件内禁止硬编码 URL
 - **按域封装**：`api/auth.ts` / `api/memory.ts` / `api/usage.ts` 等导出类型化函数（`fetchWithCodeEnvelope<XxxResponse>(API_X, {...})`），调用方不直接碰 fetch
-- 鉴权头：登录用户 `Authorization: Bearer <token>`（authHeaders()）；管理端 `X-Admin-Token` 读 `localStorage.admin_api_token`
+- 鉴权头：登录用户 `Authorization: Bearer <token>`（authHeaders()）；管理端统一走 `utils/adminHeaders.ts`（批次9 起：同时携带管理员 JWT `Authorization: Bearer` 与旧 `X-Admin-Token`（localStorage `admin_api_token`），后端 deps 双路径任一放行，旧用法不受影响）
 - **SSE 特例**（`api/adminAgent.ts`）：用原生 fetch ReadableStream + TextDecoder 增量解码，统一剔 `\r` 后按 `\n\n` 分帧、按行取 `data:` 前缀解析 JSON；非流式走 fetchWithCodeEnvelope 备用
 - **CSV/二进制特例**（`api/usage.ts`）：原生 fetch 取 Blob + 隐藏 `<a>` 触发下载，不走 JSON 封装
 

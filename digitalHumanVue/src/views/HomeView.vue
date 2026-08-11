@@ -222,6 +222,11 @@ function scrollToRecommendedRoutes() {
             浏览推荐
           </button>
         </div>
+        <!-- 管理后台入口（批次9：管理员账号密码登录，替代 X-Admin-Token 输入形式） -->
+        <p class="hero-admin-entry">
+          景区管理者？
+          <RouterLink to="/admin/login" class="admin-entry-link">进入管理后台 →</RouterLink>
+        </p>
       </div>
 
       <!-- 签名元素：朱砂印章落款「AI 导览」（入场序列最后盖章落定） -->
@@ -419,6 +424,23 @@ function scrollToRecommendedRoutes() {
   display: flex;
   gap: var(--space-md);
   flex-wrap: wrap;
+}
+
+/* 管理后台入口（批次9：管理员账号密码登录） */
+.hero-admin-entry {
+  margin: var(--space-lg) 0 0;
+  font-size: var(--text-small);
+  color: var(--slate);
+}
+
+.admin-entry-link {
+  color: var(--jade);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.admin-entry-link:hover {
+  text-decoration: underline;
 }
 
 /* ── 按钮（青玉主 / 描边次，全站通用形态） ── */

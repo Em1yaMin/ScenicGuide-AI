@@ -18,7 +18,7 @@ schemas/
   common.py     # ErrorResponse — 统一错误信封（跨域共享）
   health.py     # HealthResponse — 健康检查
   visitor.py    # VisitorRegisterRequest / VisitorRegisterResponse
-  admin.py      # DashboardResponse、ReportResponse + 7 个嵌套 Item 类
+  admin.py      # DashboardResponse、ReportResponse + 7 个嵌套 Item 类；批次9 新增 AdminLoginRequest / AdminLoginResponse（管理员账号密码登录）
   knowledge.py  # KnowledgeCreateRequest/UpdateRequest/Item/ListResponse/ImportResponse
   dialogue.py   # DialogueItem — 预留未来对话列表 API
   analysis.py   # AnalysisResultItem — 预留未来分析结果 API

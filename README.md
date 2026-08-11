@@ -211,6 +211,7 @@
 | `AMAP_WEB_KEY` | **高德 Web 服务 Key**（GPS 地理编码/路径规划）；未配置时对话工具返回 `amap_not_configured` 错误码不阻断对话 |
 | `JWT_SECRET` | JWT 签名密钥（生产必填随机长串；留空则启动生成临时密钥、重启后 token 失效） |
 | `ADMIN_API_TOKEN` / `ADMIN_TOKENS` | 管理端认证（X-Admin-Token）；`ADMIN_TOKENS="token1=admin,token2=operator"` 支持 RBAC 角色分级 |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | **管理后台账号密码登录**（批次9，替代 X-Admin-Token 输入形式）；默认演示值 `admin` / `admin123456`（见下方「访问入口」），生产必须修改 |
 | `CORS_ORIGINS` | 跨域白名单（默认覆盖 localhost/127.0.0.1/192.168.16.132 × 5173/8001/3000 演示环境，生产显式收紧；credentials 开启时不能含 `*`） |
 | `DIALOGUE_ENGINE` | `langchain`（默认，deepagents 主链路 + Dify 回落）/ `dify`（强制 Dify） |
 
@@ -268,6 +269,8 @@ node node_modules/next/dist/bin/next dev -p 3000
 | 后端 API 文档 | http://localhost:8000/docs |
 | 健康检查 | http://localhost:8000/api/v1/health（含 `app_env` 字段） |
 
+> **管理员账号（演示）**：未登录访问 `/admin` 会跳转到管理员登录页（`/admin/login`），主页 Hero 区也有「进入管理后台」入口。默认演示账号为 **`admin` / `admin123456`**，来源于环境变量 `ADMIN_USERNAME` / `ADMIN_PASSWORD`（`digitalHumanApi/.env`，见 `.env.example` 注释与上方配置表；docker-compose 部署则在根目录 `.env` 配置）。登录成功后签发管理员 JWT，管理端接口同时接受 `Authorization: Bearer` 与旧 `X-Admin-Token`（向后兼容）。**生产环境务必修改为强密码并配置 `JWT_SECRET`。**
+
 ## 部署
 
 ### 方式一：Docker Compose（一体化）
@@ -324,6 +327,7 @@ docker-compose up -d --build
 | 接口 | 说明 |
 |------|------|
 | `POST /api/v1/auth/register` / `login` / `guest` / `GET /me` | 用户注册/登录/游客 token/JWT 校验（认证端点限流保护） |
+| `POST /api/v1/admin/login` | 管理员账号密码登录（`ADMIN_USERNAME`/`ADMIN_PASSWORD`，批次9；签发 `typ=admin` 的管理员 JWT，错误凭据 401） |
 | `POST /api/v1/dialogue/chat` | 对话（非流式 + `streaming=true` SSE：step/token/done/error 事件；deepagents 主链路 → Dify 回落） |
 | `POST /api/v1/recommend` | 个性化路线推荐 |
 | `GET /api/v1/visitor/recommended-questions` / `POST /refresh-recommend` | 推荐问句（读缓存 / 手动刷新） |

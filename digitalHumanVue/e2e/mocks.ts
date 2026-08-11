@@ -121,6 +121,14 @@ export const loginResponse = {
   },
 }
 
+/** 管理员登录成功（POST /api/v1/admin/login，批次9） */
+export const adminLoginResponse = {
+  access_token: 'e2e-admin-jwt',
+  token_type: 'bearer',
+  expires_in: 86400,
+  username: 'admin',
+}
+
 /** 知识库列表（GET /api/admin/knowledge） */
 export const knowledgeList = {
   items: [
@@ -297,6 +305,8 @@ export async function mockApiRoutes(page: Page): Promise<void> {
         return respond(guestResponse)
       case 'POST /api/v1/auth/login':
         return respond(loginResponse)
+      case 'POST /api/v1/admin/login':
+        return respond(adminLoginResponse)
       case 'POST /api/v1/visitor/register':
         return respond({ ok: true })
       case 'GET /api/v1/visitor/recommended-questions':
