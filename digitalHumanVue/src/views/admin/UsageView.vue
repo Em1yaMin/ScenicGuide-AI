@@ -34,7 +34,6 @@ const GRANULARITY_OPTIONS: { key: UsageGranularity; label: string }[] = [
 /** 图表主题色对齐设计体系色板（doc/redesign-v1.md §2.1，与数据大屏/DashboardView 一致） */
 const BRAND = {
   accent: '#2F6B5B', // jade
-  ink: '#1E2A26', // ink
   inkSecondary: '#5C6B63', // slate
   border: '#E4E9E5', // mist
 }
@@ -229,19 +228,12 @@ function fmtDateTime(iso: string): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`
 }
 
-// ── 趋势图（ECharts：Token 用量柱状 + 调用次数折线，双 Y 轴） ──
+// ── 趋势图（ECharts：Token 用量柱状，单 Y 轴；船长 2026-08-11 指示移除调用次数折线） ──
 const trendOption = computed(() => {
   const series = overview.value?.series ?? []
   const buckets = series.map((s) => s.bucket)
   return {
     tooltip: { trigger: 'axis' as const, textStyle: { fontSize: 13 } },
-    legend: {
-      bottom: 0,
-      textStyle: { ...chartTextStyle, fontSize: 13 },
-      itemWidth: 12,
-      itemHeight: 12,
-      itemGap: 24,
-    },
     grid: { left: 8, right: 8, top: 24, bottom: 44, containLabel: true },
     xAxis: {
       type: 'category' as const,
@@ -250,25 +242,16 @@ const trendOption = computed(() => {
       axisLine: { lineStyle: { color: BRAND.border } },
       axisTick: { show: false },
     },
-    yAxis: [
-      {
-        type: 'value' as const,
-        name: 'Token 用量',
-        nameTextStyle: chartTextStyle,
-        axisLabel: {
-          ...chartTextStyle,
-          formatter: (v: number) => (v >= 10000 ? `${v / 10000}万` : String(v)),
-        },
-        splitLine: { lineStyle: { color: BRAND.border, type: 'dashed' as const } },
+    yAxis: {
+      type: 'value' as const,
+      name: 'Token 用量',
+      nameTextStyle: chartTextStyle,
+      axisLabel: {
+        ...chartTextStyle,
+        formatter: (v: number) => (v >= 10000 ? `${v / 10000}万` : String(v)),
       },
-      {
-        type: 'value' as const,
-        name: '调用次数',
-        nameTextStyle: chartTextStyle,
-        axisLabel: chartTextStyle,
-        splitLine: { show: false },
-      },
-    ],
+      splitLine: { lineStyle: { color: BRAND.border, type: 'dashed' as const } },
+    },
     series: [
       {
         name: 'Token 用量',
@@ -276,15 +259,6 @@ const trendOption = computed(() => {
         data: series.map((s) => s.total_tokens),
         itemStyle: { color: BRAND.accent, borderRadius: [3, 3, 0, 0] },
         barMaxWidth: 28,
-      },
-      {
-        name: '调用次数',
-        type: 'line' as const,
-        yAxisIndex: 1,
-        data: series.map((s) => s.calls),
-        itemStyle: { color: BRAND.ink },
-        lineStyle: { width: 2 },
-        symbolSize: 6,
       },
     ],
   }
