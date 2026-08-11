@@ -82,10 +82,7 @@ export async function fetchWithCodeEnvelope<T = unknown>(
     // FastAPI HTTPException 返回 { detail }；解析出消息以提供友好错误提示
     // （如 401 "用户名或密码错误"、409 "用户名已存在"、422 字段校验）。
     const detail = await extractErrorDetail(response)
-    throw new FetchError(
-      detail || `服务器返回错误 (${response.status})`,
-      response.status,
-    )
+    throw new FetchError(detail || `服务器返回错误 (${response.status})`, response.status)
   }
 
   let body: CodeEnvelope

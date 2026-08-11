@@ -11,9 +11,12 @@ import type {
   UsageOverviewParams,
   UsageOverviewResponse,
 } from '@/types/usage'
-import { FetchError, fetchWithCodeEnvelope, ANALYSIS_TIMEOUT_MS } from '@/utils/fetchWithCodeEnvelope'
+import {
+  FetchError,
+  fetchWithCodeEnvelope,
+  ANALYSIS_TIMEOUT_MS,
+} from '@/utils/fetchWithCodeEnvelope'
 import { adminApiHeaders } from '@/utils/adminHeaders'
-
 
 /** 查询参数 → querystring（空值忽略；page/page_size 为数字） */
 function buildQuery(params: UsageDetailsParams): string {
