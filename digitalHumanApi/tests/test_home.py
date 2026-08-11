@@ -12,35 +12,35 @@ import app.services.home_service as home_service
 SAMPLE_SPOTS = [
     {
         "id": "spot_001",
-        "name": "翠微峰",
-        "description": "景区最高峰",
-        "tags": ["自然风光"],
-        "duration_minutes": 120,
-        "difficulty": "中等",
-        "location": "景区北部",
-        "highlights": ["云海观景台"],
+        "name": "灵山大照壁",
+        "description": "华夏第一壁，景区入口标志性景观",
+        "tags": ["历史人文"],
+        "duration_minutes": 30,
+        "difficulty": "轻松",
+        "location": "景区入口处，面朝太湖",
+        "highlights": ["赵朴初题字"],
     },
     {
         "id": "spot_002",
-        "name": "碧波湖",
-        "description": "山间天然湖泊",
-        "tags": ["自然风光", "湖泊"],
+        "name": "九龙灌浴",
+        "description": "花开见佛的动态群雕景观",
+        "tags": ["历史人文", "演艺"],
         "duration_minutes": 60,
         "difficulty": "轻松",
-        "location": "景区中部",
-        "highlights": ["湖心亭"],
+        "location": "菩提大道北端",
+        "highlights": ["圣水祈福"],
     },
 ]
 
 SAMPLE_ROUTES = [
     {
         "id": "route_001",
-        "name": "经典自然风光一日游",
-        "description": "一日经典路线",
+        "name": "历史文化深度游",
+        "description": "灵山文化精华路线",
         "spot_ids": ["spot_001", "spot_002"],
-        "tags": ["自然风光", "经典"],
+        "tags": ["历史人文", "经典"],
         "suitable_for": ["情侣"],
-        "total_duration_minutes": 225,
+        "total_duration_minutes": 360,
         "difficulty": "中等",
         "recommend_reason": "核心景观全覆盖",
     }
@@ -71,8 +71,8 @@ async def test_highlights_returns_spots_and_routes(client: AsyncClient, monkeypa
     resp = await client.get("/api/v1/home/highlights")
     assert resp.status_code == 200
     data = resp.json()
-    assert [s["name"] for s in data["spots"]] == ["翠微峰", "碧波湖"]
-    assert data["routes"][0]["name"] == "经典自然风光一日游"
+    assert [s["name"] for s in data["spots"]] == ["灵山大照壁", "九龙灌浴"]
+    assert data["routes"][0]["name"] == "历史文化深度游"
     assert data["routes"][0]["spot_ids"] == ["spot_001", "spot_002"]
     # 每次请求实时读取数据文件
     assert calls.get("spots.json") is True
@@ -90,7 +90,7 @@ async def test_highlights_limit_params(client: AsyncClient, monkeypatch):
     )
     data = resp.json()
     assert len(data["spots"]) == 1
-    assert data["spots"][0]["name"] == "翠微峰"
+    assert data["spots"][0]["name"] == "灵山大照壁"
     assert len(data["routes"]) == 1
 
 

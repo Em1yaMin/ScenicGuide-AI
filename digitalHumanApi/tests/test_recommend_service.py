@@ -195,10 +195,10 @@ async def test_fetch_recommended_questions_full_pipeline(monkeypatch, db_session
 
 # 与真实数据源结构一致的样本（测试不依赖真实文件内容）
 SAMPLE_SPOTS = [
-    {"id": "spot_001", "name": "翠微峰", "tags": ["自然风光", "拍照打卡"]},
-    {"id": "spot_002", "name": "碧波湖", "tags": ["自然风光", "湖泊"]},
-    {"id": "spot_003", "name": "古寺钟声", "tags": ["历史人文"]},
-    {"id": "spot_004", "name": "飞瀑流泉", "tags": ["自然风光"]},
+    {"id": "spot_001", "name": "灵山大佛", "tags": ["历史人文", "祈福"]},
+    {"id": "spot_002", "name": "九龙灌浴", "tags": ["历史人文", "演艺"]},
+    {"id": "spot_003", "name": "祥符禅寺", "tags": ["历史人文"]},
+    {"id": "spot_004", "name": "曼飞龙塔", "tags": ["自然风光"]},
 ]
 
 SAMPLE_ROUTES = [
@@ -219,9 +219,9 @@ class TestBuildFallbackQuestions:
         assert "有哪些值得去的景点？" in questions
         assert "推荐一条经典游玩路线" in questions
         # 景点问句（热门景点名入问句）
-        assert "翠微峰有什么特色？" in questions
-        assert "碧波湖有什么特色？" in questions
-        assert "古寺钟声有什么特色？" in questions
+        assert "灵山大佛有什么特色？" in questions
+        assert "九龙灌浴有什么特色？" in questions
+        assert "祥符禅寺有什么特色？" in questions
         # 路线标签问句（命中标签即产出对应问句；样例候选超上限，仅断言前部命中）
         assert "帮我规划一条半日游路线" in questions
         assert "帮我规划一条一日游路线" in questions
@@ -230,7 +230,7 @@ class TestBuildFallbackQuestions:
     def test_route_tag_questions_all_match(self):
         """路线标签全部命中（候选不超过上限时不截断）。"""
         questions = _build_fallback_questions(
-            [{"name": "翠微峰"}], SAMPLE_ROUTES
+            [{"name": "灵山大佛"}], SAMPLE_ROUTES
         )
         assert "帮我规划一条半日游路线" in questions
         assert "帮我规划一条一日游路线" in questions
@@ -253,7 +253,7 @@ class TestBuildFallbackQuestions:
         questions = _build_fallback_questions(SAMPLE_SPOTS, [])
         assert questions
         assert len(questions) >= 3
-        assert "翠微峰有什么特色？" in questions
+        assert "灵山大佛有什么特色？" in questions
         assert "有哪些值得去的景点？" in questions
 
     def test_missing_files_returns_none(self, monkeypatch):
@@ -294,13 +294,13 @@ async def test_fetch_recommended_questions_no_data_uses_fallback(monkeypatch):
     # 这里固定降级结果，验证 fetch 走降级分支且不调 LLM
     monkeypatch.setattr(
         "app.services.recommend_service._build_fallback_questions",
-        lambda: ["翠微峰有什么特色？", "帮我规划一条半日游路线"],
+        lambda: ["灵山大佛有什么特色？", "帮我规划一条半日游路线"],
     )
     fake = _FakeLLM('{"questions": ["不会用到"]}')
 
     questions = await fetch_recommended_questions(llm=fake)
 
-    assert questions == ["翠微峰有什么特色？", "帮我规划一条半日游路线"]
+    assert questions == ["灵山大佛有什么特色？", "帮我规划一条半日游路线"]
     assert not fake.invoked
 
 

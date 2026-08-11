@@ -5,12 +5,28 @@ import DOMPurify from 'dompurify'
 import { fetchWithCodeEnvelope } from '@/utils/fetchWithCodeEnvelope'
 import { adminApiHeaders } from '@/utils/adminHeaders'
 import { API_ADMIN_KNOWLEDGE, API_ADMIN_KNOWLEDGE_IMPORT } from '@/api'
+import {
+  createScenicRoute,
+  createScenicSpot,
+  deleteScenicRoute,
+  deleteScenicSpot,
+  fetchScenicRoutes,
+  fetchScenicSpots,
+  updateScenicRoute,
+  updateScenicSpot,
+} from '@/api/scenic'
 import type { KnowledgeItem, KnowledgeListResponse, KnowledgeFormData } from '@/types/knowledge'
+import type { ScenicRoute, ScenicSpot } from '@/types/scenic'
+import { SCENIC_DIFFICULTIES } from '@/types/scenic'
 
 const CATEGORIES = ['讲解词', 'FAQ', '景点资料']
 const PAGE_SIZE = 10
 
-// ── State ──
+/** 页签：知识文档（knowledge_base 表）/ 景点数据 / 路线数据（app/data JSON） */
+type ScenicTab = 'knowledge' | 'spots' | 'routes'
+const activeTab = ref<ScenicTab>('knowledge')
+
+// ── 知识文档（既有 CRUD，knowledge_base 表） ──
 const items = ref<KnowledgeItem[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -32,20 +48,66 @@ const form = ref<KnowledgeFormData>({
 })
 const isSaving = ref(false)
 const editorError = ref<string | null>(null)
-const activeTab = ref<'write' | 'preview'>('write')
+const activeTabEditor = ref<'write' | 'preview'>('write')
 
 const showImport = ref(false)
 const importFile = ref<File | null>(null)
 const importCategory = ref('景点资料')
 const isImporting = ref(false)
 const importError = ref<string | null>(null)
-// 通用提示条：导入/保存成功后提示已同步前台检索（knowledge 命名空间向量索引）
 const notice = ref<string | null>(null)
 
 const showDelete = ref(false)
 const deletingItem = ref<KnowledgeItem | null>(null)
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+// ── 景点数据（app/data/spots.json，agent search_spots 单一来源） ──
+const spots = ref<ScenicSpot[]>([])
+const spotsLoading = ref(false)
+const spotsError = ref<string | null>(null)
+
+const showSpotEditor = ref(false)
+const editingSpot = ref<ScenicSpot | null>(null)
+const spotForm = ref({
+  name: '',
+  description: '',
+  tagsText: '',
+  durationMinutes: 60,
+  difficulty: '轻松' as string,
+  location: '',
+  highlightsText: '',
+})
+const spotSaving = ref(false)
+const spotEditorError = ref<string | null>(null)
+
+const showSpotDelete = ref(false)
+const deletingSpot = ref<ScenicSpot | null>(null)
+
+// ── 路线数据（app/data/routes.json，agent search_routes 单一来源） ──
+const routes = ref<ScenicRoute[]>([])
+const routesLoading = ref(false)
+const routesError = ref<string | null>(null)
+
+const showRouteEditor = ref(false)
+const editingRoute = ref<ScenicRoute | null>(null)
+const routeForm = ref({
+  name: '',
+  description: '',
+  spotIds: [] as string[],
+  tagsText: '',
+  suitableForText: '',
+  totalDurationMinutes: 180,
+  difficulty: '轻松' as string,
+  recommendReason: '',
+})
+const routeSaving = ref(false)
+const routeEditorError = ref<string | null>(null)
+
+const showRouteDelete = ref(false)
+const deletingRoute = ref<ScenicRoute | null>(null)
+
+const scenicNotice = ref<string | null>(null)
 
 // ── Computed ──
 const totalPages = computed(() => Math.ceil(total.value / pageSize.value))
@@ -54,6 +116,9 @@ const renderedPreview = computed(() => {
   const raw = marked.parse(form.value.content || '', { async: false }) as string
   return DOMPurify.sanitize(raw)
 })
+
+/** 路线编辑弹窗中可勾选的景点（按 id 索引，供勾选还原） */
+const spotsById = computed(() => new Map(spots.value.map((s) => [s.id, s])))
 
 // ── Watchers ──
 watch(keyword, (value) => {
@@ -70,11 +135,19 @@ watch(selectedCategory, () => {
   fetchList()
 })
 
-// ── API helpers ──
+// ── 通用工具 ──
 function getHeaders(): Record<string, string> {
   return adminApiHeaders()
 }
 
+function splitList(text: string): string[] {
+  return text
+    .split(/[,，]/)
+    .map((t) => t.trim())
+    .filter(Boolean)
+}
+
+// ── 知识文档 CRUD（既有） ──
 async function fetchList() {
   isLoading.value = true
   error.value = null
@@ -103,7 +176,7 @@ async function fetchList() {
 function openCreate() {
   editingItem.value = null
   form.value = { title: '', category: '讲解词', content: '', tags: '' }
-  activeTab.value = 'write'
+  activeTabEditor.value = 'write'
   editorError.value = null
   showEditor.value = true
 }
@@ -116,7 +189,7 @@ function openEdit(item: KnowledgeItem) {
     content: item.content,
     tags: (item.tags ?? []).join(', '),
   }
-  activeTab.value = 'write'
+  activeTabEditor.value = 'write'
   editorError.value = null
   showEditor.value = true
 }
@@ -147,12 +220,7 @@ async function saveForm() {
     title: form.value.title.trim(),
     category: form.value.category,
     content: form.value.content.trim(),
-    tags: form.value.tags
-      ? form.value.tags
-          .split(',')
-          .map((t) => t.trim())
-          .filter(Boolean)
-      : [],
+    tags: splitList(form.value.tags),
   }
 
   try {
@@ -250,8 +318,243 @@ function formatDate(iso: string) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+// ── 景点数据 CRUD（app/data/spots.json） ──
+async function fetchSpots() {
+  spotsLoading.value = true
+  spotsError.value = null
+  try {
+    spots.value = await fetchScenicSpots()
+  } catch (e) {
+    spotsError.value = e instanceof Error ? e.message : '加载失败'
+  } finally {
+    spotsLoading.value = false
+  }
+}
+
+function openSpotCreate() {
+  editingSpot.value = null
+  spotForm.value = {
+    name: '',
+    description: '',
+    tagsText: '',
+    durationMinutes: 60,
+    difficulty: '轻松',
+    location: '',
+    highlightsText: '',
+  }
+  spotEditorError.value = null
+  showSpotEditor.value = true
+}
+
+function openSpotEdit(spot: ScenicSpot) {
+  editingSpot.value = spot
+  spotForm.value = {
+    name: spot.name,
+    description: spot.description,
+    tagsText: spot.tags.join(', '),
+    durationMinutes: spot.duration_minutes,
+    difficulty: spot.difficulty,
+    location: spot.location,
+    highlightsText: spot.highlights.join(', '),
+  }
+  spotEditorError.value = null
+  showSpotEditor.value = true
+}
+
+function validateSpotForm(): boolean {
+  if (!spotForm.value.name.trim()) {
+    spotEditorError.value = '请输入景点名称'
+    return false
+  }
+  if (!spotForm.value.description.trim()) {
+    spotEditorError.value = '请输入景点介绍'
+    return false
+  }
+  if (!spotForm.value.durationMinutes || spotForm.value.durationMinutes < 1) {
+    spotEditorError.value = '游览时长需为正整数'
+    return false
+  }
+  spotEditorError.value = null
+  return true
+}
+
+async function saveSpot() {
+  if (!validateSpotForm()) return
+  spotSaving.value = true
+  spotEditorError.value = null
+  const payload = {
+    name: spotForm.value.name.trim(),
+    description: spotForm.value.description.trim(),
+    tags: splitList(spotForm.value.tagsText),
+    duration_minutes: Number(spotForm.value.durationMinutes),
+    difficulty: spotForm.value.difficulty,
+    location: spotForm.value.location.trim(),
+    highlights: splitList(spotForm.value.highlightsText),
+  }
+  try {
+    if (editingSpot.value) {
+      await updateScenicSpot(editingSpot.value.id, payload)
+    } else {
+      await createScenicSpot(payload)
+    }
+    showSpotEditor.value = false
+    await fetchSpots()
+    scenicNotice.value = '景点已保存，数字人导览 Agent 实时生效'
+  } catch (e) {
+    spotEditorError.value = e instanceof Error ? e.message : '保存失败'
+  } finally {
+    spotSaving.value = false
+  }
+}
+
+function confirmSpotDelete(spot: ScenicSpot) {
+  deletingSpot.value = spot
+  showSpotDelete.value = true
+}
+
+async function doSpotDelete() {
+  if (!deletingSpot.value) return
+  try {
+    await deleteScenicSpot(deletingSpot.value.id)
+    showSpotDelete.value = false
+    await fetchSpots()
+    scenicNotice.value = '景点已删除，数字人导览 Agent 实时生效'
+  } catch (e) {
+    spotsError.value = e instanceof Error ? e.message : '删除失败'
+    showSpotDelete.value = false
+  }
+}
+
+// ── 路线数据 CRUD（app/data/routes.json） ──
+async function fetchRoutes() {
+  routesLoading.value = true
+  routesError.value = null
+  try {
+    routes.value = await fetchScenicRoutes()
+  } catch (e) {
+    routesError.value = e instanceof Error ? e.message : '加载失败'
+  } finally {
+    routesLoading.value = false
+  }
+}
+
+function openRouteCreate() {
+  editingRoute.value = null
+  routeForm.value = {
+    name: '',
+    description: '',
+    spotIds: [],
+    tagsText: '',
+    suitableForText: '',
+    totalDurationMinutes: 180,
+    difficulty: '轻松',
+    recommendReason: '',
+  }
+  routeEditorError.value = null
+  showRouteEditor.value = true
+}
+
+function openRouteEdit(route: ScenicRoute) {
+  editingRoute.value = route
+  routeForm.value = {
+    name: route.name,
+    description: route.description,
+    spotIds: [...route.spot_ids],
+    tagsText: route.tags.join(', '),
+    suitableForText: route.suitable_for.join(', '),
+    totalDurationMinutes: route.total_duration_minutes,
+    difficulty: route.difficulty,
+    recommendReason: route.recommend_reason,
+  }
+  routeEditorError.value = null
+  showRouteEditor.value = true
+}
+
+function toggleRouteSpot(spotId: string) {
+  const ids = routeForm.value.spotIds
+  const idx = ids.indexOf(spotId)
+  if (idx >= 0) {
+    ids.splice(idx, 1)
+  } else {
+    ids.push(spotId)
+  }
+}
+
+function validateRouteForm(): boolean {
+  if (!routeForm.value.name.trim()) {
+    routeEditorError.value = '请输入路线名称'
+    return false
+  }
+  if (!routeForm.value.description.trim()) {
+    routeEditorError.value = '请输入路线介绍'
+    return false
+  }
+  if (!routeForm.value.totalDurationMinutes || routeForm.value.totalDurationMinutes < 1) {
+    routeEditorError.value = '总时长需为正整数'
+    return false
+  }
+  routeEditorError.value = null
+  return true
+}
+
+async function saveRoute() {
+  if (!validateRouteForm()) return
+  routeSaving.value = true
+  routeEditorError.value = null
+  const payload = {
+    name: routeForm.value.name.trim(),
+    description: routeForm.value.description.trim(),
+    spot_ids: routeForm.value.spotIds,
+    tags: splitList(routeForm.value.tagsText),
+    suitable_for: splitList(routeForm.value.suitableForText),
+    total_duration_minutes: Number(routeForm.value.totalDurationMinutes),
+    difficulty: routeForm.value.difficulty,
+    recommend_reason: routeForm.value.recommendReason.trim(),
+  }
+  try {
+    if (editingRoute.value) {
+      await updateScenicRoute(editingRoute.value.id, payload)
+    } else {
+      await createScenicRoute(payload)
+    }
+    showRouteEditor.value = false
+    await fetchRoutes()
+    scenicNotice.value = '路线已保存，数字人导览 Agent 实时生效'
+  } catch (e) {
+    routeEditorError.value = e instanceof Error ? e.message : '保存失败'
+  } finally {
+    routeSaving.value = false
+  }
+}
+
+function confirmRouteDelete(route: ScenicRoute) {
+  deletingRoute.value = route
+  showRouteDelete.value = true
+}
+
+async function doRouteDelete() {
+  if (!deletingRoute.value) return
+  try {
+    await deleteScenicRoute(deletingRoute.value.id)
+    showRouteDelete.value = false
+    await fetchRoutes()
+    scenicNotice.value = '路线已删除，数字人导览 Agent 实时生效'
+  } catch (e) {
+    routesError.value = e instanceof Error ? e.message : '删除失败'
+    showRouteDelete.value = false
+  }
+}
+
+/** 路线途经景点名称展示（未找到的 id 原样透出，前端不崩） */
+function routeSpotNames(route: ScenicRoute): string {
+  const names = route.spot_ids.map((id) => spotsById.value.get(id)?.name ?? id)
+  return names.join(' → ')
+}
+
 onMounted(() => {
   fetchList()
+  fetchSpots()
+  fetchRoutes()
 })
 </script>
 
@@ -260,85 +563,224 @@ onMounted(() => {
     <div class="page-header">
       <div class="header-text">
         <h1>知识库管理</h1>
-        <p class="header-desc">管理景区讲解词、FAQ 与景点资料</p>
+        <p class="header-desc">管理景区讲解词、FAQ 与导览 Agent 的景点/路线数据</p>
       </div>
       <div class="header-actions">
-        <button class="secondary-btn" @click="showImport = true">批量导入</button>
-        <button class="primary-btn" @click="openCreate">+ 新建条目</button>
+        <template v-if="activeTab === 'knowledge'">
+          <button class="secondary-btn" @click="showImport = true">批量导入</button>
+          <button class="primary-btn" @click="openCreate">+ 新建条目</button>
+        </template>
+        <template v-else-if="activeTab === 'spots'">
+          <button class="primary-btn" @click="openSpotCreate">+ 新建景点</button>
+        </template>
+        <template v-else>
+          <button class="primary-btn" @click="openRouteCreate">+ 新建路线</button>
+        </template>
       </div>
     </div>
 
-    <!-- Filters -->
-    <div class="filter-bar">
-      <select v-model="selectedCategory" class="filter-select">
-        <option value="">全部分类</option>
-        <option v-for="cat in CATEGORIES" :key="cat" :value="cat">{{ cat }}</option>
-      </select>
-      <input v-model="keyword" class="filter-input" type="text" placeholder="搜索标题或内容…" />
+    <!-- Tabs -->
+    <div class="scenic-tabs">
+      <button
+        :class="['scenic-tab', { active: activeTab === 'knowledge' }]"
+        @click="activeTab = 'knowledge'"
+      >
+        知识文档
+      </button>
+      <button
+        :class="['scenic-tab', { active: activeTab === 'spots' }]"
+        @click="activeTab = 'spots'"
+      >
+        景点数据
+      </button>
+      <button
+        :class="['scenic-tab', { active: activeTab === 'routes' }]"
+        @click="activeTab = 'routes'"
+      >
+        路线数据
+      </button>
     </div>
 
-    <!-- Import Result -->
-    <div v-if="notice" class="import-result">
-      <span>{{ notice }}</span>
-      <button class="icon-btn" @click="notice = null">✕</button>
+    <!-- 通用提示条 -->
+    <div v-if="scenicNotice" class="import-result">
+      <span>{{ scenicNotice }}</span>
+      <button class="icon-btn" @click="scenicNotice = null">✕</button>
     </div>
 
-    <!-- Error -->
-    <div v-if="error" class="error-state">
-      <p>{{ error }}</p>
-      <button class="secondary-btn" @click="fetchList">重试</button>
-    </div>
-
-    <!-- Table -->
-    <div v-else class="table-card">
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th class="col-title">标题</th>
-            <th class="col-category">分类</th>
-            <th class="col-tags">标签</th>
-            <th class="col-date">更新时间</th>
-            <th class="col-actions">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-if="isLoading && items.length === 0">
-            <td colspan="5" class="empty-cell">加载中…</td>
-          </tr>
-          <tr v-else-if="items.length === 0">
-            <td colspan="5" class="empty-cell">暂无知识库条目</td>
-          </tr>
-          <tr v-for="item in items" :key="item.id">
-            <td class="cell-title">{{ item.title }}</td>
-            <td>
-              <span class="category-badge">{{ item.category }}</span>
-            </td>
-            <td>
-              <span v-if="!item.tags?.length" class="tag-empty">—</span>
-              <span v-for="tag in item.tags" :key="tag" class="tag-badge">{{ tag }}</span>
-            </td>
-            <td class="cell-date">{{ formatDate(item.updated_at) }}</td>
-            <td>
-              <div class="action-group">
-                <button class="text-btn" @click="openEdit(item)">编辑</button>
-                <button class="text-btn danger" @click="confirmDelete(item)">删除</button>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-
-      <!-- Pagination -->
-      <div v-if="totalPages > 1" class="pagination">
-        <button class="page-btn" :disabled="page === 1" @click="goPage(page - 1)">上一页</button>
-        <span class="page-info">第 {{ page }} / {{ totalPages }} 页，共 {{ total }} 条</span>
-        <button class="page-btn" :disabled="page === totalPages" @click="goPage(page + 1)">
-          下一页
-        </button>
+    <!-- ══════════ 知识文档页签 ══════════ -->
+    <template v-if="activeTab === 'knowledge'">
+      <!-- Filters -->
+      <div class="filter-bar">
+        <select v-model="selectedCategory" class="filter-select">
+          <option value="">全部分类</option>
+          <option v-for="cat in CATEGORIES" :key="cat" :value="cat">{{ cat }}</option>
+        </select>
+        <input v-model="keyword" class="filter-input" type="text" placeholder="搜索标题或内容…" />
       </div>
-    </div>
 
-    <!-- Editor Modal -->
+      <!-- Import Result -->
+      <div v-if="notice" class="import-result">
+        <span>{{ notice }}</span>
+        <button class="icon-btn" @click="notice = null">✕</button>
+      </div>
+
+      <!-- Error -->
+      <div v-if="error" class="error-state">
+        <p>{{ error }}</p>
+        <button class="secondary-btn" @click="fetchList">重试</button>
+      </div>
+
+      <!-- Table -->
+      <div v-else class="table-card">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th class="col-title">标题</th>
+              <th class="col-category">分类</th>
+              <th class="col-tags">标签</th>
+              <th class="col-date">更新时间</th>
+              <th class="col-actions">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="isLoading && items.length === 0">
+              <td colspan="5" class="empty-cell">加载中…</td>
+            </tr>
+            <tr v-else-if="items.length === 0">
+              <td colspan="5" class="empty-cell">暂无知识库条目</td>
+            </tr>
+            <tr v-for="item in items" :key="item.id">
+              <td class="cell-title">{{ item.title }}</td>
+              <td>
+                <span class="category-badge">{{ item.category }}</span>
+              </td>
+              <td>
+                <span v-if="!item.tags?.length" class="tag-empty">—</span>
+                <span v-for="tag in item.tags" :key="tag" class="tag-badge">{{ tag }}</span>
+              </td>
+              <td class="cell-date">{{ formatDate(item.updated_at) }}</td>
+              <td>
+                <div class="action-group">
+                  <button class="text-btn" @click="openEdit(item)">编辑</button>
+                  <button class="text-btn danger" @click="confirmDelete(item)">删除</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <!-- Pagination -->
+        <div v-if="totalPages > 1" class="pagination">
+          <button class="page-btn" :disabled="page === 1" @click="goPage(page - 1)">上一页</button>
+          <span class="page-info">第 {{ page }} / {{ totalPages }} 页，共 {{ total }} 条</span>
+          <button class="page-btn" :disabled="page === totalPages" @click="goPage(page + 1)">
+            下一页
+          </button>
+        </div>
+      </div>
+    </template>
+
+    <!-- ══════════ 景点数据页签 ══════════ -->
+    <template v-else-if="activeTab === 'spots'">
+      <div v-if="spotsError" class="error-state">
+        <p>{{ spotsError }}</p>
+        <button class="secondary-btn" @click="fetchSpots">重试</button>
+      </div>
+      <div v-else class="table-card">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th class="col-title">景点名称</th>
+              <th class="col-tags">标签</th>
+              <th class="col-duration">时长</th>
+              <th class="col-difficulty">难度</th>
+              <th class="col-location">位置</th>
+              <th class="col-actions">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="spotsLoading && spots.length === 0">
+              <td colspan="6" class="empty-cell">加载中…</td>
+            </tr>
+            <tr v-else-if="spots.length === 0">
+              <td colspan="6" class="empty-cell">暂无景点数据（数字人导览 Agent 将无法回答景点问题）</td>
+            </tr>
+            <tr v-for="spot in spots" :key="spot.id">
+              <td class="cell-title">
+                {{ spot.name }}
+                <span class="cell-sub">{{ spot.id }}</span>
+              </td>
+              <td>
+                <span v-for="tag in spot.tags" :key="tag" class="tag-badge">{{ tag }}</span>
+              </td>
+              <td class="cell-date">{{ Math.round(spot.duration_minutes / 60 * 10) / 10 }} 小时</td>
+              <td>
+                <span class="category-badge">{{ spot.difficulty }}</span>
+              </td>
+              <td class="cell-location">{{ spot.location || '—' }}</td>
+              <td>
+                <div class="action-group">
+                  <button class="text-btn" @click="openSpotEdit(spot)">编辑</button>
+                  <button class="text-btn danger" @click="confirmSpotDelete(spot)">删除</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
+
+    <!-- ══════════ 路线数据页签 ══════════ -->
+    <template v-else>
+      <div v-if="routesError" class="error-state">
+        <p>{{ routesError }}</p>
+        <button class="secondary-btn" @click="fetchRoutes">重试</button>
+      </div>
+      <div v-else class="table-card">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th class="col-title">路线名称</th>
+              <th class="col-tags">标签</th>
+              <th class="col-suitable">适合人群</th>
+              <th class="col-duration">总时长</th>
+              <th class="col-difficulty">难度</th>
+              <th class="col-actions">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="routesLoading && routes.length === 0">
+              <td colspan="6" class="empty-cell">加载中…</td>
+            </tr>
+            <tr v-else-if="routes.length === 0">
+              <td colspan="6" class="empty-cell">暂无路线数据（数字人导览 Agent 将无法回答路线问题）</td>
+            </tr>
+            <tr v-for="route in routes" :key="route.id">
+              <td class="cell-title">
+                {{ route.name }}
+                <span class="cell-sub">{{ routeSpotNames(route) }}</span>
+              </td>
+              <td>
+                <span v-for="tag in route.tags" :key="tag" class="tag-badge">{{ tag }}</span>
+              </td>
+              <td class="cell-location">{{ route.suitable_for.join('、') || '—' }}</td>
+              <td class="cell-date">{{ Math.round(route.total_duration_minutes / 60 * 10) / 10 }} 小时</td>
+              <td>
+                <span class="category-badge">{{ route.difficulty }}</span>
+              </td>
+              <td>
+                <div class="action-group">
+                  <button class="text-btn" @click="openRouteEdit(route)">编辑</button>
+                  <button class="text-btn danger" @click="confirmRouteDelete(route)">删除</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
+
+    <!-- Editor Modal（知识文档） -->
     <Teleport to="body">
       <div v-if="showEditor" class="modal-overlay" @click.self="showEditor = false">
         <div class="modal-panel modal-large">
@@ -365,21 +807,21 @@ onMounted(() => {
             </div>
             <div class="editor-tabs">
               <button
-                :class="['tab-btn', { active: activeTab === 'write' }]"
-                @click="activeTab = 'write'"
+                :class="['tab-btn', { active: activeTabEditor === 'write' }]"
+                @click="activeTabEditor = 'write'"
               >
                 编辑
               </button>
               <button
-                :class="['tab-btn', { active: activeTab === 'preview' }]"
-                @click="activeTab = 'preview'"
+                :class="['tab-btn', { active: activeTabEditor === 'preview' }]"
+                @click="activeTabEditor = 'preview'"
               >
                 预览
               </button>
             </div>
             <div class="editor-content">
               <textarea
-                v-if="activeTab === 'write'"
+                v-if="activeTabEditor === 'write'"
                 v-model="form.content"
                 placeholder="支持 Markdown 语法"
               />
@@ -391,6 +833,136 @@ onMounted(() => {
             <button class="secondary-btn" @click="showEditor = false">取消</button>
             <button class="primary-btn" :disabled="isSaving" @click="saveForm">
               {{ isSaving ? '保存中…' : '保存' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Spot Editor Modal -->
+    <Teleport to="body">
+      <div v-if="showSpotEditor" class="modal-overlay" @click.self="showSpotEditor = false">
+        <div class="modal-panel modal-large">
+          <div class="modal-header">
+            <h2>{{ editingSpot ? '编辑景点' : '新建景点' }}</h2>
+            <button class="icon-btn" @click="showSpotEditor = false">✕</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-row form-row-inline">
+              <div class="form-field">
+                <label>景点名称</label>
+                <input v-model="spotForm.name" type="text" placeholder="如：灵山大佛" />
+              </div>
+              <div class="form-field">
+                <label>难度</label>
+                <select v-model="spotForm.difficulty">
+                  <option v-for="d in SCENIC_DIFFICULTIES" :key="d" :value="d">{{ d }}</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <label>景点介绍</label>
+              <textarea v-model="spotForm.description" placeholder="数字人导览 Agent 据此回答景点问题" />
+            </div>
+            <div class="form-row form-row-inline">
+              <div class="form-field">
+                <label>标签（用逗号分隔）</label>
+                <input v-model="spotForm.tagsText" type="text" placeholder="如：历史人文, 祈福" />
+              </div>
+              <div class="form-field">
+                <label>游览时长（分钟）</label>
+                <input v-model.number="spotForm.durationMinutes" type="number" min="1" />
+              </div>
+            </div>
+            <div class="form-row form-row-inline">
+              <div class="form-field">
+                <label>具体位置</label>
+                <input v-model="spotForm.location" type="text" placeholder="如：景区中轴线核心" />
+              </div>
+              <div class="form-field">
+                <label>游玩亮点（用逗号分隔）</label>
+                <input v-model="spotForm.highlightsText" type="text" placeholder="如：抱佛脚, 登云道" />
+              </div>
+            </div>
+            <p class="form-hint">保存后数字人导览 Agent 与首页活数据实时生效（同一份数据源）。</p>
+            <p v-if="spotEditorError" class="form-error">{{ spotEditorError }}</p>
+          </div>
+          <div class="modal-footer">
+            <button class="secondary-btn" @click="showSpotEditor = false">取消</button>
+            <button class="primary-btn" :disabled="spotSaving" @click="saveSpot">
+              {{ spotSaving ? '保存中…' : '保存' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Route Editor Modal -->
+    <Teleport to="body">
+      <div v-if="showRouteEditor" class="modal-overlay" @click.self="showRouteEditor = false">
+        <div class="modal-panel modal-large">
+          <div class="modal-header">
+            <h2>{{ editingRoute ? '编辑路线' : '新建路线' }}</h2>
+            <button class="icon-btn" @click="showRouteEditor = false">✕</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-row form-row-inline">
+              <div class="form-field">
+                <label>路线名称</label>
+                <input v-model="routeForm.name" type="text" placeholder="如：历史文化深度游" />
+              </div>
+              <div class="form-field">
+                <label>难度</label>
+                <select v-model="routeForm.difficulty">
+                  <option v-for="d in SCENIC_DIFFICULTIES" :key="d" :value="d">{{ d }}</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row">
+              <label>路线介绍</label>
+              <textarea v-model="routeForm.description" placeholder="数字人导览 Agent 据此回答路线问题" />
+            </div>
+            <div class="form-row">
+              <label>途经景点（勾选，需先维护「景点数据」）</label>
+              <div v-if="spots.length === 0" class="form-hint">暂无景点数据，请先在「景点数据」页签新建景点。</div>
+              <div v-else class="spot-check-grid">
+                <label v-for="spot in spots" :key="spot.id" class="spot-check-item">
+                  <input
+                    type="checkbox"
+                    :checked="routeForm.spotIds.includes(spot.id)"
+                    @change="toggleRouteSpot(spot.id)"
+                  />
+                  <span>{{ spot.name }}</span>
+                </label>
+              </div>
+            </div>
+            <div class="form-row form-row-inline">
+              <div class="form-field">
+                <label>标签（用逗号分隔）</label>
+                <input v-model="routeForm.tagsText" type="text" placeholder="如：亲子, 轻松" />
+              </div>
+              <div class="form-field">
+                <label>适合人群（用逗号分隔）</label>
+                <input v-model="routeForm.suitableForText" type="text" placeholder="如：带小孩, 老年人" />
+              </div>
+            </div>
+            <div class="form-row form-row-inline">
+              <div class="form-field">
+                <label>总时长（分钟）</label>
+                <input v-model.number="routeForm.totalDurationMinutes" type="number" min="1" />
+              </div>
+              <div class="form-field">
+                <label>推荐理由</label>
+                <input v-model="routeForm.recommendReason" type="text" placeholder="一句话说明推荐理由" />
+              </div>
+            </div>
+            <p class="form-hint">保存后数字人导览 Agent 与首页活数据实时生效（同一份数据源）。</p>
+            <p v-if="routeEditorError" class="form-error">{{ routeEditorError }}</p>
+          </div>
+          <div class="modal-footer">
+            <button class="secondary-btn" @click="showRouteEditor = false">取消</button>
+            <button class="primary-btn" :disabled="routeSaving" @click="saveRoute">
+              {{ routeSaving ? '保存中…' : '保存' }}
             </button>
           </div>
         </div>
@@ -429,7 +1001,7 @@ onMounted(() => {
       </div>
     </Teleport>
 
-    <!-- Delete Modal -->
+    <!-- Delete Modal（知识文档） -->
     <Teleport to="body">
       <div v-if="showDelete" class="modal-overlay" @click.self="showDelete = false">
         <div class="modal-panel modal-small">
@@ -449,6 +1021,50 @@ onMounted(() => {
         </div>
       </div>
     </Teleport>
+
+    <!-- Delete Modal（景点） -->
+    <Teleport to="body">
+      <div v-if="showSpotDelete" class="modal-overlay" @click.self="showSpotDelete = false">
+        <div class="modal-panel modal-small">
+          <div class="modal-header">
+            <h2>确认删除</h2>
+            <button class="icon-btn" @click="showSpotDelete = false">✕</button>
+          </div>
+          <div class="modal-body">
+            <p>
+              确定要删除景点 <strong>{{ deletingSpot?.name }}</strong> 吗？删除后数字人导览 Agent
+              将无法回答该景点问题。
+            </p>
+          </div>
+          <div class="modal-footer">
+            <button class="secondary-btn" @click="showSpotDelete = false">取消</button>
+            <button class="primary-btn danger" @click="doSpotDelete">删除</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Delete Modal（路线） -->
+    <Teleport to="body">
+      <div v-if="showRouteDelete" class="modal-overlay" @click.self="showRouteDelete = false">
+        <div class="modal-panel modal-small">
+          <div class="modal-header">
+            <h2>确认删除</h2>
+            <button class="icon-btn" @click="showRouteDelete = false">✕</button>
+          </div>
+          <div class="modal-body">
+            <p>
+              确定要删除路线 <strong>{{ deletingRoute?.name }}</strong> 吗？删除后数字人导览 Agent
+              将无法回答该路线问题。
+            </p>
+          </div>
+          <div class="modal-footer">
+            <button class="secondary-btn" @click="showRouteDelete = false">取消</button>
+            <button class="primary-btn danger" @click="doRouteDelete">删除</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -462,7 +1078,7 @@ onMounted(() => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: var(--space-xl);
+  margin-bottom: var(--space-lg);
   gap: var(--space-md);
 }
 
@@ -483,6 +1099,38 @@ onMounted(() => {
   display: flex;
   gap: var(--space-sm);
   flex-wrap: wrap;
+}
+
+/* Tabs */
+.scenic-tabs {
+  display: flex;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-xl);
+  border-bottom: 1px solid var(--mist);
+}
+
+.scenic-tab {
+  padding: var(--space-sm) var(--space-lg);
+  border: none;
+  background: transparent;
+  color: var(--slate);
+  font-size: var(--text-body);
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition:
+    color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out);
+}
+
+.scenic-tab:hover {
+  color: var(--ink);
+}
+
+.scenic-tab.active {
+  color: var(--jade);
+  border-bottom-color: var(--jade);
 }
 
 .primary-btn,
@@ -612,7 +1260,7 @@ onMounted(() => {
 }
 
 .col-title {
-  width: 35%;
+  width: 30%;
 }
 
 .col-category {
@@ -620,11 +1268,27 @@ onMounted(() => {
 }
 
 .col-tags {
-  width: 25%;
+  width: 20%;
 }
 
 .col-date {
-  width: 15%;
+  width: 14%;
+}
+
+.col-duration {
+  width: 10%;
+}
+
+.col-difficulty {
+  width: 10%;
+}
+
+.col-location {
+  width: 16%;
+}
+
+.col-suitable {
+  width: 16%;
 }
 
 .col-actions {
@@ -634,6 +1298,19 @@ onMounted(() => {
 .cell-title {
   font-weight: 500;
   color: var(--ink);
+}
+
+.cell-sub {
+  display: block;
+  font-size: var(--text-caption);
+  color: var(--slate);
+  font-weight: 400;
+  margin-top: 2px;
+}
+
+.cell-location {
+  color: var(--slate);
+  font-size: var(--text-small);
 }
 
 .cell-date {
@@ -828,6 +1505,11 @@ onMounted(() => {
   box-sizing: border-box;
 }
 
+.form-row textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
 .form-row input:focus,
 .form-row select:focus,
 .form-row textarea:focus {
@@ -838,7 +1520,7 @@ onMounted(() => {
 
 .form-row-inline {
   display: grid;
-  grid-template-columns: 1fr 2fr;
+  grid-template-columns: 1fr 1fr;
   gap: var(--space-md);
 }
 
@@ -848,7 +1530,7 @@ onMounted(() => {
 }
 
 .form-error {
-  color: var(--jade);
+  color: var(--cinnabar);
   font-size: var(--text-small);
   margin: var(--space-sm) 0 0;
 }
@@ -857,6 +1539,27 @@ onMounted(() => {
   color: var(--slate);
   font-size: var(--text-caption);
   margin: var(--space-xs) 0 0;
+}
+
+/* 路线编辑：途经景点勾选网格 */
+.spot-check-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-xs);
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--mist);
+  border-radius: var(--radius-sm);
+  padding: var(--space-sm);
+}
+
+.spot-check-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--text-small);
+  color: var(--ink);
+  cursor: pointer;
 }
 
 .editor-tabs {
@@ -969,13 +1672,19 @@ onMounted(() => {
     grid-template-columns: 1fr;
   }
 
+  .spot-check-grid {
+    grid-template-columns: 1fr;
+  }
+
   .data-table th,
   .data-table td {
     padding: var(--space-sm);
   }
 
   .col-tags,
-  .col-date {
+  .col-date,
+  .col-location,
+  .col-suitable {
     display: none;
   }
 }

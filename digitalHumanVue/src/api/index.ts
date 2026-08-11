@@ -29,3 +29,6 @@ export const API_ADMIN_AGENT_CHAT_STREAM = '/api/admin/agent/chat/stream'
 export const API_ADMIN_USAGE_OVERVIEW = '/api/admin/usage/overview'
 export const API_ADMIN_USAGE_DETAILS = '/api/admin/usage/details'
 export const API_ADMIN_USAGE_EXPORT = '/api/admin/usage/export'
+// 景区结构化数据（spots/routes，导览 agent 数据单一来源，批次 e3 灵山化）
+export const API_ADMIN_SCENIC_SPOTS = '/api/admin/scenic/spots'
+export const API_ADMIN_SCENIC_ROUTES = '/api/admin/scenic/routes'
