@@ -23,7 +23,7 @@ services/
   dify_client.py      # DifyClient 类 + dify_client 单例 — Dify API 封装
   recommend_agent.py  # LangChain Tool Calling 个性化路线推荐 Agent
   auth_service.py     # register_user/authenticate_user/签发 user+guest token — 用户体系
-  chat_agent.py       # **弃用（A3）** — 自研 LangChain 对话 agent（会话存储层/记忆钩子被装配层复用：_get_or_create_conversation/_append_history/has_conversation/_schedule_memory_extraction；双模式对话能力保留为参考实现，A4 再评估删除）
+  chat_agent.py       # **弃用（A3）** — 自研 LangChain 对话 agent（会话存储层/记忆钩子被装配层复用：_get_or_create_conversation/_append_history/has_conversation/_schedule_memory_extraction；**对话落库 record_dialogue（dialogues 表，本地链路直接写入，路由层注入 db 调用）**；双模式对话能力保留为参考实现，A4 再评估删除）
   intent_classifier.py # classify_intent() — 双模式意图分类（简单/复杂，轻量规则词表，失败默认简单安全降级）
   planner_agent.py    # **弃用（A3）** — 复杂任务 LangGraph 规划图（规划→多步执行→总结，SSE step/token/done 契约，异常抛 PlannerError 由 chat_agent 降级快速路径；主链路规划能力已由 deepagents 装配层 prompt 级 _PLAN_INSTRUCTION 承载）
   memory_service.py   # 长期记忆（阶段2 T2）— save_user_memory/search_user_memory/count_user_memory/extract_facts/extract_and_store，user_memory 命名空间按 user 隔离（T3 契约见 doc/long-term-memory.md）；A2 新增 list_user_memories/delete_user_memory（记忆工具化按 id 删除，Document metadata 增 memory_id 内部扩展）；B5 新增 memory_id_of/find_memory_by_id/count_memories_per_user（管理端记忆管理复用，见 doc/memory-admin-api.md）

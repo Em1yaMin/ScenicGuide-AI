@@ -54,9 +54,13 @@ import time
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 from langchain.agents import create_agent
+from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 from langchain_core.messages import (
     AIMessage,
     AIMessageChunk,
@@ -69,6 +73,8 @@ from langchain_core.tools import tool
 from app.core import memory_store
 from app.core.config import settings
 from app.core.llm import get_chat_llm
+from app.models.dialogue import Dialogue, DialogueRole
+from app.models.visitor import Visitor
 from app.services import memory_service, planner_agent, recommend_agent
 from app.services.intent_classifier import classify_intent
 from app.services.rag_service import build_rag_context
@@ -465,6 +471,92 @@ def _append_history(
             _MAX_HISTORY_MESSAGES,
             user=user,
         )
+
+
+# ── 对话落库（dialogues 表，管理后台大屏/评估数据源） ─────────────────────
+#
+# 背景（2026-08-11 船长调试发现）：deepagents 装配层主链路（默认对话引擎）
+# 对话发生在本地，但历史上从未写入 dialogues 表（仅 Dify 轮询/回填写入），
+# 导致管理后台数据大屏（dialogues 计数/情感趋势/热榜）与感受度报告
+# （evaluations）永远为空。本函数为本地对话链路落库的公共入口（会话层
+# 单一数据源，路由层注入 db session 调用，deepagents 装配层与弃用链路共用）：
+#
+# - 每轮问答写两行（用户消息 + AI 回复），visitor_id 用对话用户标识
+#   （登录用户 id / 游客 id / visitor），先确保 visitors 记录存在（外键
+#   约束；参考 polling.py 的 upsert 模式，与 visitor_service 同语义）
+# - external_message_id 生成 `local:{uuid}` 唯一值（unique 约束可去重，
+#   与 Dify 消息 id（polling/backfill 写入）前缀不同互不冲突）
+# - 写入失败仅告警不阻断对话（与 _store_call 同策略，演示不翻车）；
+#   事务提交由调用方（路由层 get_db 依赖）负责，本函数仅 flush
+
+
+async def record_dialogue(
+    db: AsyncSession,
+    *,
+    user: str,
+    conversation_id: str,
+    query: str,
+    answer: str,
+) -> None:
+    """本地对话链路落库：用户消息 + AI 回复写入 dialogues 表。
+
+    Args:
+        db: 数据库会话（路由层经 Depends(get_db) 注入；提交由调用方负责）
+        user: 对话用户标识（登录用户 id / 游客 id / visitor）
+        conversation_id: 链路会话 id（deepagents 生成/透出）
+        query: 用户消息原文
+        answer: AI 回复原文
+
+    游客/登录用户均落库；visitors 记录按需 upsert（外键约束保证）。
+    任何失败仅告警（不阻断对话响应），并回滚本会话的失败事务。
+    """
+    try:
+        # 1. 确保 visitors 记录存在（外键约束；参考 polling.py upsert 模式）
+        existing = await db.execute(select(Visitor).where(Visitor.id == user))
+        if existing.scalar_one_or_none() is None:
+            await db.execute(
+                sqlite_insert(Visitor).values(id=user).on_conflict_do_nothing()
+            )
+
+        # 2. 每轮问答两行（用户消息 + AI 回复），同轮共享前缀保证 external
+        #    _message_id 唯一（unique 约束）且可辨识
+        prefix = f"local:{uuid.uuid4().hex}"
+        now = datetime.now(timezone.utc)
+        db.add(
+            Dialogue(
+                visitor_id=user,
+                conversation_id=conversation_id or None,
+                external_message_id=f"{prefix}:user",
+                content=query,
+                role=DialogueRole.user,
+                timestamp=now,
+            )
+        )
+        db.add(
+            Dialogue(
+                visitor_id=user,
+                conversation_id=conversation_id or None,
+                external_message_id=f"{prefix}:answer",
+                content=answer,
+                role=DialogueRole.assistant,
+                timestamp=now,
+            )
+        )
+        await db.flush()
+        logger.info(
+            "本地对话落库: user=%s conversation=%s query_len=%d answer_len=%d",
+            user,
+            conversation_id,
+            len(query),
+            len(answer),
+        )
+    except Exception as e:
+        # 失败仅告警（不阻断对话）；回滚失败事务，保证后续依赖层 commit 不抛
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        logger.warning("对话落库失败（仅告警，不阻断对话）: %s", e)
 
 
 def clear_conversation(conversation_id: str) -> None:

@@ -4,11 +4,13 @@ import logging
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 import httpx
-from fastapi import APIRouter, Header, Query
+from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.database import get_db
 from app.core.security import resolve_dialogue_user
 from app.services import chat_agent, deepagents
 from app.services.dify_stream import stream_dify_chat as _call_dify_chat_stream
@@ -74,6 +76,7 @@ async def chat_with_rag(
         description="Bearer token（可选）：登录用户/游客 token 优先于请求体 user 字段；"
         "无 token 时向后兼容，使用请求体 user（默认 visitor）",
     ),
+    db: AsyncSession = Depends(get_db),
 ) -> Any:
     """RAG 增强的对话接口（双轨：deepagents 装配层主链路，Dify 兜底）。
 
@@ -102,7 +105,7 @@ async def chat_with_rag(
     # 流式模式：SSE（agent 步骤 → 回答 token → done；错误回落 Dify 时带标记）
     if request.streaming:
         return StreamingResponse(
-            _stream_chat(request=request, user=effective_user),
+            _stream_chat(request=request, user=effective_user, db=db),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -122,6 +125,20 @@ async def chat_with_rag(
                 use_rag=request.use_rag,
                 rag_top_k=request.rag_top_k,
             )
+            # 本地对话落库（dialogues 表，管理后台大屏/评估数据源；
+            # 游客/登录用户均写入，visitor 记录按需 upsert；失败仅告警不阻断）
+            try:
+                await chat_agent.record_dialogue(
+                    db,
+                    user=effective_user,
+                    conversation_id=result["conversation_id"],
+                    query=request.query,
+                    answer=result["answer"],
+                )
+            except Exception as e:
+                # 双保险：落库意外异常（record_dialogue 内部已吞 DB 错误）
+                # 也绝不影响对话响应（演示不翻车）
+                logger.warning("对话落库失败（仅告警，不阻断对话）: %s", e)
             return ChatResponse(
                 answer=result["answer"],
                 conversation_id=result["conversation_id"],
@@ -224,15 +241,21 @@ def _sse(event: Dict[str, Any]) -> str:
 async def _stream_chat(
     request: ChatRequest,
     user: str,
+    db: AsyncSession,
 ) -> AsyncIterator[str]:
     """流式对话事件生成器（双轨：deepagents 装配层主链路，Dify 兜底）。
 
     事件序列：主链路 step → token → done；链路异常时先发
     error(fallback=true) 事件（前端据此清空部分回答）再切换 Dify 流式
     输出；双链路均失败时发 error(fallback=false) 礼貌报错并结束。
+
+    本地对话落库（dialogues 表）：主链路 token 事件累积回答文本，
+    done 事件处写入（yield done 前 await——客户端收到 done 即关闭连接
+    也不丢落库；与会话存储 _append_history 的 done 前落盘同策略）。
     """
     # Step A: deepagents 装配层主链路（默认引擎；异常自动回落 Dify）
     if settings.DIALOGUE_ENGINE != "dify":
+        answer_parts: List[str] = []
         try:
             async for event in deepagents.chat_stream(
                 query=request.query,
@@ -241,6 +264,23 @@ async def _stream_chat(
                 use_rag=request.use_rag,
                 rag_top_k=request.rag_top_k,
             ):
+                if event.get("type") == "token":
+                    answer_parts.append(event.get("text", ""))
+                elif event.get("type") == "done":
+                    # 流式完成：done 事件处落库（用户消息 + 完整回答；
+                    # 失败仅告警不阻断；异常回落 Dify 时主链路无 done 不落库）
+                    try:
+                        await chat_agent.record_dialogue(
+                            db,
+                            user=user,
+                            conversation_id=event.get("conversation_id", ""),
+                            query=request.query,
+                            answer="".join(answer_parts),
+                        )
+                    except Exception as e:
+                        # 双保险：落库意外异常（record_dialogue 内部已吞
+                        # DB 错误）也绝不影响流式响应
+                        logger.warning("对话落库失败（仅告警，不阻断对话）: %s", e)
                 yield _sse(event)
             return
         except Exception as e:
