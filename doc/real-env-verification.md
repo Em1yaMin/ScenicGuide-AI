@@ -59,6 +59,8 @@ data: {"type": "done", "conversation_id": "0a966aabbc3b421c95ae620d23421980",
 
 统计：step 事件（search_spots / search_knowledge 工具）✓，token 事件 277 个 ✓，error 事件 0 个 ✓，done 事件携带 conversation_id + 3 条 RAG 来源 ✓。
 
+> **2026-08-11 更新（RAG 数据源净化）**：本段捕获的 `rag_sources` 含多景区行为分析数据（`景点景区旅游数据行为分析数据_知识库版.md`，南禅寺/鼋头渚等库外内容污染检索面）——该文件已移出 `doc/景区知识库/` 至 `doc/archive/`（船长决策方案A），重新索引后检索面仅两份纯灵山文档，不再命中库外内容。此处为当时实录，保留作证据。
+
 ## 2. 2b：短期记忆持久化（SQLite + 重启恢复）
 
 1. 第一轮（`conversation_id=memtest-1785994947`，user=mem-user）：“我叫小明，我想带家里老人去玩” → 回复推荐银发康养慢游路线
