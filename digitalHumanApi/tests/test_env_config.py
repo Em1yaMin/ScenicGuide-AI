@@ -52,3 +52,9 @@ async def test_health_exposes_app_env():
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
     assert resp.json()["app_env"] == "prod"
+
+
+def test_embedding_batch_size_default_and_override():
+    """EMBEDDING_BATCH_SIZE 默认 20（DashScope 单请求 input 上限），环境变量可覆盖。"""
+    assert _settings().EMBEDDING_BATCH_SIZE == 20
+    assert _settings(EMBEDDING_BATCH_SIZE=10).EMBEDDING_BATCH_SIZE == 10

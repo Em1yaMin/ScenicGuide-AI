@@ -206,6 +206,10 @@ class Settings(BaseModel):
     EMBEDDING_API_KEY: str = os.environ.get("EMBEDDING_API_KEY", "")
     EMBEDDING_MODEL: str = os.environ.get("EMBEDDING_MODEL", "embo-01")
     EMBEDDING_API_STYLE: str = os.environ.get("EMBEDDING_API_STYLE", "minimax")
+    # 单请求文本条数上限（2026-08-11 船长调试发现：DashScope embeddings 单请求
+    # input 最多 20 条，21+ 返回 400 "batch size is invalid"；默认 20 即 DashScope
+    # 硬上限，可按需覆盖以防其他 Embedding 后端上限更高/更低时再踩同坑）
+    EMBEDDING_BATCH_SIZE: int = int(os.environ.get("EMBEDDING_BATCH_SIZE", "20"))
 
     SSH_HOST: str = os.environ.get("SSH_HOST", "")
     SSH_PORT: int = int(os.environ.get("SSH_PORT", "22"))
