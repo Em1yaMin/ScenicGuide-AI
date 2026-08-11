@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import VChart from 'vue-echarts'
 import { registerECharts } from '@/composables/useECharts'
 import { useApi } from '@/composables/useApi'
-import { fetchWithCodeEnvelope } from '@/utils/fetchWithCodeEnvelope'
+import { fetchWithCodeEnvelope, ANALYSIS_TIMEOUT_MS } from '@/utils/fetchWithCodeEnvelope'
 import { API_ADMIN_DASHBOARD, API_ANALYSIS_OVERVIEW } from '@/api'
 import EmptyStateGuide from '@/components/EmptyStateGuide.vue'
 import type { DashboardResponse, AIOverviewResponse } from '@/types/dashboard'
@@ -29,6 +29,8 @@ async function fetchAIOverview(): Promise<void> {
   try {
     aiData.value = await fetchWithCodeEnvelope<AIOverviewResponse>(
       `${API_ANALYSIS_OVERVIEW}?days=${aiDays.value}`,
+      // AI 分析调 LLM（后端预算 180s/240s），必须覆盖默认 15s 超时，否则 LLM 慢时被掐断
+      { timeoutMs: ANALYSIS_TIMEOUT_MS },
     )
   } catch (e) {
     aiError.value = e instanceof Error ? e.message : '未知错误'

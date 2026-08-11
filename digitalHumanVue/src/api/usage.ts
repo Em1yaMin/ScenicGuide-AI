@@ -11,7 +11,7 @@ import type {
   UsageOverviewParams,
   UsageOverviewResponse,
 } from '@/types/usage'
-import { FetchError, fetchWithCodeEnvelope } from '@/utils/fetchWithCodeEnvelope'
+import { FetchError, fetchWithCodeEnvelope, ANALYSIS_TIMEOUT_MS } from '@/utils/fetchWithCodeEnvelope'
 import { adminApiHeaders } from '@/utils/adminHeaders'
 
 
@@ -35,7 +35,8 @@ export function fetchUsageOverview(
 ): Promise<UsageOverviewResponse> {
   return fetchWithCodeEnvelope<UsageOverviewResponse>(
     `${API_ADMIN_USAGE_OVERVIEW}?${buildQuery(params)}`,
-    { headers: adminApiHeaders(false) },
+    // usage 接口与 AI 分析同属管理后台长耗时链路，统一长超时避免默认 15s 掐断
+    { headers: adminApiHeaders(false), timeoutMs: ANALYSIS_TIMEOUT_MS },
   )
 }
 
@@ -43,7 +44,7 @@ export function fetchUsageOverview(
 export function fetchUsageDetails(params: UsageDetailsParams = {}): Promise<UsageDetailResponse> {
   return fetchWithCodeEnvelope<UsageDetailResponse>(
     `${API_ADMIN_USAGE_DETAILS}?${buildQuery(params)}`,
-    { headers: adminApiHeaders(false) },
+    { headers: adminApiHeaders(false), timeoutMs: ANALYSIS_TIMEOUT_MS },
   )
 }
 
@@ -53,18 +54,30 @@ export function fetchUsageDetails(params: UsageDetailsParams = {}): Promise<Usag
  * 这里用原生 fetch 处理二进制响应）。
  */
 export async function exportUsageCsv(params: UsageDetailsParams = {}): Promise<Blob> {
-  const response = await fetch(`${API_ADMIN_USAGE_EXPORT}?${buildQuery(params)}`, {
-    headers: adminApiHeaders(false),
-  })
-  if (!response.ok) {
-    let message = `导出失败（HTTP ${response.status}）`
-    try {
-      const body = (await response.json()) as { detail?: unknown }
-      if (body?.detail) message = String(body.detail)
-    } catch {
-      // 非 JSON 响应（如代理层错误页），保留默认信息
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), ANALYSIS_TIMEOUT_MS)
+  try {
+    const response = await fetch(`${API_ADMIN_USAGE_EXPORT}?${buildQuery(params)}`, {
+      headers: adminApiHeaders(false),
+      signal: controller.signal,
+    })
+    if (!response.ok) {
+      let message = `导出失败（HTTP ${response.status}）`
+      try {
+        const body = (await response.json()) as { detail?: unknown }
+        if (body?.detail) message = String(body.detail)
+      } catch {
+        // 非 JSON 响应（如代理层错误页），保留默认信息
+      }
+      throw new FetchError(message, response.status)
     }
-    throw new FetchError(message, response.status)
+    return response.blob()
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'AbortError') {
+      throw new FetchError(`请求超时 (${ANALYSIS_TIMEOUT_MS}ms)`)
+    }
+    throw e
+  } finally {
+    clearTimeout(timeoutId)
   }
-  return response.blob()
 }

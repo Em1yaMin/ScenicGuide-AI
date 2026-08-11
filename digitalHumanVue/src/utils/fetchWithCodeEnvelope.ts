@@ -10,6 +10,15 @@
 /** 默认请求超时时间（毫秒）。设为 0 禁用超时。 */
 const DEFAULT_TIMEOUT_MS = 15_000
 
+/**
+ * 分析类接口（AI 运营分析 / usage）专用超时（毫秒）。
+ *
+ * /api/v1/analysis/* 需调 LLM（opencode-go/官方 API 延迟波动大），后端预算
+ * LLM_REQUEST_TIMEOUT=180s / LLM_ANALYSIS_TIMEOUT=240s；默认 15s 会被慢请求
+ * 掐断报「请求超时 (15000ms)」，故调用点必须显式传入本常量覆盖默认值。
+ */
+export const ANALYSIS_TIMEOUT_MS = 300_000
+
 /** fetchWithCodeEnvelope 的扩展选项 */
 export interface FetchOptions extends RequestInit {
   /** 请求超时时间（毫秒），默认 15_000。设为 0 禁用超时。 */
