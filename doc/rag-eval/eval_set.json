@@ -191,6 +191,15 @@
       "source": "游览指南 门票与优惠政策"
     },
     {
+      "id": "ticket_006",
+      "type": "ticket",
+      "query": "灵山胜境的门票价格是多少",
+      "answer_keywords": ["210元"],
+      "keyword_mode": "any",
+      "expect": "成人票210元（灵山胜境门票为收费制，与拈花湾免费开放区分）",
+      "source": "游览指南 门票与优惠政策"
+    },
+    {
       "id": "show_001",
       "type": "show",
       "query": "九龙灌浴平日几点演出",

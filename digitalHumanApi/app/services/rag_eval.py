@@ -105,8 +105,9 @@ def _first_hit_rank(case: dict, results: List[dict]):
     """返回首个命中答案关键词的候选位次（1-based）；无命中返回 None。
 
     any 模式：首个含任一关键词的候选位次（精确 MRR 语义）；
-    all 模式：首个含全部关键词的候选位次（跨候选分散命中时按拼接判定
-    通过但 rank=None，该题 MRR 计 0——评测集当前全部为 any 模式）。
+    all 模式：首个含全部关键词的候选位次（需同一候选含全部关键词，
+    跨候选分散命中不通过，该题 MRR 计 0——评测集含 2 例 all 模式
+    （confuse_002/005））。
     negative 题不计 MRR，返回 None。
     """
     if case.get("type") == "negative":

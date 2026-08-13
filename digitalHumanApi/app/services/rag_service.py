@@ -57,11 +57,15 @@ _QUERY_TIME_EXPANSION: dict = {
 # 背景：文档对免票景区（拈花湾）以「免费开放/无门票限制」表述，词袋检索下
 # 「门票价格」类问法与付费票价表（210 元）词面重叠、与免费表述词面无交集
 # （评测 confuse_005 实测 210 元门票表排进 top3、免费开放块在 top3 外）。
-# 触发词取窄口径「门票价格」（不含「多少钱/票价」等付费票询问，避免拉偏
-# 付费票价检索）；仅追加不替换，目标词已有则跳过。
+# 触发条件：查询同时提及免票景区（_QUERY_TICKET_FREE_SPOTS）才扩展——
+# 灵山胜境自身门票为收费制，「灵山胜境的门票价格是多少」须命中 210 元票价表，
+# 不得被「免费开放」拉偏（评测 ticket_006 覆盖该回归）；仅追加不替换，
+# 目标词已有则跳过。
 _QUERY_TICKET_EXPANSION: dict = {
     "门票价格": "免费开放",
 }
+# 免票景区名单：仅查询提及这些景区时门票价格扩展才生效
+_QUERY_TICKET_FREE_SPOTS: tuple = ("拈花湾",)
 
 
 def _normalize_search_query(query: str) -> str:
@@ -80,7 +84,9 @@ def _normalize_search_query(query: str) -> str:
     ] + [
         target
         for trigger, target in _QUERY_TICKET_EXPANSION.items()
-        if trigger in query and target not in query
+        if trigger in query
+        and target not in query
+        and any(spot in query for spot in _QUERY_TICKET_FREE_SPOTS)
     ]
     if not extras:
         return query

@@ -1,16 +1,16 @@
 {
   "meta": {
-    "cases": 58,
+    "cases": 59,
     "top_k": 3,
     "backend": "tfidf",
     "threshold": 0.3,
     "embedding_backend": "tfidf",
     "degraded": false,
-    "duration_sec": 0.8
+    "duration_sec": 1.2
   },
   "totals": {
-    "total": 58,
-    "passed": 58,
+    "total": 59,
+    "passed": 59,
     "failed": 0,
     "accuracy": 1.0
   },
@@ -22,8 +22,8 @@
       "failed_ids": []
     },
     "ticket": {
-      "total": 5,
-      "passed": 5,
+      "total": 6,
+      "passed": 6,
       "accuracy": 1.0,
       "failed_ids": []
     },
@@ -70,7 +70,7 @@
       "failed_ids": []
     }
   },
-  "mrr": 0.9038,
+  "mrr": 0.9057,
   "failed": [],
-  "eval_set": "/home/emiyamin/.treehouse/ScenicGuide-AI-d34f36/1/ScenicGuide-AI/doc/rag-eval/eval_set.json"
+  "eval_set": "/home/emiyamin/.no-mistakes/worktrees/0635e0634429/01KZXM85VCC38KHMAGQGAJP6FK/doc/rag-eval/eval_set.json"
 }

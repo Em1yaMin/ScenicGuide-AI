@@ -1,6 +1,6 @@
 """RAG 景区知识问答评测门禁（pytest，离线可复跑）。
 
-对 doc/rag-eval/eval_set.json 全量 58 题跑检索层评测：
+对 doc/rag-eval/eval_set.json 全量 59 题跑检索层评测：
 - 默认 TF-IDF（conftest 固定无 embedding key）完全离线；
 - 独立临时持久化目录，不污染 rag_data；
 - 准确率 ≥ 90%（船长要求），且各关键题型（拒答/边界混淆/景点）不低于 90%；
@@ -172,12 +172,16 @@ def test_query_normalization_expands_time_intent():
 
 
 def test_query_normalization_expands_ticket_intent():
-    """查询规范化：门票价格意图追加免费开放（免票景区表述桥接），其余原样。"""
+    """查询规范化：免票景区（拈花湾）门票价格询问追加免费开放桥接词，其余原样。"""
     assert _normalize_search_query("拈花湾的门票价格是多少") == (
         "拈花湾的门票价格是多少 免费开放"
     )
-    assert _normalize_search_query("泰山门票价格") == "泰山门票价格 免费开放"
-    # 付费票价询问不触发（避免拉偏付费票价检索）；目标词已有则不重复
+    # 付费票询问（灵山胜境收费制）与库外查询不触发，避免拉偏付费票价检索；
+    # 目标词已有则不重复
+    assert _normalize_search_query("灵山胜境的门票价格是多少") == (
+        "灵山胜境的门票价格是多少"
+    )
+    assert _normalize_search_query("泰山门票价格") == "泰山门票价格"
     assert _normalize_search_query("灵山胜境成人票多少钱") == "灵山胜境成人票多少钱"
     assert _normalize_search_query("门票价格 免费开放") == "门票价格 免费开放"
 
