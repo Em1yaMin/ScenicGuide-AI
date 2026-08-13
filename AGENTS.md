@@ -61,6 +61,16 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - `app/routers/dialogue.py` — `POST /api/v1/dialogue/chat` 支持 RAG 增强（`use_rag`、`rag_top_k` 参数；RAG 无结果时回退正常 Dify 调用）；另有 `/api/v1/dialogue/rag-context` 供 ADH 调用
 - `app/services/recommend_agent.py` — 新增 `search_knowledge` 工具（同步包装统一检索入口，供 Agent 检索讲解词/FAQ）；推荐主流程仍用结构化工具直查（景点/路线不走向量，零幻觉原则）
 
+## RAG 评测与准确率优化（2026-08-14：准确率 46.6% → 100%）
+
+船长要求：RAG 景区信息准确率 ≥90%。权威文档 `doc/rag-eval/README.md`（评测设计/轮次分数/部署注意）；评测集 `doc/rag-eval/eval_set.json`（58 题、9 类题型：景点/门票/演出/位置/路线/历史/贴士/边界混淆/库外拒答）；报告 `doc/rag-eval/report_{baseline,round1,round2_final}.md`。
+
+- **评测引擎**：`app/services/rag_eval.py`（离线可复跑：临时目录从零建索引 + 确定性 TF-IDF；判定=正向题关键词命中 top_k 拼接文本 / negative 题=无库外关键词 + top1 score<拒答阈值；输出 Markdown 报告）；CLI `scripts/rag_eval.py`（`--top-k/--threshold/--backend tfidf|api`，`--assert-accuracy` 门禁）；pytest 门禁 `tests/test_rag_eval.py`（7 用例，总准确率 ≥90% + 拒答/混淆/景点题型 ≥90% + 基础设施契约）
+- **优化 1：标题感知分块**（`rag_service._split_documents` 重构，documents 命名空间专属）：以 Markdown 标题划分 section，chunk 带完整标题链前缀 + metadata `title`；超长 section 按行聚合（字段保整）+ 单行超长句子二次切分；无标题文档回退旧切分；`_parse_markdown_sections` 用标准标题栈（flush 取栈全链，防标题链重复 bug）。效果：碎片 chunk 归零（3769→80 块），基线 46.6%→98.3%——旧策略 56% 为 <50 字符孤立标题/字段行，答案常在 top_k 外
+- **优化 2：检索前查询规范化**（`rag_service._normalize_search_query`，统一检索入口 `_search_documents_sync` 与评测引擎共用）：TF-IDF 词袋下口语时间问法（「晚上营业到几点」vs 文档「开放时间 9:00-21:30」）词面无交集、演艺块排第 9 名；追加同义词（几点→时间/营业·开门·开到→开放/关门→闭园时间），仅追加不替换、目标词已有则跳过 → 100%（58/58）
+- **坑（评测可复现性）**：评测建索引必须用全新临时目录（tempfile.mkdtemp），复用持久化目录会叠加旧索引导致分数漂移（实测 46.6%→32.8% 假波动）
+- **部署注意**：新分块改变 documents 索引形态，生产需执行一次 `POST /api/rag/index` 全量重建（旧 3769 碎片 chunk 在 sidecar 缓存命中时不会自动重建）；knowledge 命名空间不受影响（`_build_knowledge_documents` 未动）；远端 Embedding 部署用 `--backend api` 复测（拒答阈值按后端自适应：tfidf 0.30/api 0.25）；RAG_TOP_K 默认 3 未改
+
 ## 用户认证（前端登录/注册/游客模式）
 
 后端接口（PR #14）：`POST /api/v1/auth/register|login|guest`、`GET /api/v1/auth/me`（Bearer JWT）。

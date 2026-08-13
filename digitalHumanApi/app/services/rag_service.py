@@ -12,6 +12,7 @@ CRUD/导入变更后重建 knowledge 命名空间向量索引。
 
 import logging
 import os
+import re
 import threading
 from pathlib import Path
 from typing import List, Optional
@@ -33,6 +34,42 @@ logger = logging.getLogger(__name__)
 
 # 检索上下文最大长度
 MAX_CONTEXT_LEN: int = int(os.environ.get("RAG_MAX_CONTEXT_LEN", "2000"))
+
+# ---------------------------------------------------------------------------
+# 检索前查询规范化（Round 1 优化，2026-08-14）
+# ---------------------------------------------------------------------------
+
+# 口语化时间/营业意图词 → 同义检索词扩展表。
+# 背景：TF-IDF 降级路径（embedding API 不可用）为词袋模型，查询「晚上营业到几点」
+# 与文档中的「开放时间 9:00-21:30」词面无交集，演艺/开放信息块排名靠后（评测
+# 用例 show_004 实测排到第 9 名）。扩展策略=保留原词 + 追加映射词（词袋检索对
+# 词序不敏感，追加不改变原语义；远端 embedding 语义检索下追加词亦无副作用）。
+_QUERY_TIME_EXPANSION: dict = {
+    "几点": "时间",
+    "营业": "开放",
+    "开门": "开放",
+    "关门": "闭园时间",
+    "开到": "开放",
+}
+
+
+def _normalize_search_query(query: str) -> str:
+    """检索前查询规范化：追加时间/营业意图同义词，提升召回。
+
+    仅追加、不替换、不删除原词；目标词已存在时不再重复追加（防膨胀）；
+    查询不含触发词时原样返回（零开销零副作用）。
+    """
+    query = (query or "").strip()
+    if not query:
+        return query
+    extras = [
+        target
+        for trigger, target in _QUERY_TIME_EXPANSION.items()
+        if trigger in query and target not in query
+    ]
+    if not extras:
+        return query
+    return f"{query} {' '.join(extras)}"
 
 # 向量库共享内存态（_documents/_vectors/_vector_matrix/embedding）互斥锁：
 # 重建（clear+add_documents）与检索共用同一锁边界，避免并发交错导致
@@ -86,10 +123,25 @@ def _load_documents(doc_dir: Optional[Path] = None) -> List[Document]:
 # 文本分块
 # ---------------------------------------------------------------------------
 
-def _split_documents(documents: List[Document]) -> List[Document]:
-    """递归字符分割器：按段落 → 句子 → 字符的优先级切分文本。
+# Markdown 标题行（1-6 级）
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
+# 过短正文过滤（标题已并入 section 前缀，不再单独成块；纯标题行不再产生碎片 chunk）
+_MIN_BODY_LEN = 10
 
-    使用纯 Python 实现，无需 langchain_text_splitters。
+
+def _split_documents(documents: List[Document]) -> List[Document]:
+    """递归字符分割器：按 Markdown 标题结构（section）→ 行 → 句子的优先级切分文本。
+
+    相比旧实现（按段落/句子裸切），本实现（Round 1 优化，2026-08-14）：
+    1. **标题感知**：以 #/##/### 标题为边界划分 section，chunk 携带完整标题链
+       前缀（如「子表1：灵山胜境 景点数据集 > LS-011 灵山大佛」），消除旧策略
+       下孤立标题行/字段行碎片（基线 3769 chunks 中 56% 为 <50 字符碎片，
+       直接导致「灵山大佛有多高」只命中标题行、答案不在 top_k）。
+    2. **字段保整**：超长 section 按行聚合切分（结构化数据集每行是一个完整字段
+       「- 建筑/景观参数：...」），不截断字段；单行超长时再按句子二次切分，
+       子块均带标题前缀。
+    3. **无标题文档回退**：无 Markdown 标题时走旧的段落/句子切分，行为不变。
+    4. metadata 新增 title（完整标题链），供检索来源展示/调试。
     """
     chunks: List[Document] = []
 
@@ -97,53 +149,16 @@ def _split_documents(documents: List[Document]) -> List[Document]:
         text = doc.page_content
         metadata = doc.metadata
 
-        # 按段落切分
-        paragraphs = _split_by_separators(text, ["\n\n", "\n"])
-
-        for para in paragraphs:
-            para = para.strip()
-            if not para:
-                continue
-
-            if len(para) <= CHUNK_SIZE:
-                if len(para) >= 10:  # 过滤过短片段
-                    chunks.append(Document(
-                        page_content=para,
-                        metadata=dict(metadata),
-                    ))
-            else:
-                # 段落过长，按句子切分
-                sentences = _split_by_separators(
-                    para,
-                    ["。", "！", "？", "；", ".", "!", "?", ";"],
-                )
-                current_chunk = ""
-                for sent in sentences:
-                    sent = sent.strip()
-                    if not sent:
-                        continue
-                    if len(current_chunk) + len(sent) <= CHUNK_SIZE:
-                        current_chunk += sent
-                    else:
-                        if len(current_chunk.strip()) >= 10:
-                            chunks.append(Document(
-                                page_content=current_chunk.strip(),
-                                metadata=dict(metadata),
-                            ))
-                        # 块重叠：前一 chunk 末尾 CHUNK_OVERLAP 字符作为下一 chunk 前缀
-                        prev_chunk = current_chunk.strip()
-                        if CHUNK_OVERLAP > 0 and len(prev_chunk) > 0:
-                            start = max(0, len(prev_chunk) - CHUNK_OVERLAP)
-                            current_chunk = prev_chunk[start:] + sent
-                        else:
-                            current_chunk = sent
-
-                # 处理最后一段
-                if len(current_chunk.strip()) >= 10:
-                    chunks.append(Document(
-                        page_content=current_chunk.strip(),
-                        metadata=dict(metadata),
-                    ))
+        sections = _parse_markdown_sections(text)
+        if sections:
+            for title_chain, body in sections:
+                md = dict(metadata)
+                if title_chain:
+                    md["title"] = title_chain
+                chunks.extend(_chunk_section(title_chain, body, md))
+        else:
+            # 无标题文档：回退旧段落/句子切分（兼容纯文本知识文档）
+            chunks.extend(_chunk_plain(text, metadata))
 
     logger.info(
         "Split %d documents into %d chunks (chunk_size=%d, overlap=%d)",
@@ -152,6 +167,174 @@ def _split_documents(documents: List[Document]) -> List[Document]:
         CHUNK_SIZE,
         CHUNK_OVERLAP,
     )
+    return chunks
+
+
+def _parse_markdown_sections(text: str) -> List[tuple]:
+    """把 Markdown 文本解析为 [(标题链, 正文), ...]。
+
+    - 以 #~###### 标题行为边界划分 section；标题链为祖先标题 + 当前标题
+      （去掉 # 标记，" > " 连接），如「子表1：灵山胜境 景点数据集 > LS-011 灵山大佛」；
+    - 标题前的无标题正文归入第一个 section（标题链为空）；
+    - 正文为空的 section（如「字段说明」类标题）丢弃；
+    - 文档没有任何标题行时返回 []（调用方回退旧切分）。
+    """
+    lines = text.splitlines()
+    sections: List[tuple] = []
+    stack: List[tuple] = []          # 当前标题路径 [(level, title), ...]（含当前标题）
+    current_body: List[str] = []
+    has_any_heading = False
+
+    def flush():
+        nonlocal current_body
+        body = "\n".join(current_body).strip()
+        if stack and body:
+            # 标题链 = 标题栈全链（祖先 + 当前标题，去 # 标记）
+            chain = " > ".join(t for _, t in stack)
+            sections.append((chain, body))
+        elif not stack and body:
+            # 标题前的无标题正文：归入空标题链 section
+            sections.append(("", body))
+        current_body = []
+
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        m = _HEADING_RE.match(stripped) if stripped else None
+        if m:
+            has_any_heading = True
+            flush()
+            level = len(m.group(1))
+            title = m.group(2).strip()
+            while stack and stack[-1][0] >= level:
+                stack.pop()
+            stack.append((level, title))
+        else:
+            current_body.append(raw_line)
+    flush()
+
+    if not has_any_heading:
+        return []
+    return sections
+
+
+def _chunk_section(title_chain: str, body: str, metadata: dict) -> List[Document]:
+    """section 分块：完整 section 优先；超长时按行聚合切分（字段保整），
+    单行超长再按句子二次切分；所有子块均带标题链前缀（自包含上下文）。"""
+    prefix = f"{title_chain}\n" if title_chain else ""
+    body = body.strip()
+    if not body:
+        return []
+
+    # 完整 section 直接成块（≤ CHUNK_SIZE 时）
+    if len(body) <= CHUNK_SIZE:
+        return [Document(page_content=prefix + body, metadata=dict(metadata))]
+
+    # 超长：按行聚合，预算扣除前缀长度（下限 120，防前缀挤占正文）
+    budget = max(120, CHUNK_SIZE - len(prefix))
+    lines = [ln for ln in body.split("\n") if ln.strip()]
+    chunks: List[Document] = []
+    current = ""
+
+    def flush_current():
+        nonlocal current
+        if current.strip():
+            chunks.append(
+                Document(page_content=prefix + current.strip(), metadata=dict(metadata))
+            )
+        current = ""
+
+    for line in lines:
+        line = line.strip()
+        if len(line) > budget:
+            # 单行超长（如「详细介绍」长字段）：先收尾当前块，再按句子切分该行
+            flush_current()
+            chunks.extend(_chunk_long_line(prefix, line, budget, metadata))
+            continue
+        if len(current) + len(line) + 1 <= budget:
+            current += line + "\n"
+        else:
+            flush_current()
+            current = line + "\n"
+    flush_current()
+    return chunks
+
+
+def _chunk_long_line(
+    prefix: str, line: str, budget: int, metadata: dict
+) -> List[Document]:
+    """单行超长时按句子切分（带前缀的子块）。"""
+    sentences = _split_by_separators(
+        line, ["。", "！", "？", "；", ".", "!", "?", ";"]
+    )
+    chunks: List[Document] = []
+    current = ""
+    for sent in sentences:
+        sent = sent.strip()
+        if not sent:
+            continue
+        if len(current) + len(sent) <= budget:
+            current += sent
+        else:
+            if len(current.strip()) >= _MIN_BODY_LEN:
+                chunks.append(
+                    Document(
+                        page_content=prefix + current.strip(),
+                        metadata=dict(metadata),
+                    )
+                )
+            prev = current.strip()
+            if CHUNK_OVERLAP > 0 and prev:
+                start = max(0, len(prev) - CHUNK_OVERLAP)
+                current = prev[start:] + sent
+            else:
+                current = sent
+    if len(current.strip()) >= _MIN_BODY_LEN:
+        chunks.append(
+            Document(page_content=prefix + current.strip(), metadata=dict(metadata))
+        )
+    return chunks
+
+
+def _chunk_plain(text: str, metadata: dict) -> List[Document]:
+    """无标题文档回退路径：旧的段落 → 句子切分（行为与优化前一致）。"""
+    chunks: List[Document] = []
+    paragraphs = _split_by_separators(text, ["\n\n", "\n"])
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+        if len(para) <= CHUNK_SIZE:
+            if len(para) >= _MIN_BODY_LEN:
+                chunks.append(Document(page_content=para, metadata=dict(metadata)))
+        else:
+            sentences = _split_by_separators(
+                para, ["。", "！", "？", "；", ".", "!", "?", ";"]
+            )
+            current = ""
+            for sent in sentences:
+                sent = sent.strip()
+                if not sent:
+                    continue
+                if len(current) + len(sent) <= CHUNK_SIZE:
+                    current += sent
+                else:
+                    if len(current.strip()) >= _MIN_BODY_LEN:
+                        chunks.append(
+                            Document(
+                                page_content=current.strip(),
+                                metadata=dict(metadata),
+                            )
+                        )
+                    prev = current.strip()
+                    if CHUNK_OVERLAP > 0 and len(prev) > 0:
+                        start = max(0, len(prev) - CHUNK_OVERLAP)
+                        current = prev[start:] + sent
+                    else:
+                        current = sent
+            if len(current.strip()) >= _MIN_BODY_LEN:
+                chunks.append(
+                    Document(page_content=current.strip(), metadata=dict(metadata))
+                )
     return chunks
 
 
@@ -420,6 +603,8 @@ def _search_documents_sync(
     try:
         namespaces = normalize_namespaces(namespace)
         all_results: List[dict] = []
+        # 查询规范化（时间/营业意图词扩展）与评测/其他消费方共用同一逻辑
+        query = _normalize_search_query(query)
 
         for ns in namespaces:
             vectorstore = get_vectorstore_for_namespace(ns)
