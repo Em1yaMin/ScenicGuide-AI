@@ -356,15 +356,8 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - **MiniMax TTS**: API Key 与 Group ID 来自 MiniMax 开放平台，Model `speech-2.8-hd`
 
 ### 启动命令
-```bash
-# 后端 (端口 8001，避免与主后端 8000 冲突)
-cd live2d-frontend/
-nohup ./venv/Scripts/python.exe main.py > backend.log 2>&1 &
 
-# 前端 (端口 3000) — 必须绕过 pnpm dev bug
-cd live2d-frontend/web/
-nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
-```
+一键起停/健康检查/.env 校验统一用仓库根 `scripts/` 运维脚本（`start_all.sh`/`stop_all.sh`/`health_check.sh`/`check_env.sh`），服务拓扑、用法与集成坑位（含 ADH 启动所需 `QWEN_API_KEY` 自动注入）见权威文档 `scripts/README.md`。
 
 ### 关键修改文件（相对于 ADH 根目录）
 - `configs/config_template.yaml` — SUPPORT_LIST 精简为仅目标引擎；AGENTS 默认 LangChainAgent（DifyAgent 保留可切换）

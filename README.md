@@ -238,6 +238,8 @@
 
 ### 3. 启动四服务
 
+> 一键起停/健康检查/.env 校验可用仓库根 `scripts/` 运维脚本（`start_all.sh` / `stop_all.sh` / `health_check.sh` / `check_env.sh`，用法与集成坑位见 [`scripts/README.md`](scripts/README.md)）；以下为手动首次部署命令。
+
 ```bash
 # ① 主后端（:8000）—— 后台任务自动启动（轮询/分析/推荐问句/记忆清理/用量 flush）
 cd digitalHumanApi
