@@ -90,7 +90,7 @@ sg_pids_on_port() {
     if [ -z "$out" ] && command -v lsof >/dev/null 2>&1; then
         out="$(lsof -t -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | sort -un)"
     fi
-    [ -n "$out" ] && echo "$out"
+    if [ -n "$out" ]; then echo "$out"; fi
 }
 
 # 进程 cmdline（空格分隔拼接；进程不存在输出空串）

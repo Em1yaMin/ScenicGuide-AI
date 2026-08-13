@@ -96,7 +96,7 @@ else
 fi
 for svc in "${runnable[@]}"; do
     if echo "$start_out" | grep -q "\[启动\] $svc"; then
-        if echo "$start_out" | grep -q "\[启动\] $svc.*就绪"; then
+        if echo "$start_out" | grep -q "\[启动\] $svc.*就绪："; then
             sg_ok "$svc 启动并就绪"
         else
             sg_bad "$svc 启动但未就绪（输出: $(echo "$start_out" | grep "\[启动\] $svc")）"
@@ -157,7 +157,7 @@ else
 fi
 start1_out="$("$SCRIPT_DIR/start_all.sh" "$first" 2>&1)"
 start1_rc=$?
-if [ "$start1_rc" -eq 0 ] && echo "$start1_out" | grep -q "\[启动\] $first.*就绪"; then
+if [ "$start1_rc" -eq 0 ] && echo "$start1_out" | grep -q "\[启动\] $first.*就绪："; then
     sg_ok "start_all.sh $first 单独拉起并就绪"
 else
     sg_bad "start_all.sh $first 单独拉起失败"
