@@ -77,7 +77,7 @@ python -m pytest tests/test_rag_eval.py -v
 
 ## 部署注意（重要）
 
-- 本改动改变了 documents 命名空间的 chunk 形态，**生产环境需执行一次 `POST /api/rag/index` 全量重建**，否则旧持久化索引（3769 旧碎片 chunk，sidecar 缓存命中时不会自动重建）仍按旧形态检索；
+- 本改动改变了 documents 命名空间的 chunk 形态，**生产环境需执行一次 `POST /api/rag/index` 全量重建**——chunk 分块时 metadata 打分块器版本标记（`rag.py CHUNKER_VERSION`），旧持久化索引（3769 旧碎片 chunk，无标记）在启动加载时被自动失效清空并告警（不会静默按旧形态服务、也不自动重建），重建前 documents 命名空间检索无结果；
 - `knowledge` 命名空间（管理后台知识库条目）不受影响（`_build_knowledge_documents` 未改动）；
 - 远端 Embedding 部署建议用 `--backend api` 复测一次。**拒答阈值校准（2026-08-14 firstmate 用真实 Qwen embedding 复测结论）**：Qwen 语义向量分数整体高于 TF-IDF，阈值 0.25 会把库外查询全部误判为高分命中（negative 0/6）；**阈值 0.75 下 100%（59/59）**，正向题最低分 0.837、拒答题最高分 0.707（分离带清晰，0.72-0.75 区间任取均可）。代码默认值已同步校准为 0.75（`DEFAULT_REJECT_THRESHOLD`），直接 `--backend api` 复测即可；如后续语料增长，以正向最低分/拒答最高分重新校准；
 - 检索 top_k 保持默认 3（RAG_TOP_K），未改动；对话注入上限 RAG_MAX_CONTEXT_LEN=2000 不变。
