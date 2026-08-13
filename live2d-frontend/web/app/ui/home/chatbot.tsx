@@ -114,6 +114,7 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
     // 保证新会话的第一条消息一定携带新 conversation_id（防取回前发送导致
     // 会话分裂——旧 id 已置空、后端对空 id 每次新建会话）
     const [newChatPending, setNewChatPending] = useState(false);
+    const conversationIdGenRef = useRef(0);
     const inputRef = useRef<HTMLInputElement>(null);
     const chatbotRef = useRef<HTMLDivElement>(null);
     
@@ -134,9 +135,12 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
             }
             setSettings(newSettings);
         }
+        const gen = ++conversationIdGenRef.current;
         Comm.getInstance().getConversionId(agentEngine, newSettings).then((id) => {
             console.log("conversationId: ", id);
-            setConversationId(id);
+            if (gen === conversationIdGenRef.current) {
+                setConversationId(id);
+            }
         });
         clearChatRecord();
     }, [agentEngine, agentSettings]);
@@ -313,13 +317,19 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
     const doNewChat = () => {
         ttsSession++;
         CharacterManager.getInstance().clearAudioQueue();
+        const gen = ++conversationIdGenRef.current;
         setConversationId("");
         setStreamingText("");
         clearChatRecord();
+        if (inputRef.current) {
+            inputRef.current.value = "";
+        }
         setNewChatPending(true);
         Comm.getInstance().getConversionId(agentEngine, settings).then((id) => {
             console.log("new conversationId: ", id);
-            setConversationId(id);
+            if (gen === conversationIdGenRef.current) {
+                setConversationId(id);
+            }
         }).finally(() => {
             // 取回（含失败：保持空 id，后端对空 conversation_id 自动新建）
             // 后恢复输入
@@ -478,7 +488,7 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
     // （navigator.geolocation → 坐标文本，agent 可据此做路径规划起点；
     // 非 secure context / 用户拒绝时提示，不阻断对话）
     const locateClick = () => {
-        if (!navigator.geolocation || isProcessing) return;
+        if (!navigator.geolocation || isProcessing || newChatPending) return;
         navigator.geolocation.getCurrentPosition(
             (pos) => {
                 const { longitude, latitude } = pos.coords;
@@ -661,7 +671,7 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
             <div className="px-4 pt-4 mb-2 sm:mb-0 z-10 w-full">
                 <div className="relative flex">
                     <div className="absolute inset-y-0 flex items-center">
-                        <button type="button" onClick={micClick} disabled={isProcessing} className={clsx(
+                        <button type="button" onClick={micClick} disabled={isProcessing || newChatPending} className={clsx(
                             "inline-flex items-center justify-center rounded-full h-12 w-12 transition duration-500 ease-in-out hover:bg-gray-300 focus:outline-none",
                             micRecording ? "text-red-600" : "text-green-600",
                         )}>
@@ -681,7 +691,7 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
                             // 📍 定位按钮（可选，批次8 B3）：仅 secure context
                             // （HTTPS/localhost）下可用，否则隐藏
                             geoSupported ?
-                                <button type="button" onClick={locateClick} disabled={isProcessing}
+                                <button type="button" onClick={locateClick} disabled={isProcessing || newChatPending}
                                     title="填入当前位置（供路线规划起点）"
                                     className="inline-flex items-center justify-center rounded-full h-12 w-12 transition duration-500 ease-in-out hover:bg-gray-300 focus:outline-none text-blue-600">
                                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="size-6">
