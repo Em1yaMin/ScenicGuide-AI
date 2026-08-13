@@ -257,6 +257,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 ## AI 运营分析（LangChain + OpenAI，可回退）
 
 - `app/services/analytics_service.py` + `app/routers/analysis.py` — `GET /api/v1/analysis/overview`（`?days=1-365`）、`GET /trends`、`POST /run-now`
+- **overview 结果缓存（2026-08 实机问题 9 提速）**：`get_ai_overview` 进程内 TTL 缓存（`OVERVIEW_CACHE_TTL_SECONDS=600`，键含 days）+ 同键并发 in-flight 合并（asyncio 任务共享，防刷新堆积并发 LLM 分析）；命中返回深拷贝快照并置 `cached=True`（响应新增 `cached` 字段；`analysis_timestamp` 保持实际分析时间）；**空数据结果（total_dialogues==0）不缓存**（空库查询毫秒级，防新数据入库后 TTL 内被旧空结果遮蔽）；TTL 过期自然失效；单进程部署内存缓存不共享可接受；测试隔离 `analytics_service.reset_ai_overview_cache()`（conftest autouse fixture）；前端刷新按钮已有 `:disabled="aiLoading"` 防重复点击，另加「已等待 Ns」计时提示（`aiElapsed`）
 - 使用 `langchain_openai.ChatOpenAI` 生成分析；**LLM 失败/未配置/输出不可解析时自动回退纯 DB 统计**（确定性摘要：满意度方向由趋势前后半段均分对比判定、热门问题来自 concern_tags、高峰时段 DB 精确统计、运营建议由热点/高峰推导），任务与接口均不因 LLM 故障中断
 - **降级标记**：`AIOverviewResponse.llm_analysis`（true=LLM 产出；false=DB 统计兜底），`ai_summary` 尾部附「（数据库统计模式，LLM 分析不可用）」供前端/管理后台识别
 - **超时参数（实测 2026-08-06，opencode-go + deepseek-v4-flash）**：分析 prompt 单次调用约 55-90s（端点延迟高且波动大），`LLM_REQUEST_TIMEOUT=180`（httpx）/ `LLM_ANALYSIS_TIMEOUT=240`（asyncio.wait_for 总上限）——原 60s/90s 会稳定超时误降级；详见 `doc/phase3-analytics-verification.md`；**部署拓扑约束**：docker 部署下 nginx `/api/` 的 `proxy_read_timeout` 必须 ≥ 分析超时预算（`nginx.conf` 已配 300s），否则管理后台 overview 在代理层被 504 掐断（直连 8000 不受影响）

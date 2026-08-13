@@ -58,6 +58,8 @@ class AIOverviewResponse(BaseModel):
     # 供前端/管理后台识别当前报告的数据来源
     llm_analysis: bool = False
     analysis_timestamp: str = ""
+    # 缓存命中标记：true=本次响应来自进程内 TTL 缓存（analysis_timestamp 为实际分析时间，非本次请求时间）
+    cached: bool = False
 
     model_config = {"from_attributes": True}
 

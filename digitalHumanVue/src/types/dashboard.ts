@@ -59,6 +59,8 @@ export interface AIOverviewResponse {
   ai_summary: string
   total_dialogues: number
   analysis_timestamp: string
+  /** 缓存命中标记：true=来自后端进程内 TTL 缓存（analysis_timestamp 为实际分析时间） */
+  cached?: boolean
 }
 
 export interface DailyCountItem {
