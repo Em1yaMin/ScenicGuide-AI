@@ -8,7 +8,7 @@ A3 起为对话主链路（路由 `/api/v1/dialogue/chat` 默认引擎 langchain
   + LLM 工厂 + 场景工具 + 记忆四工具；构造耗时 ~24s，必须缓存）
 - `chat()` / `chat_stream()` — 对话入口（**A3 接入会话管理**：短期记忆
   持久化 + conversation_id 生成/透出 + 多轮上下文组装；意图分类双模式
-  挂载 + 轻量用户摘要注入 + 流式 SSE 契约映射，A1 报告 §5）
+  挂载 + 轻量用户上下文注入（登录用户摘要/游客模式提示）+ 流式 SSE 契约映射，A1 报告 §5）
 
 **意图分类双模式挂载**（船长决策：planning=prompt 指令，保留意图分类
 双模式）：复用 `intent_classifier` 规则分类——简单问答不注入规划指令
@@ -115,6 +115,11 @@ def _build_system_prompt() -> str:
 3. 用户明确表达新的可复用偏好/事实时，可用 save_user_memory 记下；
    不要保存景点百科等一次性的资料性内容。
 4. 工具效率：一次检索到足够信息后直接作答，不要对同一主题反复重搜。
+5. 保存结果如实转达（严禁口头承诺）：save_user_memory 只有返回成功结果
+   （written>0）时才可告知用户「已记住/已保存」；若工具返回失败提示（如
+   「游客模式无法保存」），必须如实告知用户当前无法保存、需登录后再试；
+   游客模式下长期记忆整体不可用（对话后也不会自动保存），严禁在未成功
+   保存时承诺「记住了」。
 
 位置/路线工具使用原则（GPS/高德，坐标全部来自高德 API，零幻觉）：
 1. 用户描述位置（而非给坐标）时，先调 geocode_location 解析坐标；返回多个
@@ -303,11 +308,12 @@ def _build_messages(
     complex_intent: bool = False,
     light_summary: str = "",
 ) -> List[BaseMessage]:
-    """组装 agent 输入消息（意图分流 + 轻量摘要注入）。
+    """组装 agent 输入消息（意图分流 + 轻量用户上下文注入）。
 
     - **意图分类双模式**：复杂任务在消息头部注入 `_PLAN_INSTRUCTION`
       （prompt 级规划，A1 实测有效）；简单问答不注入（零开销直接作答）
-    - **轻量用户摘要**（昵称/记忆概览，防"忘记调用"记忆工具）：作为首条
+    - **轻量用户上下文**（登录用户=昵称/记忆概览摘要，防"忘记调用"记忆
+      工具；游客=游客模式提示，防口头承诺已保存）：作为首条
       SystemMessage 注入（与摘要本体隔离，见 `_build_light_summary`）
 
     顺序：摘要 → 规划指令 → 历史 → 当前问题（DeepSeek 兼容端点支持多条
@@ -321,7 +327,16 @@ def _build_messages(
     return messages
 
 
-# ── 轻量用户摘要（昵称/记忆概览级） ───────────────────────────────────────
+# ── 轻量用户上下文（登录用户摘要 / 游客模式提示） ─────────────────────────
+
+# 游客模式提示（每轮注入 system prompt 侧：模型须知晓当前用户无法保存
+# 长期记忆——游客身份下 save_user_memory 会失败、对话后也不会自动保存，
+# 模型据此如实告知用户，严禁口头承诺「记住了」，实机测试问题 5）
+_GUEST_MODE_NOTE = (
+    "当前用户为游客模式（未登录），无法保存长期记忆：save_user_memory "
+    "会返回失败，对话后也不会自动保存记忆。若用户要求保存称呼/偏好/事实，"
+    "请如实告知需要登录后才能保存，不要承诺已保存。"
+)
 
 
 async def _fetch_nickname(user: str) -> str:
@@ -348,14 +363,17 @@ async def _fetch_nickname(user: str) -> str:
 
 
 async def _build_light_summary(user: str) -> str:
-    """轻量用户摘要（昵称/记忆概览级，防"忘记调用"记忆工具）。
+    """轻量用户上下文（每轮注入 system prompt 侧，供模型参考）。
 
-    与阶段2 的「检索注入」（按当前问题语义检索具体记忆）不同：本摘要只含
-    用户标识级概览（昵称 + 记忆条数），每轮对话注入（成本极低），提示模型
-    存在记忆并引导其调用记忆工具获取详情。游客/无数据返回空串不注入。
+    - 登录用户：昵称/记忆概览级摘要（防"忘记调用"记忆工具），只含
+      用户标识级概览（昵称 + 记忆条数），成本极低，提示模型存在记忆
+      并引导其调用记忆工具获取详情；无数据返回空串不注入。
+    - 游客/匿名用户：返回游客模式提示（_GUEST_MODE_NOTE）——模型须
+      知晓当前用户无法保存长期记忆，避免口头承诺「记住了」（实机测试
+      问题 5：游客说「以后叫我王五」agent 却答「记住了」但实际未保存）。
     """
     if memory_service.is_guest_user(user) or not user:
-        return ""
+        return _GUEST_MODE_NOTE
     try:
         nickname = await _fetch_nickname(user)
     except Exception as e:
@@ -568,7 +586,7 @@ async def chat(
         with main_chain._conversations_lock:
             history = list(main_chain._conversations.get(conversation_id, []))
 
-    # 2. 意图分流 + 轻量摘要注入 + 消息组装（多轮上下文 + 当前问题）
+    # 2. 意图分流 + 轻量用户上下文注入 + 消息组装（多轮上下文 + 当前问题）
     complex_intent = _is_complex_intent(query)
     light_summary = await _build_light_summary(user)
     messages = _build_messages(
@@ -667,7 +685,7 @@ async def chat_stream(
         with main_chain._conversations_lock:
             history = list(main_chain._conversations.get(conversation_id, []))
 
-    # 2. 意图分流 + 轻量摘要注入 + 消息组装
+    # 2. 意图分流 + 轻量用户上下文注入 + 消息组装
     complex_intent = _is_complex_intent(query)
     light_summary = await _build_light_summary(user)
     messages = _build_messages(

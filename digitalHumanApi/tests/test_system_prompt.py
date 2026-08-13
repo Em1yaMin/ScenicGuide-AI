@@ -193,3 +193,16 @@ def test_deepagents_appended_sections_kept():
     assert "geocode_location" in prompt          # GPS/高德位置/路线原则
     assert "plan_route" in prompt
     assert "amap_not_configured" in prompt
+
+
+def test_deepagents_honest_save_constraint():
+    """诚实保存约束：保存类操作必须基于工具真实结果转达，不得口头承诺
+    （实机测试问题 5：游客说「以后叫我王五」agent 却答「记住了」）。"""
+    prompt = dg_agent.SYSTEM_PROMPT
+    assert "保存结果如实转达" in prompt
+    assert "游客模式" in prompt
+    assert "严禁" in prompt
+    assert "记住了" in prompt  # 未成功保存时禁止承诺的原文
+    # 游客模式提示常量同样含诚实约束
+    assert "游客模式" in dg_agent._GUEST_MODE_NOTE
+    assert "不要承诺已保存" in dg_agent._GUEST_MODE_NOTE
