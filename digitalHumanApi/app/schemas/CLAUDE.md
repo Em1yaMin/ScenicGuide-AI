@@ -21,7 +21,7 @@ schemas/
   admin.py      # DashboardResponse、ReportResponse + 7 个嵌套 Item 类；批次9 新增 AdminLoginRequest / AdminLoginResponse（管理员账号密码登录）
   knowledge.py  # KnowledgeCreateRequest/UpdateRequest/Item/ListResponse/ImportResponse
   dialogue.py   # DialogueItem — 预留未来对话列表 API
-  analysis.py   # AnalysisResultItem — 预留未来分析结果 API
+  analysis.py   # AI 运营建议响应（AIOverviewResponse 含 llm_analysis/cached 标记 + 嵌套 Item 类）+ 趋势（DailyCountItem/DailyScoreItem）+ AnalysisResultItem（预留）
   recommend.py  # RecommendRequest / RecommendResponse + RouteRecommendation
   auth.py       # RegisterRequest / LoginRequest / UserResponse / AuthResponse / GuestResponse
   memory_admin.py # 记忆管理（B5）：AdminMemoryItem/CreateRequest/UpdateRequest/DeleteResponse + AdminUserItem/ListResponse，契约见 doc/memory-admin-api.md

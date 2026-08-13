@@ -14,6 +14,8 @@ import asyncio
 import json
 import logging
 import re
+import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -44,6 +46,30 @@ logger = logging.getLogger(__name__)
 # 使底层超时错误正常上抛给降级链捕获）。
 LLM_REQUEST_TIMEOUT = 180
 LLM_ANALYSIS_TIMEOUT = 240
+
+# ── 结果缓存（实机测试问题 9：overview 每次调用实时拉 200 条样本调 LLM，实测 60~140s） ──
+# 进程内 TTL 缓存：键含 days 参数；命中直接返回（保留原 analysis_timestamp + cached 命中标记）。
+# 同键并发请求合并（in-flight 共享同一任务），防管理后台反复点刷新并发堆积 LLM 分析请求。
+# TTL 过期自然失效（下次调用重新分析）；多进程部署下内存缓存不共享（本项目单进程部署，可接受）。
+# 空数据结果（total_dialogues==0）不缓存：空库查询本身毫秒级，且避免新数据入库后 TTL 内被旧空结果遮蔽。
+OVERVIEW_CACHE_TTL_SECONDS = 600  # 10 分钟（建议区间 10~30 分钟下沿，兼顾演示刷新感知）
+
+
+@dataclass
+class _OverviewCacheEntry:
+    """overview 缓存条目：到期时刻（time.monotonic() 基准）+ 响应快照。"""
+    expires_at: float
+    response: AIOverviewResponse
+
+
+_ai_overview_cache: Dict[str, _OverviewCacheEntry] = {}
+_ai_overview_inflight: Dict[str, "asyncio.Task[AIOverviewResponse]"] = {}
+
+
+def reset_ai_overview_cache() -> None:
+    """清空 overview 结果缓存与 in-flight 任务（测试隔离用；生产无需调用）。"""
+    _ai_overview_cache.clear()
+    _ai_overview_inflight.clear()
 
 # ── LangChain 初始化（延迟加载，避免启动时无网络/无 key 崩溃） ──
 
@@ -411,7 +437,69 @@ def _build_db_fallback_summary(
 async def get_ai_overview(
     db: AsyncSession, days: int = 30
 ) -> AIOverviewResponse:
-    """运行 LangChain 分析链，返回 AI 运营概览。
+    """AI 运营概览（结果缓存 + 并发防抖）。
+
+    1. TTL 缓存命中：直接返回缓存结果（analysis_timestamp 为实际分析时间，cached=True）
+    2. 同键并发请求合并：in-flight 共享同一分析任务，刷新堆积不放大 LLM 成本
+    3. 未命中：执行 _compute_ai_overview（原分析流程），非空结果写入缓存
+
+    缓存行为对调用方透明：未命中时与旧版完全一致，仅在命中时秒回。
+    """
+    days = max(1, min(days, 365))  # 限制 1-365 天
+    key = f"overview:{days}"
+
+    # 1. TTL 缓存命中：返回深拷贝快照（保留原 analysis_timestamp），避免调用方改动共享对象
+    entry = _ai_overview_cache.get(key)
+    if entry is not None and entry.expires_at > time.monotonic():
+        logger.info("AI overview cache hit (days=%d)", days)
+        response = entry.response.model_copy(deep=True)
+        response.cached = True
+        return response
+
+    # 2. 同键并发请求合并（in-flight 共享同一任务；调用方取消不中断任务）
+    task = _ai_overview_inflight.get(key)
+    if task is not None and not task.done():
+        response = await asyncio.shield(task)
+        return response.model_copy(deep=True)
+
+    # 3. 未命中：执行分析并写缓存
+    task = asyncio.create_task(_compute_and_cache_ai_overview(db, key, days))
+    _ai_overview_inflight[key] = task
+    try:
+        try:
+            response = await asyncio.shield(task)
+        except asyncio.CancelledError:
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            raise
+        return response.model_copy(deep=True)
+    finally:
+        _ai_overview_inflight.pop(key, None)
+
+
+async def _compute_and_cache_ai_overview(
+    db: AsyncSession, key: str, days: int
+) -> AIOverviewResponse:
+    """执行分析并写入结果缓存（由 get_ai_overview 调度为共享后台任务）。"""
+    response = await _compute_ai_overview(db, days)
+    # 空数据结果不缓存（见模块注释）
+    if response.total_dialogues > 0:
+        _ai_overview_cache[key] = _OverviewCacheEntry(
+            expires_at=time.monotonic() + OVERVIEW_CACHE_TTL_SECONDS,
+            response=response,
+        )
+    return response
+
+
+async def _compute_ai_overview(
+    db: AsyncSession, days: int = 30
+) -> AIOverviewResponse:
+    """运行 LangChain 分析链，返回 AI 运营概览（无缓存，由 get_ai_overview 调度）。
 
     流程：
     1. 加载对话数据 + 评估摘要

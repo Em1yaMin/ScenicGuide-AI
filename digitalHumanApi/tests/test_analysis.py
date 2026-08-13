@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import json
+import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -177,6 +178,218 @@ async def test_analysis_overview_days_param(client):
     assert response.status_code == 200
     body = response.json()
     assert body["total_dialogues"] == 0  # 空数据但不会报错
+
+
+# ── AI 运营概览结果缓存（提速：进程内 TTL + 并发防抖） ──
+
+
+class _CountingChain:
+    """模拟 LLM 分析链：计数调用次数，可选延迟（用于并发/缓存计时断言）。"""
+
+    def __init__(self, delay: float = 0.0):
+        self.calls = 0
+        self.delay = delay
+
+    async def ainvoke(self, inputs):
+        self.calls += 1
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        return json.dumps({
+            "hot_questions": [
+                {"question": "门票多少钱", "count": 3, "category": "票务"},
+            ],
+            "satisfaction_summary": "整体满意度平稳，票务咨询为主",
+            "satisfaction_direction": "平稳",
+            "unanswered_questions": [
+                {"question": "怎么退票", "reason": "游客反复追问"},
+            ],
+            "peak_hours": [{"hour": 10, "count": 5, "label": "10:00-10:59"}],
+            "suggestions": ["优化退票流程"],
+        })
+
+
+async def _seed_overview_data(db_session, visitor_id="v-cache", content="门票多少钱"):
+    """写入 1 条对话 + 1 条评估，供 overview 非空分析使用。"""
+    now = datetime.now(timezone.utc)
+    db_session.add(Visitor(id=visitor_id))
+    d = Dialogue(
+        visitor_id=visitor_id, content=content, role=DialogueRole.user,
+        timestamp=now - timedelta(hours=1),
+    )
+    db_session.add(d)
+    await db_session.flush()
+    db_session.add(Evaluation(
+        dialogue_id=d.id, sentiment_label="neutral",
+        satisfaction_score=3, concern_tags=["票务咨询"],
+    ))
+    await db_session.commit()
+
+
+def _enable_fake_llm(monkeypatch, chain):
+    """开启 LLM 并注入计数链（复用既有测试的 monkeypatch 模式）。"""
+    monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(analytics_service, "_get_analysis_chain", lambda: chain)
+
+
+@pytest.mark.anyio
+async def test_overview_cache_hit_returns_cached(db_session, monkeypatch):
+    """同 days 二次调用命中缓存：LLM 只调用一次，命中响应带 cached=True 且 analysis_timestamp 不变。"""
+    await _seed_overview_data(db_session)
+    chain = _CountingChain()
+    _enable_fake_llm(monkeypatch, chain)
+
+    first = await analytics_service.get_ai_overview(db_session, days=30)
+    assert first.cached is False
+    assert chain.calls == 1
+
+    second = await analytics_service.get_ai_overview(db_session, days=30)
+    assert second.cached is True
+    assert chain.calls == 1  # 缓存命中不触发第二次 LLM 分析
+    assert second.analysis_timestamp == first.analysis_timestamp
+    assert second.total_dialogues == first.total_dialogues == 1
+    assert second.hot_questions == first.hot_questions
+
+
+@pytest.mark.anyio
+async def test_overview_cache_isolated_by_days(db_session, monkeypatch):
+    """不同 days 参数互不串缓存：各自首次调用触发分析，随后各自命中。"""
+    await _seed_overview_data(db_session)
+    chain = _CountingChain()
+    _enable_fake_llm(monkeypatch, chain)
+
+    r7 = await analytics_service.get_ai_overview(db_session, days=7)
+    r30 = await analytics_service.get_ai_overview(db_session, days=30)
+    assert chain.calls == 2  # 7 天与 30 天各自分析一次
+    assert r7.cached is False and r30.cached is False
+
+    r7b = await analytics_service.get_ai_overview(db_session, days=7)
+    r30b = await analytics_service.get_ai_overview(db_session, days=30)
+    assert chain.calls == 2  # 各自命中缓存，无新增分析
+    assert r7b.cached is True and r30b.cached is True
+    assert r7b.analysis_timestamp == r7.analysis_timestamp
+    assert r30b.analysis_timestamp == r30.analysis_timestamp
+
+
+@pytest.mark.anyio
+async def test_overview_cache_ttl_expiry_recomputes(db_session, monkeypatch):
+    """TTL 过期后重新分析（cached=False），缓存重新写入。"""
+    await _seed_overview_data(db_session)
+    chain = _CountingChain()
+    _enable_fake_llm(monkeypatch, chain)
+    # TTL 设为负数：写入即过期，下次调用必然重新分析
+    monkeypatch.setattr(analytics_service, "OVERVIEW_CACHE_TTL_SECONDS", -1)
+
+    first = await analytics_service.get_ai_overview(db_session, days=30)
+    assert first.cached is False
+    assert chain.calls == 1
+
+    second = await analytics_service.get_ai_overview(db_session, days=30)
+    assert second.cached is False
+    assert chain.calls == 2
+    assert second.analysis_timestamp != first.analysis_timestamp
+
+
+@pytest.mark.anyio
+async def test_overview_concurrent_requests_share_inflight(db_session, monkeypatch):
+    """同键并发请求合并：in-flight 共享同一 LLM 调用，刷新堆积不放大成本。"""
+    await _seed_overview_data(db_session)
+    chain = _CountingChain(delay=0.3)
+    _enable_fake_llm(monkeypatch, chain)
+
+    start = time.monotonic()
+    r1, r2, r3 = await asyncio.gather(
+        analytics_service.get_ai_overview(db_session, days=30),
+        analytics_service.get_ai_overview(db_session, days=30),
+        analytics_service.get_ai_overview(db_session, days=30),
+    )
+    elapsed = time.monotonic() - start
+
+    assert chain.calls == 1  # 三次并发仅触发一次 LLM 分析
+    assert r1.analysis_timestamp == r2.analysis_timestamp == r3.analysis_timestamp
+    assert elapsed < 0.8  # 远小于 3×0.3s 串行耗时
+    # in-flight 清理干净：后续请求不再共享旧任务，而是命中已写入的缓存
+    assert analytics_service._ai_overview_inflight == {}
+    r4 = await analytics_service.get_ai_overview(db_session, days=30)
+    assert r4.cached is True
+    assert chain.calls == 1
+
+
+@pytest.mark.anyio
+async def test_overview_empty_result_not_cached(db_session, monkeypatch):
+    """空数据结果不缓存：新对话入库后立即重新分析，不被旧空结果遮蔽。"""
+    chain = _CountingChain()
+    _enable_fake_llm(monkeypatch, chain)
+
+    first = await analytics_service.get_ai_overview(db_session, days=30)
+    assert first.total_dialogues == 0
+    assert first.cached is False
+    assert chain.calls == 0  # 空库早返回，不触发 LLM
+
+    await _seed_overview_data(db_session)
+    second = await analytics_service.get_ai_overview(db_session, days=30)
+    assert second.total_dialogues == 1  # 未命中旧空结果
+    assert second.cached is False
+    assert chain.calls == 1
+
+
+@pytest.mark.anyio
+async def test_overview_endpoint_second_call_cached(client, db_session, monkeypatch):
+    """HTTP 端点同 days 二次调用命中缓存：带 cached 标记且不重复调 LLM。"""
+    await _seed_overview_data(db_session, visitor_id="v-cache-http")
+    chain = _CountingChain()
+    _enable_fake_llm(monkeypatch, chain)
+
+    r1 = await client.get("/api/v1/analysis/overview?days=30")
+    r2 = await client.get("/api/v1/analysis/overview?days=30")
+    assert r1.status_code == r2.status_code == 200
+    assert r1.json()["cached"] is False
+    assert r2.json()["cached"] is True
+    assert r2.json()["total_dialogues"] == 1
+    assert chain.calls == 1
+
+
+@pytest.mark.anyio
+async def test_overview_creator_cancel_keeps_shared_task(db_session, monkeypatch):
+    """创建者请求被取消时共享 in-flight 任务不受影响：等待者拿到结果且缓存照常写入。"""
+    await _seed_overview_data(db_session)
+    chain = _CountingChain(delay=0.3)
+    _enable_fake_llm(monkeypatch, chain)
+
+    creator = asyncio.create_task(
+        analytics_service.get_ai_overview(db_session, days=30)
+    )
+    await asyncio.sleep(0.05)
+    waiter = asyncio.create_task(
+        analytics_service.get_ai_overview(db_session, days=30)
+    )
+    await asyncio.sleep(0.05)
+    creator.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await creator
+
+    result = await waiter
+    assert result.total_dialogues == 1
+    assert chain.calls == 1  # 创建者取消未中断共享分析
+
+    cached = await analytics_service.get_ai_overview(db_session, days=30)
+    assert cached.cached is True  # 后台任务完成时已写缓存
+    assert chain.calls == 1
+
+
+@pytest.mark.anyio
+async def test_overview_returned_object_isolated_from_cache(db_session, monkeypatch):
+    """调用方改动返回对象不影响缓存：命中路径读到的仍是原结果。"""
+    await _seed_overview_data(db_session)
+    chain = _CountingChain()
+    _enable_fake_llm(monkeypatch, chain)
+
+    first = await analytics_service.get_ai_overview(db_session, days=30)
+    assert first.hot_questions
+    first.hot_questions[0].question = "被调用方改动"
+
+    second = await analytics_service.get_ai_overview(db_session, days=30)
+    assert second.cached is True
+    assert second.hot_questions[0].question == "门票多少钱"
 
 
 # ── LLM 降级链测试（DB 统计兜底） ──

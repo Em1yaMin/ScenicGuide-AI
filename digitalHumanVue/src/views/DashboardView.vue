@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import VChart from 'vue-echarts'
 import { registerECharts } from '@/composables/useECharts'
 import { useApi } from '@/composables/useApi'
@@ -22,10 +22,29 @@ const aiData = ref<AIOverviewResponse | null>(null)
 const aiLoading = ref(false)
 const aiError = ref<string | null>(null)
 const aiDays = ref(30)
+// 分析等待时长（秒）：LLM 分析可能耗时 1~2 分钟，实时展示已等待时间减少「一直分析中」困惑
+const aiElapsed = ref(0)
+let aiTimer: ReturnType<typeof setInterval> | null = null
+
+function startAiElapsedTimer(): void {
+  stopAiElapsedTimer()
+  aiElapsed.value = 0
+  aiTimer = setInterval(() => {
+    aiElapsed.value += 1
+  }, 1000)
+}
+
+function stopAiElapsedTimer(): void {
+  if (aiTimer) {
+    clearInterval(aiTimer)
+    aiTimer = null
+  }
+}
 
 async function fetchAIOverview(): Promise<void> {
   aiLoading.value = true
   aiError.value = null
+  startAiElapsedTimer()
   try {
     aiData.value = await fetchWithCodeEnvelope<AIOverviewResponse>(
       `${API_ANALYSIS_OVERVIEW}?days=${aiDays.value}`,
@@ -36,6 +55,7 @@ async function fetchAIOverview(): Promise<void> {
     aiError.value = e instanceof Error ? e.message : '未知错误'
   } finally {
     aiLoading.value = false
+    stopAiElapsedTimer()
   }
 }
 
@@ -51,6 +71,10 @@ const hasData = computed(
 onMounted(() => {
   fetchDashboard()
   fetchAIOverview()
+})
+
+onUnmounted(() => {
+  stopAiElapsedTimer()
 })
 
 // ── KPI Computations ──
@@ -491,7 +515,12 @@ const hasAIData = computed(
             </p>
           </div>
           <div class="ai-header-actions">
-            <select v-model.number="aiDays" class="ai-days-select" @change="fetchAIOverview">
+            <select
+              v-model.number="aiDays"
+              class="ai-days-select"
+              @change="fetchAIOverview"
+              :disabled="aiLoading"
+            >
               <option :value="7">最近 7 天</option>
               <option :value="30">最近 30 天</option>
               <option :value="90">最近 90 天</option>
@@ -499,6 +528,7 @@ const hasAIData = computed(
             <button class="refresh-btn" @click="fetchAIOverview" :disabled="aiLoading">
               {{ aiLoading ? '分析中…' : '刷新分析' }}
             </button>
+            <span v-if="aiLoading" class="ai-wait-hint">已等待 {{ aiElapsed }}s</span>
           </div>
         </div>
 
@@ -842,6 +872,14 @@ const hasAIData = computed(
 .ai-days-select:focus {
   border-color: var(--jade);
   box-shadow: 0 0 0 3px var(--jade-soft);
+}
+
+/* 分析等待时长提示：LLM 分析可能耗时 1~2 分钟，秒级倒计时减少「一直分析中」困惑 */
+.ai-wait-hint {
+  font-size: var(--text-small);
+  color: var(--slate);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 错误横幅：朱砂淡底（错误语义=朱砂，见色板角色） */

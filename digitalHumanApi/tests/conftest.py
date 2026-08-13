@@ -43,6 +43,18 @@ def _pin_embedding_api_key_off(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _reset_ai_overview_cache():
+    """每个测试重置 AI 运营概览结果缓存，避免跨测试污染。
+
+    overview 提速：analytics_service 模块级 TTL 缓存 + in-flight 合并，
+    若不重置，前一个测试缓存的同 days 结果会泄漏到后一个测试（断言脏数据）。
+    """
+    from app.services import analytics_service
+
+    analytics_service.reset_ai_overview_cache()
+
+
+@pytest.fixture(autouse=True)
 def _reset_usage_tracker():
     """每个测试重置 LLM 用量记账队列/统计，避免跨测试污染。
 
