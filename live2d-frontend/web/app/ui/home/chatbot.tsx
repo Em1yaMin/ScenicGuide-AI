@@ -8,6 +8,7 @@ import { ConfirmAlert } from "@/app/ui/common/alert";
 import { AUDIO_SUPPORT_ALERT } from "@/app/lib/constants";
 import { Comm } from "@/app/lib/comm";
 import { CharacterManager } from "@/app/lib/character";
+import { getEmbedAuth } from "@/app/lib/embedAuth";
 import Markdown from 'react-markdown';
 import RouteCard from "@/app/ui/home/routeCard";
 
@@ -109,6 +110,15 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
         if (agentEngine in agentSettings) {
             for (let setting of agentSettings[agentEngine]){
                 newSettings[setting.NAME] = setting.DEFAULT;
+            }
+            // 嵌入模式身份透传（问题4 修复，长期记忆根因）：主站 5173 ChatView
+            // 以 auth_token URL 参数注入登录用户/游客 JWT；覆盖 yaml 默认空 token，
+            // 对话/建会话请求即携带 LLM_API_TOKEN → ADH 后端 Bearer 透传 → 主后端
+            // resolve_dialogue_user 解析真实身份（对话落库 user=用户 id、长期记忆
+            // 按 user 隔离生效）。未登录（无参数）不注入：行为与现状一致（visitor 兜底）
+            const { authToken } = getEmbedAuth();
+            if (authToken) {
+                newSettings["LLM_API_TOKEN"] = authToken;
             }
             setSettings(newSettings);
         }
