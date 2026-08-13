@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import VChart from 'vue-echarts'
 import { registerECharts } from '@/composables/useECharts'
 import { useApi } from '@/composables/useApi'
@@ -27,6 +27,7 @@ const aiElapsed = ref(0)
 let aiTimer: ReturnType<typeof setInterval> | null = null
 
 function startAiElapsedTimer(): void {
+  stopAiElapsedTimer()
   aiElapsed.value = 0
   aiTimer = setInterval(() => {
     aiElapsed.value += 1
@@ -70,6 +71,10 @@ const hasData = computed(
 onMounted(() => {
   fetchDashboard()
   fetchAIOverview()
+})
+
+onUnmounted(() => {
+  stopAiElapsedTimer()
 })
 
 // ── KPI Computations ──
@@ -510,7 +515,7 @@ const hasAIData = computed(
             </p>
           </div>
           <div class="ai-header-actions">
-            <select v-model.number="aiDays" class="ai-days-select" @change="fetchAIOverview">
+            <select v-model.number="aiDays" class="ai-days-select" @change="fetchAIOverview" :disabled="aiLoading">
               <option :value="7">最近 7 天</option>
               <option :value="30">最近 30 天</option>
               <option :value="90">最近 90 天</option>
