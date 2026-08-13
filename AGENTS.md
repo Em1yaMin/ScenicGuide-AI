@@ -432,6 +432,13 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 - 请求日志：每个 HTTP 请求一条 `app.request` logger 的 key=value 行（method/path/status/duration_ms/client/ip）；**异常优先**（异常或 5xx 记 ERROR 带异常堆栈，含 SSE 流中途抛错）；健康检查/文档等噪音路径降级 DEBUG；client 从 Authorization Bearer JWT 解析（用户 id/guest-xxx），X-Admin-Token 匹配配置标记 admin，解析不到为 `-`（不报错）；path 不含 query，不读请求体，token/key/密码绝不入日志；注意既有 catch-all 处理器把路由异常转 HTTP 200，排查不能只按 status=5xx 过滤（全局异常处理器仍会 ERROR 落盘）
 - 测试：`tests/test_logging.py`（13 用例）；格式与查询方式见 `doc/logging-request-logs.md`
 
+## 四服务运维脚本（scripts/，2026-08-13 批次：一键起停 + 健康检查 + .env 校验）
+
+- 权威文档：`scripts/README.md`（服务拓扑表/用法/集成坑位/check_env 规则表/验证记录）；公共库 `scripts/lib/common.sh`（服务注册表 + 端口/进程/HTTP 探测 + .env 解析，`sg_` 前缀函数）。
+- `start_all.sh`（一键启动四服务：backend 8000 / frontend 5173 / adh 8001 / adhweb 3000；幂等=端口占用即跳过；支持单服务参数）`stop_all.sh`（PID 文件 + 端口 + cmdline 签名三重匹配防误杀，TERM→10s→KILL）`health_check.sh`（端口 + HTTP 状态表，任一异常退出码 1；ADH 无根路由用 /docs 探测）`check_env.sh`（.env 校验：0=全通过/1=有问题可继续，绝不回显值）`smoke_ops.sh`（全链路冒烟，28 用例）。
+- 关键坑位已内置：ADH 的 QWEN_API_KEY 自动从 digitalHumanApi/.env 的 EMBEDDING_API_KEY 提取（否则 TTS 无声）；前端直接 node 调 vite.js（≠ npm run dev，且避免 npx 包装子进程致 PID 失效）；ADH-Web 直接 node 调 next（≠ pnpm dev）；setsid nohup bash -c + 内部 echo $$ 写 PID 后 exec；后端 .venv 缺失回退系统 python3（可 import uvicorn 即可）；ADH 前置要求 gitignored 的 live2d-frontend/configs/config.yaml。
+- check_env 核心规则（对应 embedding 静默降级坑）：EMBEDDING_API_STYLE=minimax → BASE 应含 minimax、MODEL 应含 embo；=openai → BASE 应含 dashscope、MODEL 应含 qwen；DIFY_API_URL/KEY 为空、APP_ENV 非法为严重（后端启动即报错）。
+
 ## Maintaining this file
 
 Keep this file for knowledge useful to almost every future agent session in this project.
