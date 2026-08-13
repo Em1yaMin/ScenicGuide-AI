@@ -6,8 +6,9 @@
   delete_knowledge（复用 knowledge_service；删除为两阶段二次确认）
 - **记忆**：query_user_memories / delete_user_memory（复用 memory_service；
   管理员例外：跨用户可用；删除为两阶段二次确认）
-- **公告**：list_announcements / set_announcement_status（复用
-  announcement_service，发布/下架）
+- **公告**：list_announcements / create_announcement / update_announcement /
+  set_announcement_status / delete_announcement（复用 announcement_service；
+  创建默认草稿、发布后才在首页/访客端可见，删除为两阶段二次确认）
 - **统计**：query_statistics（复用 admin_service 聚合 + DB 直查，只读）
 - **RAG**：rebuild_rag_index（复用 rag_service 索引重建，documents +
   knowledge 两命名空间）
@@ -46,7 +47,12 @@ from app.core.database import async_session_factory
 from app.models.evaluation import Evaluation
 from app.models.knowledge import KnowledgeBase
 from app.models.user import User
-from app.schemas.announcement import AnnouncementStatusUpdateRequest
+from app.schemas.announcement import (
+    AnnouncementCreateRequest,
+    AnnouncementItem,
+    AnnouncementStatusUpdateRequest,
+    AnnouncementUpdateRequest,
+)
 from app.schemas.knowledge import KnowledgeCreateRequest, KnowledgeItem, KnowledgeUpdateRequest
 from app.services import (
     admin_service,
@@ -439,6 +445,157 @@ async def list_announcements(
 
 
 @tool
+async def create_announcement(
+    title: str,
+    content: str,
+    status: str = "draft",
+    pinned: bool = False,
+    is_admin: Annotated[bool, InjectedState("is_admin")] = False,
+) -> str:
+    """新建公告（写操作，系统自动记录审计日志）。
+
+    参数：title 标题、content 正文、status 状态（draft 草稿默认 /
+    published 发布）、pinned 是否置顶（默认否）。**新建默认为草稿，只有发布
+    （published）后才在首页/访客端可见**；如需立即上首页，请直接传
+    status=published（或创建后调用 set_announcement_status 发布）。"""
+    _require_admin(is_admin)
+    if not title.strip() or not content.strip():
+        return _empty_result("标题与正文不能为空")
+    if status not in ("published", "draft"):
+        return _empty_result("status 仅支持 published（发布）或 draft（草稿）")
+    try:
+        request = AnnouncementCreateRequest(
+            title=title.strip(),
+            content=content.strip(),
+            status=status,
+            pinned=pinned,
+        )
+        async with _db_session() as db:
+            item = await announcement_service.create_announcement(db, request)
+    except Exception as e:
+        logger.warning("create_announcement 工具失败: %s", e)
+        return _empty_result("公告创建失败")
+    _audit_log(
+        "create_announcement",
+        f"announcement#{item.id}《{item.title}》",
+        "create",
+        f"ok id={item.id} status={item.status}",
+    )
+    return _json_dumps({"status": "ok", "item": item.model_dump()})
+
+
+@tool
+async def update_announcement(
+    announcement_id: int,
+    title: str = "",
+    content: str = "",
+    status: str = "",
+    pinned: Optional[bool] = None,
+    is_admin: Annotated[bool, InjectedState("is_admin")] = False,
+) -> str:
+    """更新公告（写操作，部分更新：仅更新传入的非空字段）。
+
+    announcement_id 为目标公告 id；title/content 只更新传入的非空值；
+    status 取 published（发布）/draft（草稿）；pinned 传布尔值更新置顶。"""
+    _require_admin(is_admin)
+    if status and status not in ("published", "draft"):
+        return _empty_result("status 仅支持 published（发布）或 draft（草稿）")
+    try:
+        # 部分更新：仅把传入字段写入（避免显式 None 覆盖既有字段）
+        update_data: Dict[str, Any] = {}
+        if title.strip():
+            update_data["title"] = title.strip()
+        if content.strip():
+            update_data["content"] = content.strip()
+        if status:
+            update_data["status"] = status
+        if pinned is not None:
+            update_data["pinned"] = pinned
+        if not update_data:
+            return _json_dumps(
+                {"status": "error", "message": "没有可更新的字段（title/content/status/pinned 至少提供一个）"}
+            )
+        request = AnnouncementUpdateRequest.model_validate(update_data)
+        async with _db_session() as db:
+            item = await announcement_service.update_announcement(
+                db, announcement_id, request
+            )
+    except Exception as e:
+        logger.warning("update_announcement 工具失败: %s", e)
+        return _empty_result("公告更新失败")
+    if item is None:
+        return _json_dumps({"status": "error", "message": f"公告 #{announcement_id} 不存在"})
+    _audit_log(
+        "update_announcement",
+        f"announcement#{item.id}《{item.title}》",
+        "update",
+        f"ok id={item.id}",
+    )
+    return _json_dumps(
+        {"status": "ok", "item": AnnouncementItem.model_validate(item).model_dump()}
+    )
+
+
+@tool
+async def delete_announcement(
+    announcement_id: int,
+    is_admin: Annotated[bool, InjectedState("is_admin")] = False,
+) -> str:
+    """删除一条公告（**删除类操作，两阶段二次确认**）。
+
+    首次调用只登记待确认项并返回 operation_id（不执行删除）；确认删除
+    请再调用 confirm_operation(operation_id)。operation_id 短时有效
+    （默认 120 秒），过期需重新发起。"""
+    _require_admin(is_admin)
+    try:
+        async with _db_session() as db:
+            item = await announcement_service.get_announcement(db, announcement_id)
+    except Exception as e:
+        logger.warning("delete_announcement 工具定位目标失败: %s", e)
+        return _empty_result("公告查询暂时不可用")
+    if item is None:
+        return _json_dumps({"status": "error", "message": f"公告 #{announcement_id} 不存在"})
+    op = confirm.create_pending(
+        "delete_announcement",
+        {"announcement_id": announcement_id},
+        f"公告 #{item.id}《{item.title}》（状态：{item.status}）",
+    )
+    return _json_dumps(
+        {
+            "status": "pending_confirmation",
+            "operation_id": op.operation_id,
+            "tool": "delete_announcement",
+            "summary": op.summary,
+            "message": "删除为两阶段操作：请调用 confirm_operation 工具并传入 operation_id 确认执行删除",
+        }
+    )
+
+
+async def _execute_delete_announcement(params: dict) -> str:
+    """confirm_operation 派发：实际执行公告删除（重新定位目标 + 审计）。"""
+    announcement_id = int(params.get("announcement_id", 0))
+    try:
+        async with _db_session() as db:
+            item = await announcement_service.get_announcement(db, announcement_id)
+            if item is None:
+                return _json_dumps(
+                    {"status": "error", "message": f"公告 #{announcement_id} 已不存在（可能已被其他操作删除）"}
+                )
+            title = item.title
+            deleted = await announcement_service.delete_announcement(db, announcement_id)
+    except Exception as e:
+        logger.warning("confirm 执行 delete_announcement 失败: %s", e)
+        return _empty_result("公告删除失败")
+    _audit_log(
+        "delete_announcement",
+        f"announcement#{announcement_id}《{title}》",
+        "delete",
+        f"ok deleted={1 if deleted else 0}",
+    )
+    return _json_dumps({"status": "ok", "deleted": announcement_id, "title": title})
+
+
+@tool
 async def set_announcement_status(
     announcement_id: int,
     status: str,
@@ -613,6 +770,7 @@ async def view_home_highlights(
 _CONFIRM_EXECUTORS: Dict[str, Callable[[dict], Awaitable[str]]] = {
     "delete_knowledge": _execute_delete_knowledge,
     "delete_user_memory": _execute_delete_user_memory,
+    "delete_announcement": _execute_delete_announcement,
 }
 
 
@@ -660,6 +818,9 @@ ADMIN_TOOLS: List[Any] = [
     query_user_memories,
     delete_user_memory,
     list_announcements,
+    create_announcement,
+    update_announcement,
+    delete_announcement,
     set_announcement_status,
     query_statistics,
     rebuild_rag_index,
