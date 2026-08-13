@@ -196,8 +196,11 @@ async def test_guest_user_skipped_for_all_tools():
                 user=guest,
             )
         )
-        # 游客 save：返回提示消息（底层 skipped=True 不落库）
-        assert "游客用户不保存长期记忆" in res.get("message", "")
+        # 游客 save：返回明确失败提示（底层 skipped=True 不落库），模型
+        # 据此如实转达「无法保存/需登录」，不得口头承诺已保存（实机测试问题 5）
+        assert "游客模式" in res.get("message", "")
+        assert "无法保存" in res.get("message", "")
+        assert res.get("written", 0) == 0  # 结果不含成功写入字段
         assert "暂无相关记忆" in await _run_tool(
             recall_user_memory, {"query": "拍照"}, user=guest
         )
@@ -211,6 +214,15 @@ async def test_guest_user_skipped_for_all_tools():
 
 
 # ── save 输入解析 ─────────────────────────────────────────────────────────
+
+
+async def test_save_tool_description_honest_constraint():
+    """save_user_memory 工具描述含诚实转达约束：
+    成功才可告知已保存、游客失败须如实转达（模型可感知游客语义）。"""
+    desc = save_user_memory.description
+    assert "游客" in desc
+    assert "如实转达" in desc
+    assert "严禁口头承诺" in desc
 
 
 async def test_save_parses_natural_language_fact():

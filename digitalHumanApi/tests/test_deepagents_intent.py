@@ -77,12 +77,27 @@ def test_messages_order_summary_before_plan():
 # ── 轻量用户摘要 ──────────────────────────────────────────────────────────
 
 
-async def test_light_summary_guest_empty(monkeypatch):
-    """游客/空用户：不注入摘要。"""
+async def test_light_summary_guest_returns_mode_note(monkeypatch):
+    """游客/空用户：注入游客模式提示（模型知晓无法保存记忆，防口头承诺
+    「记住了」——实机测试问题 5：游客说「以后叫我王五」agent 却答已记住）。"""
     monkeypatch.setattr(dg_agent, "_fetch_nickname", _fake_nickname("小明"))
-    assert await dg_agent._build_light_summary("visitor") == ""
-    assert await dg_agent._build_light_summary("guest-abc") == ""
-    assert await dg_agent._build_light_summary("") == ""
+    note = await dg_agent._build_light_summary("visitor")
+    assert "游客模式" in note and "无法保存" in note
+    assert note == dg_agent._GUEST_MODE_NOTE
+    assert await dg_agent._build_light_summary("guest-abc") == note
+    assert await dg_agent._build_light_summary("") == note
+
+
+def test_guest_note_injected_as_system_message():
+    """游客模式提示经 _build_messages 作为首条 system 消息注入（每轮生效）。"""
+    messages = dg_agent._build_messages(
+        "以后叫我王五",
+        complex_intent=False,
+        light_summary=dg_agent._GUEST_MODE_NOTE,
+    )
+    assert messages[0].type == "system"
+    assert "游客模式" in messages[0].content
+    assert messages[1].type == "human"
 
 
 async def test_light_summary_with_nickname_and_count(monkeypatch):

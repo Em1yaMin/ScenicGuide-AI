@@ -104,7 +104,12 @@ async def save_user_memory(
 
     facts 为 JSON 数组（每项 {"fact_type": "preference|fact|habit",
     "content": "记忆句"}）或单个自然语言记忆句（按 fact 类型保存）。
-    同内容重复保存会覆盖更新（不膨胀）；游客用户自动跳过。"""
+    同内容重复保存会覆盖更新（不膨胀）。
+
+    保存结果必须如实转达：只有返回成功结果（written>0）时才可告知用户
+    「已记住/已保存」；游客（visitor/guest-*）无法保存——工具会返回明确
+    失败提示（如「游客模式无法保存」），此时必须如实告知用户需登录后
+    才能使用记忆保存，严禁口头承诺已保存（实机测试问题 5）。"""
     if not facts or not facts.strip():
         return _empty_result("没有可保存的内容")
     entries = _parse_facts_input(facts)
@@ -112,7 +117,10 @@ async def save_user_memory(
         return _empty_result("无法解析要保存的事实（需为 JSON 数组或自然语言句）")
     result = await memory_service.save_user_memory(user, entries)
     if result.get("skipped"):
-        return _empty_result("游客用户不保存长期记忆")
+        return _empty_result(
+            "保存失败：当前为游客模式，无法保存长期记忆（本次内容未保存）。"
+            "请如实告知用户需要登录后才能使用记忆保存功能。"
+        )
     return json.dumps(result, ensure_ascii=False)
 
 
