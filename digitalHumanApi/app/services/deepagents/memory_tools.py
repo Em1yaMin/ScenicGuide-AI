@@ -16,8 +16,9 @@
 （visitor / guest-*）一律跳过读写（memory_service 契约）。管理员版全量
 记忆管理为后续 B5 任务，本任务只做用户侧。
 
-轻量用户摘要（昵称/记忆概览）仍由装配层注入 system prompt（防"忘记调用"
-记忆工具），见 `agent.py::_build_light_summary`。
+轻量用户上下文仍由装配层注入 system prompt：登录用户=昵称/记忆概览摘要
+（防"忘记调用"记忆工具），游客=游客模式提示（`_GUEST_MODE_NOTE`，如实
+告知无法保存长期记忆、防口头承诺已保存），见 `agent.py::_build_light_summary`。
 """
 import json
 import logging

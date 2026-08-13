@@ -110,9 +110,11 @@
 ## 七、检索注入（阶段2 T3：对话前注入）
 
 > **A3 变更（批次3）**：本节描述的「按问题语义检索注入」仅保留在**弃用链路**
-> （chat_agent）中；**主链路（deepagents 装配层）已改为「轻量摘要注入 + 记忆工具
-> 按需检索」**——每轮注入昵称/记忆条数概览（`_build_light_summary`，成本极低），
-> 提示模型存在记忆并调用记忆四工具（recall_user_memory 等）获取详情，不再做
+> （chat_agent）中；**主链路（deepagents 装配层）已改为「轻量用户上下文注入 + 记忆工具
+> 按需检索」**——每轮注入轻量用户上下文（`_build_light_summary`，成本极低）：
+> 登录用户=昵称/记忆条数概览，提示模型存在记忆并调用记忆四工具（recall_user_memory 等）获取详情；
+> 游客（visitor / guest-*）=游客模式提示（`_GUEST_MODE_NOTE`），明确无法保存长期记忆，
+> 约束模型如实转达、不得口头承诺已保存（实机测试问题 5）。不再做
 > 对话前语义检索（见 AGENTS.md「deepagents 装配层」专节与 `tests/test_deepagents_*`）。
 
 **位置**：`app/services/chat_agent.py` 的 `_build_memory_context`，在 `chat()` 与

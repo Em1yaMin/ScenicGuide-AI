@@ -8,7 +8,7 @@ A3 起为对话主链路（路由 `/api/v1/dialogue/chat` 默认引擎 langchain
   + LLM 工厂 + 场景工具 + 记忆四工具；构造耗时 ~24s，必须缓存）
 - `chat()` / `chat_stream()` — 对话入口（**A3 接入会话管理**：短期记忆
   持久化 + conversation_id 生成/透出 + 多轮上下文组装；意图分类双模式
-  挂载 + 轻量用户摘要注入 + 流式 SSE 契约映射，A1 报告 §5）
+  挂载 + 轻量用户上下文注入（登录用户摘要/游客模式提示）+ 流式 SSE 契约映射，A1 报告 §5）
 
 **意图分类双模式挂载**（船长决策：planning=prompt 指令，保留意图分类
 双模式）：复用 `intent_classifier` 规则分类——简单问答不注入规划指令
@@ -308,7 +308,7 @@ def _build_messages(
     complex_intent: bool = False,
     light_summary: str = "",
 ) -> List[BaseMessage]:
-    """组装 agent 输入消息（意图分流 + 轻量摘要注入）。
+    """组装 agent 输入消息（意图分流 + 轻量用户上下文注入）。
 
     - **意图分类双模式**：复杂任务在消息头部注入 `_PLAN_INSTRUCTION`
       （prompt 级规划，A1 实测有效）；简单问答不注入（零开销直接作答）
@@ -327,7 +327,7 @@ def _build_messages(
     return messages
 
 
-# ── 轻量用户摘要（昵称/记忆概览级） ───────────────────────────────────────
+# ── 轻量用户上下文（登录用户摘要 / 游客模式提示） ─────────────────────────
 
 # 游客模式提示（每轮注入 system prompt 侧：模型须知晓当前用户无法保存
 # 长期记忆——游客身份下 save_user_memory 会失败、对话后也不会自动保存，
@@ -586,7 +586,7 @@ async def chat(
         with main_chain._conversations_lock:
             history = list(main_chain._conversations.get(conversation_id, []))
 
-    # 2. 意图分流 + 轻量摘要注入 + 消息组装（多轮上下文 + 当前问题）
+    # 2. 意图分流 + 轻量用户上下文注入 + 消息组装（多轮上下文 + 当前问题）
     complex_intent = _is_complex_intent(query)
     light_summary = await _build_light_summary(user)
     messages = _build_messages(
@@ -685,7 +685,7 @@ async def chat_stream(
         with main_chain._conversations_lock:
             history = list(main_chain._conversations.get(conversation_id, []))
 
-    # 2. 意图分流 + 轻量摘要注入 + 消息组装
+    # 2. 意图分流 + 轻量用户上下文注入 + 消息组装
     complex_intent = _is_complex_intent(query)
     light_summary = await _build_light_summary(user)
     messages = _build_messages(
