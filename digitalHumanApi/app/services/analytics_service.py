@@ -459,22 +459,41 @@ async def get_ai_overview(
     # 2. 同键并发请求合并（in-flight 共享同一任务；调用方取消不中断任务）
     task = _ai_overview_inflight.get(key)
     if task is not None and not task.done():
-        return await asyncio.shield(task)
+        response = await asyncio.shield(task)
+        return response.model_copy(deep=True)
 
     # 3. 未命中：执行分析并写缓存
-    task = asyncio.create_task(_compute_ai_overview(db, days))
+    task = asyncio.create_task(_compute_and_cache_ai_overview(db, key, days))
     _ai_overview_inflight[key] = task
     try:
-        response = await task
-        # 空数据结果不缓存（见模块注释）
-        if response.total_dialogues > 0:
-            _ai_overview_cache[key] = _OverviewCacheEntry(
-                expires_at=time.monotonic() + OVERVIEW_CACHE_TTL_SECONDS,
-                response=response,
-            )
-        return response
+        try:
+            response = await asyncio.shield(task)
+        except asyncio.CancelledError:
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            raise
+        return response.model_copy(deep=True)
     finally:
         _ai_overview_inflight.pop(key, None)
+
+
+async def _compute_and_cache_ai_overview(
+    db: AsyncSession, key: str, days: int
+) -> AIOverviewResponse:
+    """执行分析并写入结果缓存（由 get_ai_overview 调度为共享后台任务）。"""
+    response = await _compute_ai_overview(db, days)
+    # 空数据结果不缓存（见模块注释）
+    if response.total_dialogues > 0:
+        _ai_overview_cache[key] = _OverviewCacheEntry(
+            expires_at=time.monotonic() + OVERVIEW_CACHE_TTL_SECONDS,
+            response=response,
+        )
+    return response
 
 
 async def _compute_ai_overview(

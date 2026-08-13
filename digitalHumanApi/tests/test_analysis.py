@@ -348,6 +348,50 @@ async def test_overview_endpoint_second_call_cached(client, db_session, monkeypa
     assert chain.calls == 1
 
 
+@pytest.mark.anyio
+async def test_overview_creator_cancel_keeps_shared_task(db_session, monkeypatch):
+    """创建者请求被取消时共享 in-flight 任务不受影响：等待者拿到结果且缓存照常写入。"""
+    await _seed_overview_data(db_session)
+    chain = _CountingChain(delay=0.3)
+    _enable_fake_llm(monkeypatch, chain)
+
+    creator = asyncio.create_task(
+        analytics_service.get_ai_overview(db_session, days=30)
+    )
+    await asyncio.sleep(0.05)
+    waiter = asyncio.create_task(
+        analytics_service.get_ai_overview(db_session, days=30)
+    )
+    await asyncio.sleep(0.05)
+    creator.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await creator
+
+    result = await waiter
+    assert result.total_dialogues == 1
+    assert chain.calls == 1  # 创建者取消未中断共享分析
+
+    cached = await analytics_service.get_ai_overview(db_session, days=30)
+    assert cached.cached is True  # 后台任务完成时已写缓存
+    assert chain.calls == 1
+
+
+@pytest.mark.anyio
+async def test_overview_returned_object_isolated_from_cache(db_session, monkeypatch):
+    """调用方改动返回对象不影响缓存：命中路径读到的仍是原结果。"""
+    await _seed_overview_data(db_session)
+    chain = _CountingChain()
+    _enable_fake_llm(monkeypatch, chain)
+
+    first = await analytics_service.get_ai_overview(db_session, days=30)
+    assert first.hot_questions
+    first.hot_questions[0].question = "被调用方改动"
+
+    second = await analytics_service.get_ai_overview(db_session, days=30)
+    assert second.cached is True
+    assert second.hot_questions[0].question == "门票多少钱"
+
+
 # ── LLM 降级链测试（DB 统计兜底） ──
 
 
