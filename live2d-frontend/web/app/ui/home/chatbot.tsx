@@ -9,6 +9,7 @@ import { AUDIO_SUPPORT_ALERT } from "@/app/lib/constants";
 import { Comm } from "@/app/lib/comm";
 import { CharacterManager } from "@/app/lib/character";
 import { getEmbedAuth } from "@/app/lib/embedAuth";
+import { nextNewChatAction } from "@/app/lib/newChat";
 import Markdown from 'react-markdown';
 import RouteCard from "@/app/ui/home/routeCard";
 
@@ -16,6 +17,9 @@ let mediaStream: MediaStream | null = null;
 let mediaRecorder: MediaRecorder | null = null;
 let recordedChunks: Blob[] = [];
 let isRecording: boolean = false;
+// TTS 会话代际计数：新开会话/新一轮对话开始时递增，使旧会话仍在后台
+// 合成的 TTS 入队全部作废（丢弃不入队，不跨会话/跨轮播放旧语音）
+let ttsSession = 0;
 
 /**
  * 将浏览器录制的音频 Blob（webm/opus 等）解码并转为 16kHz 16bit 单声道 WAV
@@ -102,6 +106,15 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
     // 浏览器定位可用性（需 secure context：HTTPS 或 localhost；演示环境
     // 经局域网 IP 访问不可用则隐藏 📍 按钮）
     const [geoSupported, setGeoSupported] = useState(false);
+    // 新开会话轻量确认态（两段式：首次点击进入确认态，再次点击才执行，
+    // 防误触丢失当前聊天记录；3 秒未确认自动复位）
+    const [confirmingNewChat, setConfirmingNewChat] = useState(false);
+    const newChatConfirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // 新会话 id 在途标记（取回后清除）：期间禁用输入/发送/麦克风/新开按钮，
+    // 保证新会话的第一条消息一定携带新 conversation_id（防取回前发送导致
+    // 会话分裂——旧 id 已置空、后端对空 id 每次新建会话）
+    const [newChatPending, setNewChatPending] = useState(false);
+    const conversationIdGenRef = useRef(0);
     const inputRef = useRef<HTMLInputElement>(null);
     const chatbotRef = useRef<HTMLDivElement>(null);
     
@@ -122,9 +135,12 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
             }
             setSettings(newSettings);
         }
+        const gen = ++conversationIdGenRef.current;
         Comm.getInstance().getConversionId(agentEngine, newSettings).then((id) => {
             console.log("conversationId: ", id);
-            setConversationId(id);
+            if (gen === conversationIdGenRef.current) {
+                setConversationId(id);
+            }
         });
         clearChatRecord();
     }, [agentEngine, agentSettings]);
@@ -172,7 +188,13 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
         let audioRecorderDict = new Map<number, ArrayBuffer | null>();
         if (audioAutoStop) {
             CharacterManager.getInstance().clearAudioQueue();
+            // 新一轮对话开始：递增代际，作废上一轮仍在后台合成的 TTS 入队
+            // （与 clearAudioQueue 同一语义：打断未结束的旧语音）
+            ttsSession++;
         }
+        // 本轮 TTS 入队代际快照（audioAutoStop 关闭时保持原代际，
+        // 旧语音不打断——与「新对话是否打断未结束对话=否」语义一致）
+        const myTtsSession = ttsSession;
         // 单句 TTS 入队（#77 修复 + #70-5b 回归修复）：
         // - 后端 qwenTTS WebSocket 偶发中断会导致单句合成失败/悬挂，失败/超时
         //   句记为 null 出队跳过，后续句子照常播放（不卡死队列）；
@@ -194,6 +216,9 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
                 });
                 return Promise.race([ttsPromise, timeoutPromise]);
             }).then((data: ArrayBuffer | null) => {
+                // 代际校验：新会话/新一轮已开始后，旧链仍在后台合成的音频
+                // 直接丢弃不入队（不跨会话/跨轮播放旧语音）
+                if (ttsSession !== myTtsSession) return;
                 // 成功/失败/超时都落记录：失败为 null，出队推进不卡后续句子
                 audioRecorderDict.set(index, data || null);
                 while (true) {
@@ -276,8 +301,66 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
     }
 
 
+    // 新开会话（实机测试问题3）：重新生成 conversation_id（全新会话，
+    // 短期记忆不延续），清空聊天记录/流式文本并恢复初始欢迎状态。
+    // - 进行中（流式 isProcessing / 录音 micRecording）时不响应（按钮禁用），
+    //   避免打断进行中的对话；
+    // - 两段式轻量确认：首次点击进入确认态（按钮文案变化，3 秒未确认自动
+    //   复位），再次点击才执行——防误触丢失当前聊天记录；
+    // - 执行时先置空 conversation_id 再异步取新 id；取回前输入/发送/麦克风
+    //   禁用（newChatPending 在途标记），保证新会话第一条消息一定携带新 id
+    //   （防会话分裂：取回前发送会以空 id 在后端另建会话）；取回失败保持
+    //   空 id——后端对空 conversation_id 自动新建会话，对话仍可用
+    //   （仅跨轮短期记忆不延续）；
+    // - 同步作废/清空旧会话 TTS（ttsSession 代际 + clearAudioQueue），
+    //   旧会话语音不再继续播放
+    const doNewChat = () => {
+        ttsSession++;
+        CharacterManager.getInstance().clearAudioQueue();
+        const gen = ++conversationIdGenRef.current;
+        setConversationId("");
+        setStreamingText("");
+        clearChatRecord();
+        if (inputRef.current) {
+            inputRef.current.value = "";
+        }
+        setNewChatPending(true);
+        Comm.getInstance().getConversionId(agentEngine, settings).then((id) => {
+            console.log("new conversationId: ", id);
+            if (gen === conversationIdGenRef.current) {
+                setConversationId(id);
+            }
+        }).finally(() => {
+            // 取回（含失败：保持空 id，后端对空 conversation_id 自动新建）
+            // 后恢复输入
+            setNewChatPending(false);
+        });
+    };
+
+    const newChatClick = () => {
+        if (newChatPending) return;
+        const action = nextNewChatAction({
+            isProcessing,
+            micRecording,
+            confirming: confirmingNewChat,
+        });
+        if (action === "ignore") return;
+        if (action === "arm") {
+            // 首次点击：进入确认态，3 秒未确认自动复位（防误触）
+            setConfirmingNewChat(true);
+            if (newChatConfirmTimerRef.current) clearTimeout(newChatConfirmTimerRef.current);
+            newChatConfirmTimerRef.current = setTimeout(() => setConfirmingNewChat(false), 3000);
+            return;
+        }
+        // 确认态再次点击：执行
+        if (newChatConfirmTimerRef.current) clearTimeout(newChatConfirmTimerRef.current);
+        newChatConfirmTimerRef.current = null;
+        setConfirmingNewChat(false);
+        doNewChat();
+    };
+
     const micClick = () => {
-        if (isProcessing) return;
+        if (isProcessing || newChatPending) return;
         
         if (!mediaStream) {
             // 首次点击：请求麦克风并开始录音
@@ -394,6 +477,7 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
     }
 
     const sendClick = () => {
+        if (newChatPending) return;
         if (inputRef.current.value === "") return;
         setIsProcessing(true);
         chatWithAI(inputRef.current.value);
@@ -404,7 +488,7 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
     // （navigator.geolocation → 坐标文本，agent 可据此做路径规划起点；
     // 非 secure context / 用户拒绝时提示，不阻断对话）
     const locateClick = () => {
-        if (!navigator.geolocation || isProcessing) return;
+        if (!navigator.geolocation || isProcessing || newChatPending) return;
         navigator.geolocation.getCurrentPosition(
             (pos) => {
                 const { longitude, latitude } = pos.coords;
@@ -433,6 +517,13 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
         console.log('Ctrl + M was pressed!');
         micClick();
     }, 500); // 1000 毫秒内多次触发只执行一次   
+
+    // 卸载时清理新开会话确认定时器（防组件卸载后 setState）
+    useEffect(() => {
+        return () => {
+            if (newChatConfirmTimerRef.current) clearTimeout(newChatConfirmTimerRef.current);
+        };
+    }, []);
 
     useEffect(() => {
         // 聊天滚动条到底部
@@ -472,6 +563,37 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
     return (
         <div className="p-2 sm:p-6 justify-between flex flex-col h-full">
             {micRecordAlert ? <ConfirmAlert message={AUDIO_SUPPORT_ALERT} /> : null}
+            {/* 新开会话入口（实机测试问题3）：始终可见（嵌入 hide_menu=1 与独立
+                模式行为一致）；对话进行中（流式/录音）禁用不响应；首次点击进入
+                确认态（文案变化，3 秒未确认自动复位），再次点击执行新开会话 */}
+            <div className="flex items-center justify-end px-1 z-10">
+                <button
+                    type="button"
+                    onClick={newChatClick}
+                    disabled={isProcessing || micRecording || newChatPending}
+                    title={
+                        newChatPending
+                            ? "正在创建新会话…"
+                            : isProcessing || micRecording
+                                ? "对话进行中，暂不能新开"
+                                : confirmingNewChat
+                                    ? "再次点击确认新开会话（清空聊天记录）"
+                                    : "新开会话（清空聊天记录，短期记忆不延续）"
+                    }
+                    className={clsx(
+                        "inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs transition duration-300 ease-in-out focus:outline-none",
+                        confirmingNewChat
+                            ? "bg-red-100 text-red-600 hover:bg-red-200"
+                            : "text-gray-500 hover:bg-gray-200 hover:text-gray-700",
+                        (isProcessing || micRecording || newChatPending) && "opacity-40 cursor-not-allowed"
+                    )}
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="size-3.5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                    {confirmingNewChat ? "再次点击确认新开" : "新开会话"}
+                </button>
+            </div>
             <div id="messages" ref={chatbotRef} className="flex flex-col space-y-4 p-3 overflow-y-auto no-scrollbar z-10">
                 {
                     showChatHistory ?
@@ -549,7 +671,7 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
             <div className="px-4 pt-4 mb-2 sm:mb-0 z-10 w-full">
                 <div className="relative flex">
                     <div className="absolute inset-y-0 flex items-center">
-                        <button type="button" onClick={micClick} disabled={isProcessing} className={clsx(
+                        <button type="button" onClick={micClick} disabled={isProcessing || newChatPending} className={clsx(
                             "inline-flex items-center justify-center rounded-full h-12 w-12 transition duration-500 ease-in-out hover:bg-gray-300 focus:outline-none",
                             micRecording ? "text-red-600" : "text-green-600",
                         )}>
@@ -569,7 +691,7 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
                             // 📍 定位按钮（可选，批次8 B3）：仅 secure context
                             // （HTTPS/localhost）下可用，否则隐藏
                             geoSupported ?
-                                <button type="button" onClick={locateClick} disabled={isProcessing}
+                                <button type="button" onClick={locateClick} disabled={isProcessing || newChatPending}
                                     title="填入当前位置（供路线规划起点）"
                                     className="inline-flex items-center justify-center rounded-full h-12 w-12 transition duration-500 ease-in-out hover:bg-gray-300 focus:outline-none text-blue-600">
                                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="size-6">
@@ -581,14 +703,14 @@ export default function Chatbot(props: { showChatHistory: boolean }) {
                                 <></>
                         }
                     </div>
-                    <input enterKeyHint="send" type="text" disabled={isProcessing} placeholder="Write your message!" ref={inputRef} onKeyDown={enterPress} className={clsx("w-full focus:outline-none focus:placeholder-gray-400 text-gray-600 placeholder-gray-600 bg-gray-200 rounded-md py-3", geoSupported ? "pl-24" : "pl-12")} />
+                    <input enterKeyHint="send" type="text" disabled={isProcessing || newChatPending} placeholder="Write your message!" ref={inputRef} onKeyDown={enterPress} className={clsx("w-full focus:outline-none focus:placeholder-gray-400 text-gray-600 placeholder-gray-600 bg-gray-200 rounded-md py-3", geoSupported ? "pl-24" : "pl-12")} />
                     <div className="absolute right-0 items-center inset-y-0 hidden sm:flex">
                         <button type="button" className="inline-flex items-center justify-center rounded-full h-10 w-10 transition duration-500 ease-in-out text-gray-500 hover:bg-gray-300 focus:outline-none">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="h-6 w-6 text-gray-600">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path>
                             </svg>
                         </button>
-                        <button type="button" onClick={sendClick} disabled={isProcessing} className="inline-flex items-center justify-center rounded-lg px-4 py-3 transition duration-500 ease-in-out text-white bg-blue-500 hover:bg-blue-400 focus:outline-none">
+                        <button type="button" onClick={sendClick} disabled={isProcessing || newChatPending} className="inline-flex items-center justify-center rounded-lg px-4 py-3 transition duration-500 ease-in-out text-white bg-blue-500 hover:bg-blue-400 focus:outline-none">
                             <span className="font-bold">Send</span>
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="h-6 w-6 ml-2 transform rotate-90">
                                 <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z"></path>
