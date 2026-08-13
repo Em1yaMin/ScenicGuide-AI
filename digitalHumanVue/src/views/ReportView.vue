@@ -67,6 +67,18 @@ const SENTIMENT_COLORS: Record<string, string> = {
   neutral: '#C8D2CC',
 }
 
+// 后端枚举（positive/negative/neutral）仅存于数据层，展示层统一映射中文
+// （与 DashboardView 大屏正面/负面/中性口径一致）；未知名保持原样
+const SENTIMENT_LABELS: Record<string, string> = {
+  positive: '正面',
+  negative: '负面',
+  neutral: '中性',
+}
+
+function sentimentLabel(label: string): string {
+  return SENTIMENT_LABELS[label.toLowerCase()] ?? label
+}
+
 function sentimentColor(label: string): string {
   return SENTIMENT_COLORS[label.toLowerCase()] ?? '#9CB3A8'
 }
@@ -97,7 +109,7 @@ const sentimentPieOption = computed(() => {
           lineStyle: { color: '#E4E9E5' },
         },
         data: (data.value?.sentiment_stats ?? []).map((item) => ({
-          name: item.label,
+          name: sentimentLabel(item.label),
           value: item.count,
           itemStyle: { color: sentimentColor(item.label) },
         })),
@@ -138,7 +150,9 @@ const sentimentPieOption = computed(() => {
       <div class="key-finding" v-if="dominantSentiment">
         <span class="finding-label">本期关键发现</span>
         <blockquote class="finding-quote">
-          在 {{ totalAnalyses }} 条分析中，访客整体呈「{{ dominantSentiment.label }}」情绪
+          在 {{ totalAnalyses }} 条分析中，访客整体呈「{{
+            sentimentLabel(dominantSentiment.label)
+          }}」情绪
           <template v-if="topConcern">，最关注的方面为「{{ topConcern.concern }}」</template>
         </blockquote>
       </div>
@@ -158,7 +172,7 @@ const sentimentPieOption = computed(() => {
           <div class="sentiment-summary">
             <div v-for="(item, idx) in data?.sentiment_stats" :key="idx" class="summary-item">
               <span class="summary-dot" :style="{ background: sentimentColor(item.label) }" />
-              <span class="summary-label">{{ item.label }}</span>
+              <span class="summary-label">{{ sentimentLabel(item.label) }}</span>
               <span class="summary-count">{{ item.count }}</span>
             </div>
           </div>
