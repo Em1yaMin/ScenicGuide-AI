@@ -515,7 +515,12 @@ const hasAIData = computed(
             </p>
           </div>
           <div class="ai-header-actions">
-            <select v-model.number="aiDays" class="ai-days-select" @change="fetchAIOverview" :disabled="aiLoading">
+            <select
+              v-model.number="aiDays"
+              class="ai-days-select"
+              @change="fetchAIOverview"
+              :disabled="aiLoading"
+            >
               <option :value="7">最近 7 天</option>
               <option :value="30">最近 30 天</option>
               <option :value="90">最近 90 天</option>
