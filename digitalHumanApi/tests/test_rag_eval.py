@@ -12,6 +12,7 @@ import pytest
 
 from app.services.rag_eval import (
     DEFAULT_EVAL_SET,
+    _first_hit_rank,
     load_eval_set,
     run_eval,
 )
@@ -168,3 +169,26 @@ def test_query_normalization_expands_time_intent():
     )
     assert _normalize_search_query("灵山大佛有多高") == "灵山大佛有多高"
     assert _normalize_search_query("") == ""
+
+
+def test_first_hit_rank_computes_candidate_position():
+    """MRR 位次：any 模式取首个含任一关键词的候选位次；无命中/negative 为 None。"""
+    case = {
+        "type": "spot",
+        "answer_keywords": ["88m"],
+        "keyword_mode": "any",
+    }
+    results = [
+        {"content": "LS-001 灵山大照壁 39.8m"},
+        {"content": "LS-011 灵山大佛 高88m"},
+    ]
+    assert _first_hit_rank(case, results) == 2
+    assert _first_hit_rank(case, [{"content": "无关内容"}]) is None
+    assert _first_hit_rank({**case, "type": "negative"}, results) is None
+    # all 模式：需同一候选含全部关键词
+    case_all = {"type": "spot", "answer_keywords": ["88m", "725吨"], "keyword_mode": "all"}
+    assert _first_hit_rank(case_all, results) is None
+    assert _first_hit_rank(
+        case_all,
+        [{"content": "无关"}, {"content": "灵山大佛 高88m 耗铜725吨"}],
+    ) == 2

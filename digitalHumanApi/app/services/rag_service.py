@@ -22,6 +22,7 @@ from langchain_core.documents import Document
 from app.core.rag import (
     CHUNK_OVERLAP,
     CHUNK_SIZE,
+    CHUNKER_VERSION,
     DEFAULT_DOC_DIR,
     DEFAULT_TOP_K,
     NAMESPACE_DOCUMENTS,
@@ -147,7 +148,10 @@ def _split_documents(documents: List[Document]) -> List[Document]:
 
     for doc in documents:
         text = doc.page_content
-        metadata = doc.metadata
+        metadata = dict(doc.metadata)
+        # 分块器版本标记（C7 2026-08-14）：documents 命名空间加载时校验，
+        # 分块器升级后旧持久化 chunk 自动失效（见 rag.py _load 版本校验）
+        metadata["chunker_version"] = CHUNKER_VERSION
 
         sections = _parse_markdown_sections(text)
         if sections:

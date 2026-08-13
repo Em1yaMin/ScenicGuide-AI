@@ -99,6 +99,32 @@ def build_eval_index(
     return store
 
 
+def _first_hit_rank(case: dict, results: List[dict]):
+    """返回首个命中答案关键词的候选位次（1-based）；无命中返回 None。
+
+    any 模式：首个含任一关键词的候选位次（精确 MRR 语义）；
+    all 模式：首个含全部关键词的候选位次（跨候选分散命中时按拼接判定
+    通过但 rank=None，该题 MRR 计 0——评测集当前全部为 any 模式）。
+    negative 题不计 MRR，返回 None。
+    """
+    if case.get("type") == "negative":
+        return None
+    keywords = [
+        _normalize(k) for k in (case.get("answer_keywords") or [])
+    ]
+    if not keywords:
+        return None
+    mode = case.get("keyword_mode", "any")
+    for rank, r in enumerate(results, 1):
+        norm = _normalize(r["content"])
+        if mode == "all":
+            if all(k in norm for k in keywords):
+                return rank
+        elif any(k in norm for k in keywords):
+            return rank
+    return None
+
+
 def judge_case(case: dict, results: List[dict], threshold: float) -> tuple:
     """判定单题是否通过。
 
@@ -190,6 +216,8 @@ def run_eval(
                 "top1_score": float(results[0]["score"]) if results else 0.0,
                 "top1_content": results[0]["content"] if results else "",
                 "top_k_content": "\n".join(r["content"] for r in results),
+                # 原始候选（供 MRR 位次计算，不进报告）
+                "_retrieved": results,
             }
         )
 
@@ -211,14 +239,18 @@ def run_eval(
             round(bucket["passed"] / bucket["total"], 4) if bucket["total"] else 0.0
         )
 
-    # MRR：正向题首个命中关键词出现在第几位候选
+    # MRR@top_k：正向题首个命中关键词候选位次的倒数均值（无命中计 0）
     mrr_sum = 0.0
     mrr_n = 0
-    for r in results_by_case:
-        if r["type"] == "negative":
+    for case, r in zip(cases, results_by_case):
+        if case.get("type") == "negative":
             continue
         mrr_n += 1
-        mrr_sum += 1.0 if r["passed"] else 0.0
+        rank = _first_hit_rank(case, [
+            {"content": x["content"]} for x in r["_retrieved"]
+        ])
+        if rank is not None:
+            mrr_sum += 1.0 / rank
     mrr = round(mrr_sum / mrr_n, 4) if mrr_n else 0.0
 
     failed = [
@@ -284,7 +316,8 @@ def render_markdown_report(report: dict) -> str:
         "",
         f"**准确率: {report['totals']['accuracy'] * 100:.1f}%**"
         f"（{report['totals']['passed']}/{report['totals']['total']} 通过，"
-        f"{report['totals']['failed']} 失败）；正向题 top1 命中率 MRR≈{report['mrr']:.3f}",
+        f"{report['totals']['failed']} 失败）；正向题 MRR@top_k≈{report['mrr']:.3f}"
+        "（首命中关键词候选位次的倒数均值）",
         "",
         "## 按题型统计",
         "",

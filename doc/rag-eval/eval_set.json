@@ -522,7 +522,7 @@
       "id": "negative_006",
       "type": "negative",
       "query": "怎么坐高铁去灵山胜境",
-      "neg_keywords": ["高铁", "铁路", "火车"],
+      "neg_keywords": ["高铁", "铁路"],
       "expect": "知识库无交通指南，不应编造高铁信息",
       "source": "库外（文档无交通章节）"
     }

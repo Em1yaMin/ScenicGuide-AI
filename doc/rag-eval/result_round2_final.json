@@ -6,7 +6,7 @@
     "threshold": 0.3,
     "embedding_backend": "tfidf",
     "degraded": false,
-    "duration_sec": 0.9
+    "duration_sec": 0.8
   },
   "totals": {
     "total": 58,
@@ -70,7 +70,7 @@
       "failed_ids": []
     }
   },
-  "mrr": 1.0,
+  "mrr": 0.9038,
   "failed": [],
   "eval_set": "/home/emiyamin/.treehouse/ScenicGuide-AI-d34f36/1/ScenicGuide-AI/doc/rag-eval/eval_set.json"
 }
