@@ -49,6 +49,10 @@ function adminLogout() {
           <span class="nav-icon">◔</span>
           <span>成本仪表盘</span>
         </RouterLink>
+        <RouterLink to="/admin/users" class="nav-item">
+          <span class="nav-icon">◈</span>
+          <span>账号管理</span>
+        </RouterLink>
       </nav>
       <div class="sidebar-footer">
         <!-- 管理身份（批次9：账号密码登录替代 X-Admin-Token 输入形式） -->

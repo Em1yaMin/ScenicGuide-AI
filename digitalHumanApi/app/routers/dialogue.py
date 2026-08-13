@@ -4,7 +4,7 @@ import logging
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 import httpx
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import resolve_dialogue_user
+from app.models.user import User
 from app.services import chat_agent, deepagents
 from app.services.dify_stream import stream_dify_chat as _call_dify_chat_stream
 from app.services.rag_service import build_rag_context, search_documents
@@ -20,6 +21,26 @@ from app.tasks.polling import poll_once
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/dialogue", tags=["对话抓取"])
+
+
+async def _ensure_user_active(db: AsyncSession, user: str) -> None:
+    """对话用户门禁（2026-08-13 账号管理：对话受控）。
+
+    仅对「注册用户 id」形态（全数字）的用户标识校验：用户在 users 表中
+    不存在（已删除）或被软禁用 → 403 阻断对话。游客（visitor / guest-*）
+    与请求体自定义标识不校验（维持既有行为）。
+    """
+    if not user.isdigit():
+        return
+    try:
+        u = await db.get(User, int(user))
+    except (TypeError, ValueError):
+        return
+    if u is None or u.is_disabled:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="账号已被禁用或注销，请联系管理员",
+        )
 
 
 # --- Request schemas ---
@@ -101,6 +122,11 @@ async def chat_with_rag(
     # security.resolve_dialogue_user 决策注释）；无 token 时回退请求体 user
     # 字段（默认 "visitor"），保持向后兼容。
     effective_user = resolve_dialogue_user(authorization) or request.user
+
+    # 软禁用/已删除账号门禁（2026-08-13 账号管理）：注册用户 id 形态的
+    # 用户标识在 users 表不存在或被禁用时 403 阻断（登录/对话受控）
+    await _ensure_user_active(db, effective_user)
+
 
     # 流式模式：SSE（agent 步骤 → 回答 token → done；错误回落 Dify 时带标记）
     if request.streaming:

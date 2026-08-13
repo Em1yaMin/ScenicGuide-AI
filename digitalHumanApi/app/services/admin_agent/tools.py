@@ -13,6 +13,12 @@
 - **RAG**：rebuild_rag_index（复用 rag_service 索引重建，documents +
   knowledge 两命名空间）
 - **首页数据**：view_home_highlights（复用 home_service，只读）
+- **账号管理**（2026-08-13）：list_users / get_user_detail（只读）、
+  create_user（写）、enable_user（写，直接执行）、**disable_user /
+  reset_user_password / delete_user（敏感操作，两阶段二次确认）**；
+  删除/禁用/重置密码全部二次确认、**单目标严禁批量**、系统管理员账号
+  （ADMIN_USERNAME）受保护不可禁用/删除；全部敏感操作落库审计
+  （admin_audit_logs 表，operator=admin-agent）
 - **二次确认**：confirm_operation（两阶段契约唯一执行入口，见 confirm.py）
 
 **admin 上下文校验**：每个工具首个参数为 `Annotated[bool,
@@ -54,13 +60,17 @@ from app.schemas.announcement import (
     AnnouncementUpdateRequest,
 )
 from app.schemas.knowledge import KnowledgeCreateRequest, KnowledgeItem, KnowledgeUpdateRequest
+from app.schemas.user_admin import AdminUserCreateRequest
 from app.services import (
+    admin_audit_service,
     admin_service,
     announcement_service,
+    auth_service,
     home_service,
     knowledge_service,
     memory_service,
     rag_service,
+    user_admin_service,
 )
 from app.services.admin_agent import confirm
 
@@ -764,6 +774,374 @@ async def view_home_highlights(
     )
 
 
+# ── 账号管理工具（2026-08-13：敏感操作二次确认 + 落库审计） ──────────────
+
+
+@tool
+async def list_users(
+    keyword: str = "",
+    page: int = 1,
+    page_size: int = 10,
+    is_admin: Annotated[bool, InjectedState("is_admin")] = False,
+) -> str:
+    """查询注册账号列表（只读）。
+
+    可按用户名/昵称关键词搜索分页；返回账号 JSON 列表（id/username/
+    nickname/is_disabled/对话数/记忆条数/注册时间/最后登录时间）。"""
+    _require_admin(is_admin)
+    try:
+        async with _db_session() as db:
+            result = await user_admin_service.list_users(
+                db,
+                keyword=keyword.strip() or None,
+                page=page,
+                page_size=page_size,
+            )
+    except Exception as e:
+        logger.warning("list_users 工具失败: %s", e)
+        return _empty_result("账号列表查询暂时不可用")
+    return _json_dumps(
+        {
+            "total": result.total,
+            "page": result.page,
+            "page_size": result.page_size,
+            "items": [i.model_dump() for i in result.items],
+        }
+    )
+
+
+@tool
+async def get_user_detail(
+    user_id: int,
+    is_admin: Annotated[bool, InjectedState("is_admin")] = False,
+) -> str:
+    """查询单个账号详情（只读）。
+
+    user_id 为目标账号 id；返回 id/username/nickname/is_disabled/对话数/
+    记忆条数/注册时间/最后登录时间。账号不存在返回错误。"""
+    _require_admin(is_admin)
+    try:
+        async with _db_session() as db:
+            item = await user_admin_service.get_user_item(db, user_id)
+    except Exception as e:
+        logger.warning("get_user_detail 工具失败: %s", e)
+        return _empty_result("账号查询暂时不可用")
+    if item is None:
+        return _json_dumps({"status": "error", "message": f"账号 #{user_id} 不存在"})
+    return _json_dumps({"status": "ok", "user": item.model_dump()})
+
+
+@tool
+async def create_user(
+    username: str,
+    password: str,
+    nickname: str = "",
+    is_admin: Annotated[bool, InjectedState("is_admin")] = False,
+) -> str:
+    """创建账号（写操作，系统自动记录审计日志）。
+
+    参数：username 用户名（3-32 位字母/数字/下划线）、password 初始密码
+    （至少 6 位）、nickname 昵称（可选）。用户名重复返回错误。"""
+    _require_admin(is_admin)
+    if not username.strip() or not password:
+        return _json_dumps({"status": "error", "message": "用户名与初始密码不能为空"})
+    if len(password) < 6:
+        return _json_dumps({"status": "error", "message": "初始密码至少 6 位"})
+    try:
+        request = AdminUserCreateRequest(
+            username=username.strip(),
+            password=password,
+            nickname=nickname.strip() or None,
+        )
+        async with _db_session() as db:
+            user = await user_admin_service.create_user(db, request)
+            await admin_audit_service.record_audit(
+                db,
+                operator="admin-agent",
+                action=admin_audit_service.ACTION_CREATE,
+                target_user_id=user.id,
+                target_username=user.username,
+                detail="ok",
+            )
+            item = await user_admin_service.get_user_item(db, user.id)
+    except auth_service.AuthError as e:
+        # 用户名已存在 / 密码超长等业务校验失败：规范错误信封
+        return _json_dumps({"status": "error", "message": e.message})
+    except Exception as e:
+        logger.warning("create_user 工具失败: %s", e)
+        return _empty_result("账号创建失败（用户名可能已存在或不符合规则）")
+    _audit_log(
+        "create_user",
+        f"user#{item.id} {item.username}",
+        "create",
+        f"ok id={item.id}",
+    )
+    return _json_dumps({"status": "ok", "user": item.model_dump()})
+
+
+@tool
+async def disable_user(
+    user_id: int,
+    is_admin: Annotated[bool, InjectedState("is_admin")] = False,
+) -> str:
+    """禁用账号（**敏感操作，两阶段二次确认**；单目标，禁止批量）。
+
+    首次调用只登记待确认项并返回 operation_id（**并未实际禁用**）；确认
+    请再调用 confirm_operation(operation_id)。operation_id 短时有效（默认
+    120 秒），过期需重新发起。系统管理员账号（ADMIN_USERNAME）受保护，
+    不可禁用。"""
+    _require_admin(is_admin)
+    try:
+        async with _db_session() as db:
+            user = await db.get(User, user_id)
+    except Exception as e:
+        logger.warning("disable_user 工具定位目标失败: %s", e)
+        return _empty_result("账号查询暂时不可用")
+    if user is None:
+        return _json_dumps({"status": "error", "message": f"账号 #{user_id} 不存在"})
+    if user.is_disabled:
+        return _json_dumps({"status": "error", "message": f"账号 {user.username} 已处于禁用状态"})
+    if user_admin_service.is_protected_username(user.username):
+        return _json_dumps(
+            {"status": "error", "message": f"系统管理员账号「{user.username}」受保护，不可禁用"}
+        )
+    op = confirm.create_pending(
+        "disable_user",
+        {"user_id": user_id},
+        f"账号 #{user.id} {user.username}（禁用）",
+    )
+    return _json_dumps(
+        {
+            "status": "pending_confirmation",
+            "operation_id": op.operation_id,
+            "tool": "disable_user",
+            "summary": op.summary,
+            "message": "禁用为两阶段操作：请调用 confirm_operation 工具并传入 operation_id 确认执行禁用",
+        }
+    )
+
+
+async def _execute_disable_user(params: dict) -> str:
+    """confirm_operation 派发：实际执行账号禁用（重新定位目标 + 落库审计）。"""
+    user_id = int(params.get("user_id", 0))
+    try:
+        async with _db_session() as db:
+            user, changed = await user_admin_service.set_user_disabled(db, user_id, True)
+            if not changed:
+                return _json_dumps(
+                    {"status": "error", "message": f"账号 {user.username} 已处于禁用状态"}
+                )
+            await admin_audit_service.record_audit(
+                db,
+                operator="admin-agent",
+                action=admin_audit_service.ACTION_DISABLE,
+                target_user_id=user.id,
+                target_username=user.username,
+                detail="ok",
+            )
+    except user_admin_service.UserAdminError as e:
+        return _json_dumps({"status": "error", "message": e.message})
+    except Exception as e:
+        logger.warning("confirm 执行 disable_user 失败: %s", e)
+        return _empty_result("账号禁用失败")
+    _audit_log("disable_user", f"user#{user_id} {user.username}", "disable", "ok")
+    return _json_dumps({"status": "ok", "disabled": user_id, "username": user.username})
+
+
+@tool
+async def enable_user(
+    user_id: int,
+    is_admin: Annotated[bool, InjectedState("is_admin")] = False,
+) -> str:
+    """启用账号（写操作，系统自动记录审计日志；单目标）。
+
+    user_id 为目标账号 id。启用为恢复操作（非破坏性），直接执行；
+    账号不存在返回错误。"""
+    _require_admin(is_admin)
+    try:
+        async with _db_session() as db:
+            user, changed = await user_admin_service.set_user_disabled(db, user_id, False)
+            if not changed:
+                return _json_dumps(
+                    {"status": "error", "message": f"账号 {user.username} 未处于禁用状态"}
+                )
+            await admin_audit_service.record_audit(
+                db,
+                operator="admin-agent",
+                action=admin_audit_service.ACTION_ENABLE,
+                target_user_id=user.id,
+                target_username=user.username,
+                detail="ok",
+            )
+    except user_admin_service.UserAdminError as e:
+        return _json_dumps({"status": "error", "message": e.message})
+    except Exception as e:
+        logger.warning("enable_user 工具失败: %s", e)
+        return _empty_result("账号启用失败")
+    _audit_log("enable_user", f"user#{user_id} {user.username}", "enable", "ok")
+    return _json_dumps({"status": "ok", "enabled": user_id, "username": user.username})
+
+
+@tool
+async def reset_user_password(
+    user_id: int,
+    new_password: str = "",
+    is_admin: Annotated[bool, InjectedState("is_admin")] = False,
+) -> str:
+    """重置账号密码（**敏感操作，两阶段二次确认**；单目标）。
+
+    首次调用只登记待确认项并返回 operation_id（**并未实际重置**）；确认
+    请再调用 confirm_operation(operation_id)。new_password 可指定新密码
+    （至少 6 位）；留空则由系统生成 12 位临时密码（确认执行后仅返回一次，
+    请立即转达管理员）。"""
+    _require_admin(is_admin)
+    if new_password and len(new_password) < 6:
+        return _empty_result("新密码至少 6 位")
+    try:
+        async with _db_session() as db:
+            user = await db.get(User, user_id)
+    except Exception as e:
+        logger.warning("reset_user_password 工具定位目标失败: %s", e)
+        return _empty_result("账号查询暂时不可用")
+    if user is None:
+        return _json_dumps({"status": "error", "message": f"账号 #{user_id} 不存在"})
+    op = confirm.create_pending(
+        "reset_user_password",
+        {"user_id": user_id, "new_password": new_password},
+        f"账号 #{user.id} {user.username}（重置密码）",
+    )
+    return _json_dumps(
+        {
+            "status": "pending_confirmation",
+            "operation_id": op.operation_id,
+            "tool": "reset_user_password",
+            "summary": op.summary,
+            "message": "重置密码为两阶段操作：请调用 confirm_operation 工具并传入 operation_id 确认执行",
+        }
+    )
+
+
+async def _execute_reset_user_password(params: dict) -> str:
+    """confirm_operation 派发：实际执行密码重置（重新定位目标 + 落库审计）。"""
+    user_id = int(params.get("user_id", 0))
+    new_password = str(params.get("new_password", "") or "")
+    try:
+        async with _db_session() as db:
+            result = await user_admin_service.reset_user_password(
+                db, user_id, new_password or None
+            )
+            user = result["user"]
+            await admin_audit_service.record_audit(
+                db,
+                operator="admin-agent",
+                action=admin_audit_service.ACTION_RESET_PASSWORD,
+                target_user_id=user.id,
+                target_username=user.username,
+                detail="ok generated" if result["generated"] else "ok",
+            )
+    except user_admin_service.UserAdminError as e:
+        return _json_dumps({"status": "error", "message": e.message})
+    except Exception as e:
+        logger.warning("confirm 执行 reset_user_password 失败: %s", e)
+        return _empty_result("密码重置失败")
+    _audit_log("reset_user_password", f"user#{user_id} {user.username}", "reset_password", "ok")
+    return _json_dumps(
+        {
+            "status": "ok",
+            "user_id": user.id,
+            "username": user.username,
+            "generated": result["generated"],
+            "new_password": result["new_password"],
+        }
+    )
+
+
+@tool
+async def delete_user(
+    user_id: int,
+    is_admin: Annotated[bool, InjectedState("is_admin")] = False,
+) -> str:
+    """删除账号（**敏感操作，两阶段二次确认**；**单目标，严禁批量**）。
+
+    首次调用只登记待确认项并返回 operation_id 与影响概览（关联对话数/
+    记忆条数——删除会**级联清理**该账号的对话、量化评估与长期记忆，
+    不可恢复）；确认请再调用 confirm_operation(operation_id)。系统管理员
+    账号（ADMIN_USERNAME）受保护，不可删除。"""
+    _require_admin(is_admin)
+    try:
+        async with _db_session() as db:
+            user = await db.get(User, user_id)
+            item = await user_admin_service.get_user_item(db, user_id) if user else None
+    except Exception as e:
+        logger.warning("delete_user 工具定位目标失败: %s", e)
+        return _empty_result("账号查询暂时不可用")
+    if user is None:
+        return _json_dumps({"status": "error", "message": f"账号 #{user_id} 不存在"})
+    if user_admin_service.is_protected_username(user.username):
+        return _json_dumps(
+            {"status": "error", "message": f"系统管理员账号「{user.username}」受保护，不可删除"}
+        )
+    summary = f"账号 #{user.id} {user.username}（对话 {item.dialogue_count} 条 / 记忆 {item.memory_count} 条，删除将级联清理）"
+    op = confirm.create_pending(
+        "delete_user",
+        {"user_id": user_id},
+        summary,
+    )
+    return _json_dumps(
+        {
+            "status": "pending_confirmation",
+            "operation_id": op.operation_id,
+            "tool": "delete_user",
+            "summary": summary,
+            "impact": {
+                "dialogues": item.dialogue_count,
+                "memories": item.memory_count,
+            },
+            "message": "删除为两阶段操作：请调用 confirm_operation 工具并传入 operation_id 确认执行删除",
+        }
+    )
+
+
+async def _execute_delete_user(params: dict) -> str:
+    """confirm_operation 派发：实际执行账号删除（重新定位目标 + 落库审计）。"""
+    user_id = int(params.get("user_id", 0))
+    try:
+        async with _db_session() as db:
+            result = await user_admin_service.delete_user(db, user_id)
+            if result is None:
+                return _json_dumps(
+                    {"status": "error", "message": f"账号 #{user_id} 已不存在（可能已被其他操作删除）"}
+                )
+            await admin_audit_service.record_audit(
+                db,
+                operator="admin-agent",
+                action=admin_audit_service.ACTION_DELETE,
+                target_user_id=user_id,
+                target_username=result["username"],
+                detail=(
+                    f"ok dialogues={result['deleted_dialogues']} "
+                    f"evaluations={result['deleted_evaluations']} "
+                    f"memories={result['deleted_memories']}"
+                ),
+            )
+    except user_admin_service.UserAdminError as e:
+        return _json_dumps({"status": "error", "message": e.message})
+    except Exception as e:
+        logger.warning("confirm 执行 delete_user 失败: %s", e)
+        return _empty_result("账号删除失败")
+    _audit_log("delete_user", f"user#{user_id} {result['username']}", "delete", "ok")
+    return _json_dumps(
+        {
+            "status": "ok",
+            "deleted": user_id,
+            "username": result["username"],
+            "deleted_dialogues": result["deleted_dialogues"],
+            "deleted_evaluations": result["deleted_evaluations"],
+            "deleted_memories": result["deleted_memories"],
+        }
+    )
+
+
 # ── 二次确认工具（两阶段契约唯一执行入口） ───────────────────────────────
 
 
@@ -771,6 +1149,9 @@ _CONFIRM_EXECUTORS: Dict[str, Callable[[dict], Awaitable[str]]] = {
     "delete_knowledge": _execute_delete_knowledge,
     "delete_user_memory": _execute_delete_user_memory,
     "delete_announcement": _execute_delete_announcement,
+    "disable_user": _execute_disable_user,
+    "reset_user_password": _execute_reset_user_password,
+    "delete_user": _execute_delete_user,
 }
 
 
@@ -779,12 +1160,13 @@ async def confirm_operation(
     operation_id: str,
     is_admin: Annotated[bool, InjectedState("is_admin")] = False,
 ) -> str:
-    """确认并执行一条待确认的删除操作（两阶段二次确认契约）。
+    """确认并执行一条待确认的敏感操作（两阶段二次确认契约）。
 
-    删除类工具（delete_knowledge / delete_user_memory）首次调用只返回
-    pending_confirmation 结果（含 operation_id），**必须**再调用本工具
-    传入该 operation_id 才会真正执行删除；operation_id 短时有效
-    （默认 120 秒），过期/重复确认会返回错误，需重新发起删除。"""
+    删除/禁用/重置密码类工具（delete_knowledge / delete_user_memory /
+    delete_announcement / disable_user / reset_user_password / delete_user）
+    首次调用只返回 pending_confirmation 结果（含 operation_id），**必须**
+    再调用本工具传入该 operation_id 才会真正执行；operation_id 短时有效
+    （默认 120 秒），过期/重复确认会返回错误，需重新发起。"""
     _require_admin(is_admin)
     if not operation_id.strip():
         return _empty_result("请提供 operation_id")
@@ -825,5 +1207,12 @@ ADMIN_TOOLS: List[Any] = [
     query_statistics,
     rebuild_rag_index,
     view_home_highlights,
+    list_users,
+    get_user_detail,
+    create_user,
+    disable_user,
+    enable_user,
+    reset_user_password,
+    delete_user,
     confirm_operation,
 ]

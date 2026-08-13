@@ -459,13 +459,36 @@ async def count_user_memory(user: str) -> int:
         None, _count_user_memory_sync, user
     )
 
-
 def _count_user_memory_sync(user: str) -> int:
     """count_user_memory 的同步实现（经 run_in_executor 在事件循环外执行）。"""
     if is_guest_user(user):
         return 0
     with _vector_index_lock:
         return len([e for e in _all_entries() if e.user == user])
+
+
+async def delete_all_user_memories(user: str) -> int:
+    """删除指定用户的全部长期记忆（账号管理：删除用户时级联清理）。
+
+    返回实际删除条数；游客/匿名用户返回 0。
+    """
+    if is_guest_user(user):
+        return 0
+    return await asyncio.get_running_loop().run_in_executor(
+        None, _delete_all_user_memories_sync, user
+    )
+
+
+def _delete_all_user_memories_sync(user: str) -> int:
+    """delete_all_user_memories 的同步实现（经 run_in_executor 在事件循环外执行）。"""
+    store = _memory_store()
+    with _vector_index_lock:
+        deleted = store.delete_documents(
+            lambda doc: doc.metadata.get("user") == user
+        )
+    if deleted:
+        logger.info("长期记忆级联删除: user=%s deleted=%d", user, deleted)
+    return deleted
 
 
 async def find_memory_by_id(memory_id: str) -> Optional[MemoryEntry]:

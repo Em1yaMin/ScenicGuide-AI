@@ -192,8 +192,23 @@ async def test_chat_without_token_still_works(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_chat_with_valid_token_works(client: AsyncClient):
+async def test_chat_with_valid_token_works(client: AsyncClient, db_session: AsyncSession):
     """携带有效 token 的对话请求正常走通（token 解析不阻断主链路）。"""
+    # 先落库用户 id=7（对话门禁：注册用户 id 须在 users 表中存在，否则 403）
+    from sqlalchemy import select
+
+    from app.models.user import User
+    from app.services import auth_service
+
+    user = User(
+        id=7,
+        username="tok_user",
+        password_hash=auth_service.hash_password("secret123"),
+    )
+    db_session.add(user)
+    await db_session.commit()
+    assert (await db_session.execute(select(User).where(User.id == 7))).scalar_one()
+
     token, _ = create_access_token(subject="7", token_type="user")
     resp = await client.post(
         "/api/v1/dialogue/chat",
