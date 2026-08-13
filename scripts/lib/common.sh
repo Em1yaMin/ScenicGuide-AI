@@ -125,7 +125,9 @@ sg_http_up() {
         code="$(sg_http_status "$url")"
         [ "$code" -ge 200 ] && [ "$code" -lt 400 ]
     else
-        sg_port_listening "${url##*:}"
+        local port="${url##*:}"
+        port="${port%%/*}"
+        sg_port_listening "$port"
     fi
 }
 
