@@ -7,7 +7,7 @@
       "doc/景区知识库/灵山胜境_景点结构化数据集_知识库版.md",
       "doc/景区知识库/灵山胜境_历史文化景点特色与个性化游览指南_知识库版.md"
     ],
-    "judge_rule": "正向题：answer_keywords 在 top_k 拼接文本中命中（keyword_mode=any|all）。negative 题：检索结果不含 neg_keywords 且 top1 score 低于拒答阈值视为正确拒答。"
+    "judge_rule": "正向题：answer_keywords 在 top_k 任一候选文本中命中（keyword_mode=any|all，按候选独立判定不跨候选拼接）。negative 题：任一候选不含 neg_keywords 且 top1 score 低于拒答阈值视为正确拒答。"
   },
   "cases": [
     {
@@ -428,8 +428,8 @@
       "id": "confuse_002",
       "type": "confuse",
       "query": "吉祥颂是在哪个建筑里演出",
-      "answer_keywords": ["梵宫"],
-      "keyword_mode": "any",
+      "answer_keywords": ["梵宫", "吉祥颂"],
+      "keyword_mode": "all",
       "expect": "《灵山吉祥颂》在灵山梵宫演出（区别于九龙灌浴动态演出）",
       "source": "结构化数据集 LS-013 灵山梵宫"
     },
@@ -455,8 +455,8 @@
       "id": "confuse_005",
       "type": "confuse",
       "query": "拈花湾的门票价格是多少",
-      "answer_keywords": ["拈花湾"],
-      "keyword_mode": "any",
+      "answer_keywords": ["拈花湾", "免费开放"],
+      "keyword_mode": "all",
       "expect": "应命中拈花湾相关内容（免费开放），而非灵山胜境210元门票表",
       "source": "结构化数据集 表2 拈花湾"
     },

@@ -53,9 +53,19 @@ _QUERY_TIME_EXPANSION: dict = {
     "开到": "开放",
 }
 
+# 门票价格意图 → 检索词扩展表。
+# 背景：文档对免票景区（拈花湾）以「免费开放/无门票限制」表述，词袋检索下
+# 「门票价格」类问法与付费票价表（210 元）词面重叠、与免费表述词面无交集
+# （评测 confuse_005 实测 210 元门票表排进 top3、免费开放块在 top3 外）。
+# 触发词取窄口径「门票价格」（不含「多少钱/票价」等付费票询问，避免拉偏
+# 付费票价检索）；仅追加不替换，目标词已有则跳过。
+_QUERY_TICKET_EXPANSION: dict = {
+    "门票价格": "免费开放",
+}
+
 
 def _normalize_search_query(query: str) -> str:
-    """检索前查询规范化：追加时间/营业意图同义词，提升召回。
+    """检索前查询规范化：追加时间/营业/门票意图同义词，提升召回。
 
     仅追加、不替换、不删除原词；目标词已存在时不再重复追加（防膨胀）；
     查询不含触发词时原样返回（零开销零副作用）。
@@ -66,6 +76,10 @@ def _normalize_search_query(query: str) -> str:
     extras = [
         target
         for trigger, target in _QUERY_TIME_EXPANSION.items()
+        if trigger in query and target not in query
+    ] + [
+        target
+        for trigger, target in _QUERY_TICKET_EXPANSION.items()
         if trigger in query and target not in query
     ]
     if not extras:

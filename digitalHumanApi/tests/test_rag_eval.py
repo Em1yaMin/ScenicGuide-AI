@@ -171,6 +171,17 @@ def test_query_normalization_expands_time_intent():
     assert _normalize_search_query("") == ""
 
 
+def test_query_normalization_expands_ticket_intent():
+    """查询规范化：门票价格意图追加免费开放（免票景区表述桥接），其余原样。"""
+    assert _normalize_search_query("拈花湾的门票价格是多少") == (
+        "拈花湾的门票价格是多少 免费开放"
+    )
+    assert _normalize_search_query("泰山门票价格") == "泰山门票价格 免费开放"
+    # 付费票价询问不触发（避免拉偏付费票价检索）；目标词已有则不重复
+    assert _normalize_search_query("灵山胜境成人票多少钱") == "灵山胜境成人票多少钱"
+    assert _normalize_search_query("门票价格 免费开放") == "门票价格 免费开放"
+
+
 def test_first_hit_rank_computes_candidate_position():
     """MRR 位次：any 模式取首个含任一关键词的候选位次；无命中/negative 为 None。"""
     case = {

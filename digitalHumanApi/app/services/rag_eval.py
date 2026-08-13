@@ -43,7 +43,9 @@ DEFAULT_EVAL_SET = (
 
 # 拒答判定阈值默认值（top1 score 低于该值视为「无有效命中」= 正确拒答）。
 # TF-IDF 与 API embedding 分数分布不同，分开配置；可用 --threshold 覆盖。
-DEFAULT_REJECT_THRESHOLD = {"tfidf": 0.30, "api": 0.25}
+# api=0.75 为真实 Qwen embedding 校准值（正向最低 0.837 / 拒答最高 0.707，
+# 见 doc/rag-eval/README.md「部署注意」）；tfidf=0.30 为本地确定性评测基线。
+DEFAULT_REJECT_THRESHOLD = {"tfidf": 0.30, "api": 0.75}
 
 # 判定用关键词归一化：去除空白/全角空格
 _WS_RE = re.compile(r"[\s\u3000]+")
@@ -137,12 +139,12 @@ def judge_case(case: dict, results: List[dict], threshold: float) -> tuple:
         (passed: bool, reason: str)
     """
     kind = case.get("type", "spot")
-    top_text = _normalize("".join(r["content"] for r in results))
 
     if kind == "negative":
         neg_keywords = case.get("neg_keywords") or []
         for kw in neg_keywords:
-            if _normalize(kw) in top_text:
+            norm_kw = _normalize(kw)
+            if any(norm_kw in _normalize(r["content"]) for r in results):
                 return False, f"误命中库外内容关键词: {kw}"
         if not results:
             return True, "正确拒答（无检索结果）"
@@ -152,19 +154,34 @@ def judge_case(case: dict, results: List[dict], threshold: float) -> tuple:
         return False, f"库外问题给出高分答案（top1={top1:.3f} ≥ 阈值 {threshold}）"
 
     # 正向题（spot/ticket/show/location/route/history/tips/confuse）
+    # 按候选独立判定（与 MRR 位次口径一致），关键词不跨候选拼接
     keywords = case.get("answer_keywords") or []
     if not keywords:
         return False, "评测集缺少 answer_keywords"
     mode = case.get("keyword_mode", "any")
-    hits = {kw: _normalize(kw) in top_text for kw in keywords}
+    norm_keywords = [_normalize(k) for k in keywords]
+    norm_contents = [_normalize(r["content"]) for r in results]
     if mode == "all":
-        passed = all(hits.values())
+        hit_candidates = [
+            r for r, nc in zip(results, norm_contents)
+            if all(k in nc for k in norm_keywords)
+        ]
     else:
-        passed = any(hits.values())
-    if passed:
-        hit_list = [kw for kw, ok in hits.items() if ok]
+        hit_candidates = [
+            r for r, nc in zip(results, norm_contents)
+            if any(k in nc for k in norm_keywords)
+        ]
+    if hit_candidates:
+        hit_list = [
+            kw for kw, nk in zip(keywords, norm_keywords)
+            if any(nk in nc for nc in norm_contents)
+        ]
         return True, f"关键词命中: {hit_list}"
-    return False, f"关键词未命中: {[kw for kw, ok in hits.items() if not ok]}"
+    missed = [
+        kw for kw, nk in zip(keywords, norm_keywords)
+        if not any(nk in nc for nc in norm_contents)
+    ]
+    return False, f"关键词未命中: {missed}"
 
 
 def run_eval(

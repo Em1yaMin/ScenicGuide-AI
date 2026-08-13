@@ -3,13 +3,14 @@
 
 对评测集（doc/rag-eval/eval_set.json）逐题检索并判定，输出 Markdown 报告。
 默认本地 TF-IDF（完全离线、可复现）；部署环境可 --backend api 使用配置的
-远端 Embedding（注意结果分数分布不同，拒答阈值需用 --threshold 校准）。
+远端 Embedding（注意结果分数分布不同，拒答阈值默认已按后端校准：api=0.75，
+分数分布变化时用 --threshold 重新校准）。
 
 用法:
     python -m scripts.rag_eval                                     # 默认跑全量并打印报告
     python -m scripts.rag_eval --out doc/rag-eval/report_round1.md # 报告写入文件
     python -m scripts.rag_eval --top-k 5 --backend tfidf           # 调整检索参数
-    python -m scripts.rag_eval --threshold 0.25                    # 覆盖拒答阈值
+    python -m scripts.rag_eval --threshold 0.75                    # 覆盖拒答阈值
 
 退出码 0 表示运行成功（无论分数）；--assert-accuracy 0.9 时低于目标退出码 2。
 """

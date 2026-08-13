@@ -22,7 +22,7 @@
 - 58 题覆盖：景点介绍（15）/门票（5）/演出时间（5）/位置（5）/路线（5）/历史典故（5）/注意事项（5）/边界混淆（7）/知识库外拒答（6）。
 - 边界混淆用例：相似景点区分（吉祥颂演出地=梵宫 vs 九龙灌浴、曼飞龙塔=南传 vs 五印坛城=藏传、五智门六柱=六度波罗蜜）、灵山胜境 vs 拈花湾门票归属、「华夏第一壁」归属、小灵山与灵鹫山典故。
 - 知识库外拒答用例：黄果树瀑布/迪士尼/故宫/西湖/泰山/高铁交通（文档确无交通章节，防编造）。
-- 判定规则：正向题=答案关键词（对照文档原文摘取）在 top_k 拼接文本中命中（any/all）；negative 题=检索结果不含库外关键词 且 top1 score 低于拒答阈值（TF-IDF 默认 0.30，API 默认 0.25）。
+- 判定规则：正向题=答案关键词（对照文档原文摘取）在 top_k 任一候选文本中命中（any/all，按候选独立判定、不跨候选拼接）；negative 题=检索结果不含库外关键词 且 top1 score 低于拒答阈值（TF-IDF 默认 0.30，API 默认 0.75）。
 
 ## 运行方法（离线可复跑）
 
@@ -33,7 +33,7 @@ python -m scripts.rag_eval --out ../doc/rag-eval/report_latest.md
 python -m scripts.rag_eval --json-out /tmp/result.json   # 结构化结果
 
 # 参数：--top-k / --threshold / --backend api（部署环境用配置的远端 Embedding 复测）
-python -m scripts.rag_eval --top-k 5 --threshold 0.25 --backend api
+python -m scripts.rag_eval --top-k 5 --threshold 0.75 --backend api
 
 # pytest 门禁（CI 哨兵）：准确率 ≥90% + 关键题型 ≥90%
 python -m pytest tests/test_rag_eval.py -v
@@ -48,7 +48,7 @@ python -m pytest tests/test_rag_eval.py -v
 | 基线 | 无（旧按行/段落切分） | 46.6%（27/58） | 3769 chunks 中 56% 为 <50 字符碎片，top1 常命中孤立标题行/「景区名称」行 |
 | Round 1a | 标题感知分块（初版） | 96.5% | 标题链前缀重复 bug（栈尾与当前标题重复） |
 | Round 1 | 修复标题链重复 | 98.3% | 剩 1 失败（show_004 营业时间） |
-| Round 2 | + 查询规范化（时间/营业意图词扩展） | **100%** | show_004 的演艺块从第 9 名进入 top3 |
+| Round 2 | + 查询规范化（时间/营业意图 + 门票价格意图词扩展） | **100%** | show_004 的演艺块从第 9 名进入 top3；confuse_005 的免费开放块进入 top3、210 元门票表被挤出 |
 
 ## 优化内容与失败分析
 
@@ -66,6 +66,8 @@ python -m pytest tests/test_rag_eval.py -v
 
 剩余失败 show_004「拈花湾禅意小镇晚上营业到几点」：TF-IDF 词袋模型下查询词「营业/几点」与演艺块「开放时间 9:00-21:30」词面无交集，演艺块实测排第 9 名。处理：统一检索入口（`_search_documents_sync`，对话 RAG/后台/推荐 Agent 共用）在检索前对时间/营业意图词**追加**同义词（几点→时间、营业/开门/开到→开放、关门→闭园时间；仅追加不替换，目标词已有则跳过）。评测引擎走同一函数，保证评测覆盖生产行为。
 
+同机制追加**门票价格意图词**（门票价格→免费开放）：文档对免票景区（拈花湾）以「免费开放/无门票限制」表述，词袋检索下「拈花湾的门票价格是多少」词面与付费票价表重叠（实测 210 元门票表排 top2、免费开放块在 top3 外），边界混淆用例 confuse_005 暴露该归属风险；触发词取窄口径「门票价格」（不含「多少钱/票价」等付费票询问，避免拉偏付费票价检索）。
+
 ### 基线失败分类（31 个，供参考）
 
 - 碎片 chunk 型（~20）：答案行不在 top3（spot/ticket/show/location/tips 多数失败）——Round 1 解决；
@@ -77,5 +79,5 @@ python -m pytest tests/test_rag_eval.py -v
 
 - 本改动改变了 documents 命名空间的 chunk 形态，**生产环境需执行一次 `POST /api/rag/index` 全量重建**，否则旧持久化索引（3769 旧碎片 chunk，sidecar 缓存命中时不会自动重建）仍按旧形态检索；
 - `knowledge` 命名空间（管理后台知识库条目）不受影响（`_build_knowledge_documents` 未改动）；
-- 远端 Embedding 部署建议用 `--backend api` 复测一次。**拒答阈值校准（2026-08-14 firstmate 用真实 Qwen embedding 复测结论）**：Qwen 语义向量分数整体高于 TF-IDF，阈值 0.25 会把库外查询全部误判为高分命中（negative 0/6）；**阈值 0.75 下 100%（58/58）**，正向题最低分 0.837、拒答题最高分 0.707（分离带清晰，0.72-0.75 区间任取均可）。部署时请用 `--backend api --threshold 0.75` 复测；如后续语料增长，以正向最低分/拒答最高分重新校准；
+- 远端 Embedding 部署建议用 `--backend api` 复测一次。**拒答阈值校准（2026-08-14 firstmate 用真实 Qwen embedding 复测结论）**：Qwen 语义向量分数整体高于 TF-IDF，阈值 0.25 会把库外查询全部误判为高分命中（negative 0/6）；**阈值 0.75 下 100%（58/58）**，正向题最低分 0.837、拒答题最高分 0.707（分离带清晰，0.72-0.75 区间任取均可）。代码默认值已同步校准为 0.75（`DEFAULT_REJECT_THRESHOLD`），直接 `--backend api` 复测即可；如后续语料增长，以正向最低分/拒答最高分重新校准；
 - 检索 top_k 保持默认 3（RAG_TOP_K），未改动；对话注入上限 RAG_MAX_CONTEXT_LEN=2000 不变。
