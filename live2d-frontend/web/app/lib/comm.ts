@@ -1,4 +1,5 @@
 import * as API from '@/app/lib/api';
+import { getEmbedAuth } from '@/app/lib/embedAuth';
 
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -105,6 +106,14 @@ export class Comm {
     callbackStep?: (step: { tool: string; label: string }) => void,
     callbackRoute?: (route: any) => void
   ): Promise<void> {
+    // 嵌入模式身份透传兜底（问题4 修复，长期记忆根因）：保证任何调用方
+    // 的对话请求 settings 都携带 auth_token → LLM_API_TOKEN（chatbot.tsx
+    // 已在 settings 构建时注入，此处幂等兜底防其它调用路径遗漏）；
+    // 未登录（无 auth_token）不注入：行为与现状一致（主后端 visitor 兜底）
+    const { authToken } = getEmbedAuth();
+    if (authToken && !settings["LLM_API_TOKEN"]) {
+      settings["LLM_API_TOKEN"] = authToken;
+    }
     // 流式对话结束回调兜底：无论正常 EOF 还是中途异常（网络错误/服务端
     // 中断），都必须触发 callbackEnd——前端据此固化已收到的部分文本并恢复
     // 输入（不永久卡死）。修复「工具调用后文字气泡不显示」（#70-5b）：
