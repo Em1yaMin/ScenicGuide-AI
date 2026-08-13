@@ -8,7 +8,11 @@ import os
 import base64
 import pytest
 from httpx import AsyncClient
+from digitalHuman.utils import config
 from digitalHuman.utils.env import  OUTPUT_PATH
+
+# 实际启用的 TTS 引擎列表（config.yaml 不存在时回退 config_template.yaml）
+_SUPPORTED_TTS = {c.NAME for c in config.SERVER.ENGINES.TTS.SUPPORT_LIST}
 
 
 class Test_TTS_API():
@@ -32,6 +36,7 @@ class Test_TTS_API():
     #         f.write(audio)
     
     @pytest.mark.asyncio(scope="session")
+    @pytest.mark.skipif("EdgeAPI" not in _SUPPORTED_TTS, reason="EdgeAPI 未在配置中启用，跳过")
     async def test_edgeAPI_infer(self, version, client):
         url = f"/adh/tts/{version}/infer"
         item = {
