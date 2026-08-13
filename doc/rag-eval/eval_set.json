@@ -1,0 +1,539 @@
+{
+  "meta": {
+    "name": "灵山景区 RAG 知识问答评测集",
+    "version": 1,
+    "description": "针对 doc/景区知识库/ 两份纯灵山文档的检索层评测：景点介绍/门票/演出/位置/路线/历史/贴士/边界混淆/知识库外拒答。判定基于检索 top_k 结果的关键词命中与拒答分数阈值，可复现、零外部依赖。",
+    "source_docs": [
+      "doc/景区知识库/灵山胜境_景点结构化数据集_知识库版.md",
+      "doc/景区知识库/灵山胜境_历史文化景点特色与个性化游览指南_知识库版.md"
+    ],
+    "judge_rule": "正向题：answer_keywords 在 top_k 任一候选文本中命中（keyword_mode=any|all，按候选独立判定不跨候选拼接）。negative 题：任一候选不含 neg_keywords 且 top1 score 低于拒答阈值视为正确拒答。"
+  },
+  "cases": [
+    {
+      "id": "spot_001",
+      "type": "spot",
+      "query": "灵山大佛有多高",
+      "answer_keywords": ["88m", "101.5m"],
+      "keyword_mode": "any",
+      "expect": "佛像高88m（主体79m+莲花瓣9m），含台基总高101.5m",
+      "source": "结构化数据集 LS-011 灵山大佛"
+    },
+    {
+      "id": "spot_002",
+      "type": "spot",
+      "query": "灵山大照壁长多少米",
+      "answer_keywords": ["39.8m"],
+      "keyword_mode": "any",
+      "expect": "长39.8m，高7m，青石雕刻，华夏第一壁",
+      "source": "结构化数据集 LS-001 灵山大照壁"
+    },
+    {
+      "id": "spot_003",
+      "type": "spot",
+      "query": "九龙灌浴的太子佛有多高",
+      "answer_keywords": ["7.2m"],
+      "keyword_mode": "any",
+      "expect": "鎏金太子佛高7.2m、重12吨，整体耗铜180吨",
+      "source": "结构化数据集 LS-006 九龙灌浴"
+    },
+    {
+      "id": "spot_004",
+      "type": "spot",
+      "query": "阿育王柱通高多少米",
+      "answer_keywords": ["16.9m", "180吨"],
+      "keyword_mode": "any",
+      "expect": "通高16.9m、直径1.8m、重180吨，花岗岩整石雕刻",
+      "source": "结构化数据集 LS-008 阿育王柱"
+    },
+    {
+      "id": "spot_005",
+      "type": "spot",
+      "query": "灵山梵宫建筑面积有多大",
+      "answer_keywords": ["72000"],
+      "keyword_mode": "any",
+      "expect": "建筑面积72000㎡，最高处66.5米，鲁班奖",
+      "source": "结构化数据集 LS-013 灵山梵宫"
+    },
+    {
+      "id": "spot_006",
+      "type": "spot",
+      "query": "梵宫里的华藏世界琉璃作品有多大",
+      "answer_keywords": ["8米", "160块"],
+      "keyword_mode": "any",
+      "expect": "宽8米高10米，160块彩色琉璃拼接",
+      "source": "结构化数据集 LS-013 灵山梵宫"
+    },
+    {
+      "id": "spot_007",
+      "type": "spot",
+      "query": "五印坛城总高约多少米",
+      "answer_keywords": ["30米", "藏式"],
+      "keyword_mode": "any",
+      "expect": "五层重檐楼宇总高约30米，藏式碉楼风格，小布达拉宫",
+      "source": "结构化数据集 LS-014 五印坛城"
+    },
+    {
+      "id": "spot_008",
+      "type": "spot",
+      "query": "曼飞龙塔是什么风格的建筑",
+      "answer_keywords": ["南传佛教", "干栏式", "傣族"],
+      "keyword_mode": "any",
+      "expect": "南传佛教干栏式建筑风格，兼具傣族建筑特色，九塔组合",
+      "source": "结构化数据集 LS-015 曼飞龙塔"
+    },
+    {
+      "id": "spot_009",
+      "type": "spot",
+      "query": "百子戏弥勒是什么材质的雕塑",
+      "answer_keywords": ["青铜群雕", "青铜"],
+      "keyword_mode": "any",
+      "expect": "高3m宽7.8m重9吨的青铜群雕，弥勒卧姿百名孩童",
+      "source": "结构化数据集 LS-009 百子戏弥勒"
+    },
+    {
+      "id": "spot_010",
+      "type": "spot",
+      "query": "佛足坛的足印是用什么材料铸造的",
+      "answer_keywords": ["青铜"],
+      "keyword_mode": "any",
+      "expect": "每只足印长1.2m宽0.6m，整块青铜铸造",
+      "source": "结构化数据集 LS-003 佛足坛"
+    },
+    {
+      "id": "spot_011",
+      "type": "spot",
+      "query": "祥符禅寺的钟有多重",
+      "answer_keywords": ["12.8吨"],
+      "keyword_mode": "any",
+      "expect": "钟楼内悬挂重12.8吨的祥符禅钟（江南第一钟）",
+      "source": "结构化数据集 LS-010 祥符禅寺 / 游览指南祥符禅寺讲解重点"
+    },
+    {
+      "id": "spot_012",
+      "type": "spot",
+      "query": "菩提大道有多长",
+      "answer_keywords": ["250m", "250米"],
+      "keyword_mode": "any",
+      "expect": "长约250m宽约10m，两侧近百棵印度菩提树",
+      "source": "结构化数据集 LS-005 菩提大道"
+    },
+    {
+      "id": "spot_013",
+      "type": "spot",
+      "query": "降魔浮雕讲的是什么故事",
+      "answer_keywords": ["魔王波旬", "菩提树下"],
+      "keyword_mode": "any",
+      "expect": "佛陀在菩提树下静坐修行战胜魔王波旬觉悟成佛",
+      "source": "结构化数据集 LS-007 降魔浮雕"
+    },
+    {
+      "id": "spot_014",
+      "type": "spot",
+      "query": "无尽意斋是纪念哪位人物的",
+      "answer_keywords": ["赵朴初"],
+      "keyword_mode": "any",
+      "expect": "复刻赵朴初先生北京故居，赵朴初先生纪念馆",
+      "source": "结构化数据集 LS-016 无尽意斋"
+    },
+    {
+      "id": "spot_015",
+      "type": "spot",
+      "query": "佛教文化博览馆三层万佛殿里有多少尊小佛像",
+      "answer_keywords": ["9999"],
+      "keyword_mode": "any",
+      "expect": "三层万佛殿内9999尊小佛像，与灵山大佛合称万佛朝宗",
+      "source": "结构化数据集 LS-012 佛教文化博览馆"
+    },
+    {
+      "id": "ticket_001",
+      "type": "ticket",
+      "query": "灵山胜境成人票多少钱",
+      "answer_keywords": ["210元"],
+      "keyword_mode": "any",
+      "expect": "成人票210元（18周岁以上）",
+      "source": "游览指南 门票与优惠政策"
+    },
+    {
+      "id": "ticket_002",
+      "type": "ticket",
+      "query": "灵山胜境半价票什么条件",
+      "answer_keywords": ["60-69周岁", "6-18周岁"],
+      "keyword_mode": "any",
+      "expect": "半价票105元：6-18周岁未成年人、全日制学生、60-69周岁老人",
+      "source": "游览指南 门票与优惠政策"
+    },
+    {
+      "id": "ticket_003",
+      "type": "ticket",
+      "query": "什么人可以免票进灵山胜境",
+      "answer_keywords": ["70周岁以上", "现役军人", "1.4米以下"],
+      "keyword_mode": "any",
+      "expect": "免票：6周岁以下或1.4米以下儿童、70周岁以上老人、现役军人、残疾人",
+      "source": "游览指南 门票与优惠政策"
+    },
+    {
+      "id": "ticket_004",
+      "type": "ticket",
+      "query": "灵山胜境观光车单独购票多少钱",
+      "answer_keywords": ["40元"],
+      "keyword_mode": "any",
+      "expect": "观光车单独购票40元/人",
+      "source": "游览指南 门票与优惠政策"
+    },
+    {
+      "id": "ticket_005",
+      "type": "ticket",
+      "query": "网购联票多少钱",
+      "answer_keywords": ["225元"],
+      "keyword_mode": "any",
+      "expect": "网购联票225元，门票+观光车无限次乘坐",
+      "source": "游览指南 门票与优惠政策"
+    },
+    {
+      "id": "ticket_006",
+      "type": "ticket",
+      "query": "灵山胜境的门票价格是多少",
+      "answer_keywords": ["210元"],
+      "keyword_mode": "any",
+      "expect": "成人票210元（灵山胜境门票为收费制，与拈花湾免费开放区分）",
+      "source": "游览指南 门票与优惠政策"
+    },
+    {
+      "id": "show_001",
+      "type": "show",
+      "query": "九龙灌浴平日几点演出",
+      "answer_keywords": ["10:00", "13:30", "15:00"],
+      "keyword_mode": "any",
+      "expect": "平日10:00/11:30/13:30/15:00，每场约15分钟",
+      "source": "结构化数据集 LS-006 九龙灌浴 演艺信息"
+    },
+    {
+      "id": "show_002",
+      "type": "show",
+      "query": "灵山吉祥颂演出时间",
+      "answer_keywords": ["10:35", "16:00"],
+      "keyword_mode": "any",
+      "expect": "10:35/11:30/14:00/16:00，每场约20分钟，凭大门票免费",
+      "source": "结构化数据集 LS-013 灵山梵宫 演艺信息"
+    },
+    {
+      "id": "show_003",
+      "type": "show",
+      "query": "灵山梵宫几点开放",
+      "answer_keywords": ["9:00-17:00"],
+      "keyword_mode": "any",
+      "expect": "9:00-17:00开放，冬季闭馆提前至16:30",
+      "source": "结构化数据集 LS-013 灵山梵宫 演艺信息"
+    },
+    {
+      "id": "show_004",
+      "type": "show",
+      "query": "拈花湾禅意小镇晚上营业到几点",
+      "answer_keywords": ["21:30"],
+      "keyword_mode": "any",
+      "expect": "拈花湾小镇9:00-21:30，冬季提前至20:30",
+      "source": "结构化数据集 表2 拈花湾"
+    },
+    {
+      "id": "show_005",
+      "type": "show",
+      "query": "佛教文化博览馆免费讲解在几点",
+      "answer_keywords": ["9:30", "14:30"],
+      "keyword_mode": "any",
+      "expect": "讲解时段9:30/11:00/14:30/16:00，一层入口集合",
+      "source": "结构化数据集 LS-012 佛教文化博览馆 演艺信息"
+    },
+    {
+      "id": "location_001",
+      "type": "location",
+      "query": "灵山胜境在无锡的什么位置",
+      "answer_keywords": ["马山镇", "太湖西北部"],
+      "keyword_mode": "any",
+      "expect": "江苏省无锡市太湖西北部的马山镇，三山环抱，占地约30万平方米",
+      "source": "游览指南 景区概况"
+    },
+    {
+      "id": "location_002",
+      "type": "location",
+      "query": "灵山大佛在景区的什么位置",
+      "answer_keywords": ["秦履峰", "祥符禅寺北侧"],
+      "keyword_mode": "any",
+      "expect": "祥符禅寺北侧、秦履峰南侧，景区最高处",
+      "source": "结构化数据集 LS-011 灵山大佛"
+    },
+    {
+      "id": "location_003",
+      "type": "location",
+      "query": "灵山梵宫在哪里",
+      "answer_keywords": ["香水海", "灵山胜境西侧"],
+      "keyword_mode": "any",
+      "expect": "灵山胜境西侧香水海之畔，与五印坛城隔湖相望",
+      "source": "结构化数据集 LS-013 灵山梵宫"
+    },
+    {
+      "id": "location_004",
+      "type": "location",
+      "query": "五印坛城在什么位置",
+      "answer_keywords": ["香水海中央", "圆岛"],
+      "keyword_mode": "any",
+      "expect": "香水海中央的独立圆岛上，梵宫南侧，四面环水",
+      "source": "结构化数据集 LS-014 五印坛城"
+    },
+    {
+      "id": "location_005",
+      "type": "location",
+      "query": "梵天花海在拈花湾的哪个方向",
+      "answer_keywords": ["西侧", "拈花广场西南"],
+      "keyword_mode": "any",
+      "expect": "小镇西侧，拈花广场西南方向，毗邻鹿鸣谷",
+      "source": "结构化数据集 NH-002 梵天花海"
+    },
+    {
+      "id": "route_001",
+      "type": "route",
+      "query": "历史文化爱好者游览路线要多久",
+      "answer_keywords": ["6小时"],
+      "keyword_mode": "any",
+      "expect": "历史文化爱好者路线6小时深度游",
+      "source": "游览指南 个性化游览路线推荐"
+    },
+    {
+      "id": "route_002",
+      "type": "route",
+      "query": "自然风光全景游路线经过哪些景点",
+      "answer_keywords": ["曼飞龙塔", "灵山精舍"],
+      "keyword_mode": "any",
+      "expect": "佛足坛→九龙灌浴→菩提大道→灵山大佛→曼飞龙塔→灵山精舍→梵宫广场",
+      "source": "游览指南 自然风光爱好者路线"
+    },
+    {
+      "id": "route_003",
+      "type": "route",
+      "query": "亲子家庭轻松游路线有什么",
+      "answer_keywords": ["百子戏弥勒", "抱佛脚"],
+      "keyword_mode": "any",
+      "expect": "九龙灌浴→佛手广场→百子戏弥勒→梵宫→五印坛城，含抱佛脚亲子活动",
+      "source": "游览指南 亲子家庭路线"
+    },
+    {
+      "id": "route_004",
+      "type": "route",
+      "query": "灵山胜境最佳游览季节是什么时候",
+      "answer_keywords": ["3-5月", "9-11月", "春秋"],
+      "keyword_mode": "any",
+      "expect": "春秋季节（3-5月、9-11月）气候宜人",
+      "source": "游览指南 最佳游览时间"
+    },
+    {
+      "id": "route_005",
+      "type": "route",
+      "query": "建议几点前入园避开人流高峰",
+      "answer_keywords": ["9点", "9:00"],
+      "keyword_mode": "any",
+      "expect": "建议上午9点前入园避开人流高峰",
+      "source": "游览指南 最佳游览时间"
+    },
+    {
+      "id": "history_001",
+      "type": "history",
+      "query": "灵山胜境的历史可以追溯到什么时候",
+      "answer_keywords": ["唐代贞观", "1300多年", "玄奘"],
+      "keyword_mode": "any",
+      "expect": "1300多年前的唐代贞观年间，与玄奘法师西行取经相关",
+      "source": "游览指南 景区概况与千年历史渊源"
+    },
+    {
+      "id": "history_002",
+      "type": "history",
+      "query": "祥符禅寺的寺名是谁赐的",
+      "answer_keywords": ["宋真宗", "大中祥符"],
+      "keyword_mode": "any",
+      "expect": "北宋大中祥符年间宋真宗赵恒赐额祥符禅寺",
+      "source": "游览指南 祥符禅寺的千年兴衰"
+    },
+    {
+      "id": "history_003",
+      "type": "history",
+      "query": "灵山大佛是哪一年落成开光的",
+      "answer_keywords": ["1997"],
+      "keyword_mode": "any",
+      "expect": "1997年11月15日灵山大佛落成开光",
+      "source": "游览指南 现代灵山胜境的崛起"
+    },
+    {
+      "id": "history_004",
+      "type": "history",
+      "query": "灵山梵宫是哪一年建成的",
+      "answer_keywords": ["2008"],
+      "keyword_mode": "any",
+      "expect": "灵山梵宫于2008年建成，被誉为东方卢浮宫",
+      "source": "结构化数据集 LS-013 灵山梵宫"
+    },
+    {
+      "id": "history_005",
+      "type": "history",
+      "query": "灵山梵宫是世界佛教论坛的什么会址",
+      "answer_keywords": ["永久会址", "第二、四届"],
+      "keyword_mode": "any",
+      "expect": "第二、四届世界佛教论坛的永久会址",
+      "source": "结构化数据集 LS-013 灵山梵宫"
+    },
+    {
+      "id": "tips_001",
+      "type": "tips",
+      "query": "在灵山梵宫里拍照有什么禁忌",
+      "answer_keywords": ["闪光灯"],
+      "keyword_mode": "any",
+      "expect": "禁止使用闪光灯，以免损伤油画与琉璃作品",
+      "source": "结构化数据集 LS-013 灵山梵宫 备注"
+    },
+    {
+      "id": "tips_002",
+      "type": "tips",
+      "query": "游览灵山胜境建议穿什么鞋",
+      "answer_keywords": ["运动鞋"],
+      "keyword_mode": "any",
+      "expect": "景区步行较多，建议穿舒适的运动鞋",
+      "source": "游览指南 其他实用建议"
+    },
+    {
+      "id": "tips_003",
+      "type": "tips",
+      "query": "景区导游讲解服务多少钱",
+      "answer_keywords": ["300元"],
+      "keyword_mode": "any",
+      "expect": "导游讲解服务300元起",
+      "source": "游览指南 其他实用建议"
+    },
+    {
+      "id": "tips_004",
+      "type": "tips",
+      "query": "梵宫素斋自助多少钱一位",
+      "answer_keywords": ["50元"],
+      "keyword_mode": "any",
+      "expect": "梵宫素斋自助50元/位",
+      "source": "游览指南 餐饮与住宿推荐"
+    },
+    {
+      "id": "tips_005",
+      "type": "tips",
+      "query": "雨天去五印坛城要注意什么",
+      "answer_keywords": ["湿滑"],
+      "keyword_mode": "any",
+      "expect": "湖心岛雨天栈道可能湿滑，注意安全",
+      "source": "结构化数据集 LS-014 五印坛城 备注"
+    },
+    {
+      "id": "confuse_001",
+      "type": "confuse",
+      "query": "华夏第一壁指的是哪个景点",
+      "answer_keywords": ["华夏第一壁"],
+      "keyword_mode": "any",
+      "expect": "灵山大照壁被誉为华夏第一壁（需命中大照壁段落而非其它景点）",
+      "source": "结构化数据集 LS-001 灵山大照壁 / 游览指南路线讲解"
+    },
+    {
+      "id": "confuse_002",
+      "type": "confuse",
+      "query": "吉祥颂是在哪个建筑里演出",
+      "answer_keywords": ["梵宫", "吉祥颂"],
+      "keyword_mode": "all",
+      "expect": "《灵山吉祥颂》在灵山梵宫演出（区别于九龙灌浴动态演出）",
+      "source": "结构化数据集 LS-013 灵山梵宫"
+    },
+    {
+      "id": "confuse_003",
+      "type": "confuse",
+      "query": "祥符禅寺的开放时间",
+      "answer_keywords": ["全天开放"],
+      "keyword_mode": "any",
+      "expect": "祥符禅寺全天开放（区别于梵宫9:00-17:00）",
+      "source": "结构化数据集 LS-010 祥符禅寺 演艺信息"
+    },
+    {
+      "id": "confuse_004",
+      "type": "confuse",
+      "query": "曼飞龙塔属于哪个语系的佛教建筑",
+      "answer_keywords": ["南传"],
+      "keyword_mode": "any",
+      "expect": "南传佛教建筑（区别于五印坛城的藏传佛教）",
+      "source": "结构化数据集 LS-015 曼飞龙塔"
+    },
+    {
+      "id": "confuse_005",
+      "type": "confuse",
+      "query": "拈花湾的门票价格是多少",
+      "answer_keywords": ["拈花湾", "免费开放"],
+      "keyword_mode": "all",
+      "expect": "应命中拈花湾相关内容（免费开放），而非灵山胜境210元门票表",
+      "source": "结构化数据集 表2 拈花湾"
+    },
+    {
+      "id": "confuse_006",
+      "type": "confuse",
+      "query": "小灵山这个名字和哪座山有关",
+      "answer_keywords": ["灵鹫山"],
+      "keyword_mode": "any",
+      "expect": "山形酷似印度灵鹫山而得名",
+      "source": "游览指南 小灵山的佛教缘起"
+    },
+    {
+      "id": "confuse_007",
+      "type": "confuse",
+      "query": "五智门的六根柱子代表什么",
+      "answer_keywords": ["六度波罗蜜"],
+      "keyword_mode": "any",
+      "expect": "六柱代表六度波罗蜜（布施持戒忍辱精进禅定般若）",
+      "source": "结构化数据集 LS-004 五智门"
+    },
+    {
+      "id": "negative_001",
+      "type": "negative",
+      "query": "黄果树瀑布门票多少钱",
+      "neg_keywords": ["黄果树", "贵州"],
+      "expect": "知识库外内容，应拒答（无有效命中）",
+      "source": "库外"
+    },
+    {
+      "id": "negative_002",
+      "type": "negative",
+      "query": "上海迪士尼乐园几点开门",
+      "neg_keywords": ["迪士尼"],
+      "expect": "知识库外内容，应拒答（无有效命中）",
+      "source": "库外"
+    },
+    {
+      "id": "negative_003",
+      "type": "negative",
+      "query": "北京故宫的开放时间",
+      "neg_keywords": ["故宫", "紫禁城"],
+      "expect": "知识库外内容，应拒答（无有效命中）",
+      "source": "库外"
+    },
+    {
+      "id": "negative_004",
+      "type": "negative",
+      "query": "杭州西湖有哪些景点",
+      "neg_keywords": ["西湖", "杭州"],
+      "expect": "知识库外内容，应拒答（无有效命中）",
+      "source": "库外"
+    },
+    {
+      "id": "negative_005",
+      "type": "negative",
+      "query": "泰山门票价格",
+      "neg_keywords": ["泰山", "山东"],
+      "expect": "知识库外内容，应拒答（无有效命中）",
+      "source": "库外"
+    },
+    {
+      "id": "negative_006",
+      "type": "negative",
+      "query": "怎么坐高铁去灵山胜境",
+      "neg_keywords": ["高铁", "铁路"],
+      "expect": "知识库无交通指南，不应编造高铁信息",
+      "source": "库外（文档无交通章节）"
+    }
+  ]
+}

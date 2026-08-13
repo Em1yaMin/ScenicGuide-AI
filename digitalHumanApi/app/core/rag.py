@@ -45,6 +45,14 @@ DEFAULT_TOP_K: int = int(os.environ.get("RAG_TOP_K", "3"))
 CHUNK_SIZE: int = int(os.environ.get("RAG_CHUNK_SIZE", "500"))
 CHUNK_OVERLAP: int = int(os.environ.get("RAG_CHUNK_OVERLAP", "50"))
 
+# 分块器版本（rag_service._split_documents 契约，2026-08-14 引入）：
+# v1=旧按段落/句子裸切（3769 碎片 chunk）；v2=标题感知分块（section-aware，
+# 带标题链前缀，约 80 chunk）。分块器变更会改变 chunk 形态，但磁盘持久化的
+# docs/sidecar 摘要自洽（内容就是旧 chunk），启动缓存校验无法感知分块器升级，
+# 会静默按旧形态服务（评测口径 46.6%）。故 chunk 持久化时在 metadata 打版本
+# 标记，加载时校验不匹配即清空告警（要求 /index 重建，见 _load）。
+CHUNKER_VERSION: int = 2
+
 
 # ---------------------------------------------------------------------------
 # 命名空间定义
@@ -383,6 +391,29 @@ class SimpleVectorStore:
                         )
                         for d in data
                     ]
+                    # 分块器版本校验（C7 2026-08-14）：documents 命名空间（集合名
+                    # scenic_knowledge）的 chunk 由 rag_service._split_documents 切分，
+                    # 切分时 metadata 打 CHUNKER_VERSION 标记。磁盘旧 chunk 无标记或
+                    # 标记不一致 = 分块器已升级、存储形态过期——缓存摘要自洽无法感知，
+                    # 此处显式校验并清空（告警要求 /index 重建），避免静默按旧形态服务。
+                    # 其他命名空间（knowledge 条目/user_memory 记忆，无切分）不受影响。
+                    if (
+                        self.collection_name == NAMESPACE_COLLECTIONS[NAMESPACE_DOCUMENTS]
+                        and self._documents
+                        and any(
+                            d.metadata.get("chunker_version") != CHUNKER_VERSION
+                            for d in self._documents
+                        )
+                    ):
+                        logger.warning(
+                            "Chunker version mismatch for %s: 持久化 chunk 为旧分块器"
+                            "产物（期望 v%d），清空索引；请执行 POST /api/rag/index "
+                            "全量重建以启用新分块器",
+                            self.collection_name,
+                            CHUNKER_VERSION,
+                        )
+                        self._documents = []
+                        self._vectors = []
                     # 优先复用 sidecar 落盘向量（缓存命中则跳过 embedding API 重算）
                     if self._documents and self._try_reuse_cached_vectors():
                         pass
