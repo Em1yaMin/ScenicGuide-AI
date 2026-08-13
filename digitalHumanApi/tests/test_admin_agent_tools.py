@@ -16,6 +16,7 @@ import json
 import logging
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core import rag
@@ -26,7 +27,7 @@ from app.models.evaluation import Evaluation
 from app.models.knowledge import KnowledgeBase
 from app.models.user import User
 from app.models.visitor import Visitor
-from app.services import memory_service
+from app.services import announcement_service, memory_service
 from app.services.admin_agent import confirm, tools
 from app.services.memory_service import MemoryEntry
 
@@ -110,6 +111,9 @@ async def test_all_tools_reject_non_admin_context():
         (tools.query_user_memories, {"user": "1"}),
         (tools.delete_user_memory, {"memory_id": "abc"}),
         (tools.list_announcements, {}),
+        (tools.create_announcement, {"title": "t", "content": "b"}),
+        (tools.update_announcement, {"announcement_id": 1, "title": "t"}),
+        (tools.delete_announcement, {"announcement_id": 1}),
         (tools.set_announcement_status, {"announcement_id": 1, "status": "published"}),
         (tools.query_statistics, {}),
         (tools.rebuild_rag_index, {}),
@@ -325,6 +329,187 @@ async def test_delete_user_memory_not_found():
 
 
 # ── 公告工具 ──────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_create_announcement_default_draft_and_audit(db_session, tool_db, caplog):
+    """create_announcement：默认草稿入库 + 审计；草稿不在访客端/首页可见。"""
+    caplog.set_level(logging.INFO, logger="app.services.admin_agent.tools")
+    result = _parse(
+        await tools.create_announcement.ainvoke(
+            {"title": "雨天路滑提醒", "content": "提醒游客雨天路滑，小心出行", **ADMIN}
+        )
+    )
+    assert result["status"] == "ok"
+    item = result["item"]
+    assert item["status"] == "draft"
+    assert item["pinned"] is False
+    ann = await db_session.get(Announcement, item["id"])
+    assert ann is not None and ann.title == "雨天路滑提醒"
+    assert any(
+        "operator=admin-agent tool=create_announcement" in r.getMessage()
+        and "action=create" in r.getMessage()
+        for r in caplog.records
+    )
+    # 草稿不在访客端公开列表（首页不可见，需发布）
+    async with tool_db() as db:
+        public = await announcement_service.list_published_announcements(db)
+    assert public.total == 0
+
+
+@pytest.mark.asyncio
+async def test_create_announcement_published_visible_on_home(tool_db):
+    """create_announcement：status=published 创建即发布，访客端/首页可见。"""
+    result = _parse(
+        await tools.create_announcement.ainvoke(
+            {
+                "title": "开园公告",
+                "content": "今日正常开园",
+                "status": "published",
+                "pinned": True,
+                **ADMIN,
+            }
+        )
+    )
+    assert result["status"] == "ok"
+    assert result["item"]["status"] == "published"
+    assert result["item"]["pinned"] is True
+    async with tool_db() as db:
+        public = await announcement_service.list_published_announcements(db)
+    assert public.total == 1
+    assert public.items[0].title == "开园公告"
+
+
+@pytest.mark.asyncio
+async def test_create_announcement_invalid_inputs(tool_db):
+    """create_announcement：空白标题/正文、非法状态报错（不落库）。"""
+    bad = _parse(
+        await tools.create_announcement.ainvoke(
+            {"title": "  ", "content": "内容", **ADMIN}
+        )
+    )
+    assert "标题与正文不能为空" in bad["message"]
+    bad = _parse(
+        await tools.create_announcement.ainvoke(
+            {"title": "标题", "content": "  ", **ADMIN}
+        )
+    )
+    assert "标题与正文不能为空" in bad["message"]
+    bad = _parse(
+        await tools.create_announcement.ainvoke(
+            {"title": "标题", "content": "内容", "status": "invalid", **ADMIN}
+        )
+    )
+    assert "仅支持" in bad["message"]
+    async with tool_db() as db:
+        total = (
+            await db.execute(select(func.count(Announcement.id)))
+        ).scalar_one()
+    assert total == 0
+
+
+@pytest.mark.asyncio
+async def test_update_announcement_partial_update_and_audit(db_session, tool_db, caplog):
+    """update_announcement：部分更新（仅更新传入字段）+ 审计。"""
+    caplog.set_level(logging.INFO, logger="app.services.admin_agent.tools")
+    aid = await _seed_announcement(db_session, title="旧标题", content="旧内容")
+    result = _parse(
+        await tools.update_announcement.ainvoke(
+            {"announcement_id": aid, "title": "新标题", "pinned": True, **ADMIN}
+        )
+    )
+    assert result["status"] == "ok"
+    assert result["item"]["title"] == "新标题"
+    assert result["item"]["pinned"] is True
+    ann = await db_session.get(Announcement, aid)
+    assert ann.title == "新标题"
+    assert ann.content == "旧内容"  # 未传字段保持不变
+    assert ann.status == STATUS_DRAFT
+    assert any(
+        "operator=admin-agent tool=update_announcement" in r.getMessage()
+        and "action=update" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+@pytest.mark.asyncio
+async def test_update_announcement_invalid_and_not_found(db_session, tool_db):
+    """update_announcement：无更新字段/非法状态/目标不存在报错。"""
+    aid = await _seed_announcement(db_session)
+    empty = _parse(
+        await tools.update_announcement.ainvoke({"announcement_id": aid, **ADMIN})
+    )
+    assert empty["status"] == "error"
+    assert "没有可更新的字段" in empty["message"]
+    bad_status = _parse(
+        await tools.update_announcement.ainvoke(
+            {"announcement_id": aid, "status": "invalid", **ADMIN}
+        )
+    )
+    assert "仅支持" in bad_status["message"]
+    not_found = _parse(
+        await tools.update_announcement.ainvoke(
+            {"announcement_id": 999, "title": "x", **ADMIN}
+        )
+    )
+    assert not_found["status"] == "error"
+    assert "不存在" in not_found["message"]
+
+
+@pytest.mark.asyncio
+async def test_delete_announcement_two_phase_confirmation_and_audit(
+    db_session, tool_db, caplog
+):
+    """delete_announcement 两阶段：首次待确认不删除 → confirm 后真正删除 + 审计。"""
+    caplog.set_level(logging.INFO, logger="app.services.admin_agent.tools")
+    aid = await _seed_announcement(db_session, title="待删公告")
+
+    # 第一阶段：返回待确认（不执行删除）
+    result = _parse(await tools.delete_announcement.ainvoke({"announcement_id": aid, **ADMIN}))
+    assert result["status"] == "pending_confirmation"
+    assert result["tool"] == "delete_announcement"
+    op_id = result["operation_id"]
+    assert "待删公告" in result["summary"]
+    assert await db_session.get(Announcement, aid) is not None  # 未删除
+
+    # 确认执行
+    confirmed = _parse(await tools.confirm_operation.ainvoke({"operation_id": op_id, **ADMIN}))
+    assert confirmed["status"] == "ok"
+    assert confirmed["deleted"] == aid
+    assert await db_session.get(Announcement, aid) is None  # 已删除
+    assert any(
+        "operator=admin-agent tool=delete_announcement" in r.getMessage()
+        and "action=delete" in r.getMessage()
+        for r in caplog.records
+    )
+
+    # 重复确认失效（防重放）
+    replay = _parse(await tools.confirm_operation.ainvoke({"operation_id": op_id, **ADMIN}))
+    assert replay["status"] == "error"
+    assert "过期" in replay["message"]
+
+
+@pytest.mark.asyncio
+async def test_delete_announcement_not_found(db_session, tool_db):
+    """delete_announcement：目标不存在直接报错（不进入待确认）。"""
+    result = _parse(await tools.delete_announcement.ainvoke({"announcement_id": 999, **ADMIN}))
+    assert result["status"] == "error"
+    assert "不存在" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_delete_announcement_confirm_target_already_deleted(db_session, tool_db):
+    """确认执行时公告已被其他操作删除：如实报告（不抛错、不误删其他）。"""
+    aid = await _seed_announcement(db_session, title="将被他人删除")
+    result = _parse(await tools.delete_announcement.ainvoke({"announcement_id": aid, **ADMIN}))
+    op_id = result["operation_id"]
+    # 他人（直接经 service）删除目标
+    async with tool_db() as db:
+        assert await announcement_service.delete_announcement(db, aid)
+        await db.commit()
+    confirmed = _parse(await tools.confirm_operation.ainvoke({"operation_id": op_id, **ADMIN}))
+    assert confirmed["status"] == "error"
+    assert "已不存在" in confirmed["message"]
 
 
 @pytest.mark.asyncio

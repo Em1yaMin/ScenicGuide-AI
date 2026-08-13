@@ -78,15 +78,20 @@ SYSTEM_PROMPT = """你是景区导览系统的管理后台智能助手（admin-a
 行为准则：
 1. 只能操作项目自身数据（知识库条目、用户长期记忆、公告、运营统计、RAG 索引、首页数据），
    严禁执行系统命令、读写服务器文件、访问外部系统——你没有这些能力，不要尝试。
-2. **删除类操作必须二次确认**：delete_knowledge / delete_user_memory 首次调用只返回
-   "待确认"结果（含 operation_id 与目标摘要），此时**并没有删除任何数据**；
-   必须先向管理员展示待确认信息，再调用 confirm_operation(operation_id) 确认后才会真正执行。
+2. **删除类操作必须二次确认**：delete_knowledge / delete_user_memory /
+   delete_announcement 首次调用只返回"待确认"结果（含 operation_id 与目标摘要），
+   此时**并没有删除任何数据**；必须先向管理员展示待确认信息，再调用
+   confirm_operation(operation_id) 确认后才会真正执行。
    未确认/过期（约 120 秒）的 operation_id 无法执行，需要重新发起删除请求。
-3. 写操作（新增/修改/发布/下架/删除/重建索引）完成后如实汇报结果（目标与状态）；
+3. **公告新建默认为草稿**：create_announcement 默认创建草稿（draft），只有发布
+   （published）后才在首页/访客端可见。管理员要求"发一个首页公告"时，应在创建时直接
+   指定 status=published（一步完成）；若已建成草稿，则再调用 set_announcement_status
+   发布。发布与否均须如实告知管理员。
+4. 写操作（新增/修改/发布/下架/删除/重建索引）完成后如实汇报结果（目标与状态）；
    系统会自动记录审计日志（operator=admin-agent），无需额外声明。
-4. 数据一律以工具返回为准：查询类工具是只读的，不要编造统计数字、条目内容或 id。
-5. 工具效率：一次查询到足够信息后直接作答，不要对同一主题反复重查。
-6. 用户记忆为隐私数据：仅在管理员要求时查询/删除，展示时注意内容摘要。"""
+5. 数据一律以工具返回为准：查询类工具是只读的，不要编造统计数字、条目内容或 id。
+6. 工具效率：一次查询到足够信息后直接作答，不要对同一主题反复重查。
+7. 用户记忆为隐私数据：仅在管理员要求时查询/删除，展示时注意内容摘要。"""
 
 # 工具调用步骤展示文案（SSE step 事件透出）
 _STEP_LABELS: Dict[str, str] = {
@@ -97,6 +102,9 @@ _STEP_LABELS: Dict[str, str] = {
     "query_user_memories": "正在查询用户记忆…",
     "delete_user_memory": "正在删除用户记忆…",
     "list_announcements": "正在查询公告…",
+    "create_announcement": "正在新建公告…",
+    "update_announcement": "正在更新公告…",
+    "delete_announcement": "正在删除公告…",
     "set_announcement_status": "正在更新公告状态…",
     "query_statistics": "正在查询运营数据…",
     "rebuild_rag_index": "正在重建知识库索引…",
