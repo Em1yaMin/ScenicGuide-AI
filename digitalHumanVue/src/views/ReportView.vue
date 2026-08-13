@@ -150,7 +150,9 @@ const sentimentPieOption = computed(() => {
       <div class="key-finding" v-if="dominantSentiment">
         <span class="finding-label">本期关键发现</span>
         <blockquote class="finding-quote">
-          在 {{ totalAnalyses }} 条分析中，访客整体呈「{{ sentimentLabel(dominantSentiment.label) }}」情绪
+          在 {{ totalAnalyses }} 条分析中，访客整体呈「{{
+            sentimentLabel(dominantSentiment.label)
+          }}」情绪
           <template v-if="topConcern">，最关注的方面为「{{ topConcern.concern }}」</template>
         </blockquote>
       </div>
