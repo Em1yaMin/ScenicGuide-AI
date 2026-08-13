@@ -79,6 +79,10 @@
   `route.transits[0]` 并归一化为统一 steps（步行指令 + 公交「乘坐{线路名}
   （上车站 → 下车站）」合成指令）。
 
+三种模式请求均携带 `extensions=all`（客户端统一加，调用方无需传）：公交
+integrated 默认 base 模式会把步行段 instruction 替换为十六进制标记（如
+「步行23米0x02」），传 `extensions=all` 才返回完整中文动作（实机测试问题 2）。
+
 成功 data 结构（walking/driving/transit 同构）：
 
 ```json

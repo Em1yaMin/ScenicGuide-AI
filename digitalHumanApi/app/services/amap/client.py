@@ -272,6 +272,11 @@ class AmapClient:
             "origin": origin,
             "destination": destination,
             "output": "JSON",
+            # extensions=all：三种模式统一携带——公交 integrated 默认 base 模式
+            # 会把步行段 instruction 替换为十六进制标记（如「步行23米0x02」），
+            # 带 extensions=all 才返回完整中文动作（实机测试问题2）；walking/
+            # driving 同步带上保证分支一致
+            "extensions": "all",
         }
         url = _DIRECTION_URL.format(mode=mode)
         if mode == "transit":

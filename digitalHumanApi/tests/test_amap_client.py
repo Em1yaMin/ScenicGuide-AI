@@ -330,9 +330,20 @@ async def test_regeo_no_key():
 
 
 async def test_route_walking_success():
-    """步行路径规划：paths[0].steps 指令文本解析，distance/duration 透出。"""
-    client = AmapClient(api_key="k", _transport=httpx.MockTransport(_json_handler(WALKING_ROUTE_OK)))
+    """步行路径规划：paths[0].steps 指令文本解析，distance/duration 透出。
+
+    请求参数断言：extensions=all（默认 base 模式会把 instruction 替换为
+    十六进制标记，如「步行23米0x02」，须传 extensions=all 才返回完整中文动作）。
+    """
+    seen = {}
+
+    def handler(request):
+        seen["params"] = _url_params(request)
+        return httpx.Response(200, json=WALKING_ROUTE_OK)
+
+    client = AmapClient(api_key="k", _transport=httpx.MockTransport(handler))
     result = await client.route("114.306967,30.545389", "114.320,30.560", "walking")
+    assert seen["params"]["extensions"] == "all"
     assert result["ok"] is True
     data = result["data"]
     assert data["mode"] == "walking"
@@ -352,9 +363,16 @@ async def test_route_walking_success():
 
 
 async def test_route_driving_success():
-    """驾车路径规划：同 walking 结构（含 polyline 透出）。"""
-    client = AmapClient(api_key="k", _transport=httpx.MockTransport(_json_handler(WALKING_ROUTE_OK)))
+    """驾车路径规划：同 walking 结构（含 polyline 透出 + extensions=all 参数）。"""
+    seen = {}
+
+    def handler(request):
+        seen["params"] = _url_params(request)
+        return httpx.Response(200, json=WALKING_ROUTE_OK)
+
+    client = AmapClient(api_key="k", _transport=httpx.MockTransport(handler))
     result = await client.route("114.306967,30.545389", "114.320,30.560", "driving")
+    assert seen["params"]["extensions"] == "all"
     assert result["ok"] is True
     assert result["data"]["mode"] == "driving"
     assert result["data"]["steps"]
@@ -387,7 +405,9 @@ async def test_route_transit_success():
     """公交路径规划：自动 regeo 推导 city/cityd + transits 归一化。
 
     - 请求先发两次 regeo（起/终点），再发 transit/integrated，URL 含
-      city/cityd=420100（regeo adcode 推导）
+      city/cityd=420100（regeo adcode 推导）与 extensions=all（公交默认
+      base 模式 instruction 会被替换为十六进制标记，extensions=all 才返回
+      完整中文动作）
     - 归一化 steps：步行指令 + 公交合成指令「乘坐804路（黄鹤楼站 → 武昌火车站）」
     """
     calls = []
@@ -406,6 +426,7 @@ async def test_route_transit_success():
     params = dict(httpx.URL(transit_call).params)
     assert params["city"] == "420100"
     assert params["cityd"] == "420100"
+    assert params["extensions"] == "all"
     data = result["data"]
     assert data["mode"] == "transit"
     assert data["distance"] == "5400"
