@@ -169,8 +169,13 @@ if [ -z "$(sg_get JWT_SECRET)" ]; then
 else
     sg_report 通过 "JWT_SECRET 已配置"
 fi
-if [ "$(sg_get ADMIN_PASSWORD)" = "admin123456" ]; then
-    sg_report 警告 "ADMIN_PASSWORD 为默认演示值 admin123456——生产环境必须修改"
+admin_user="$(sg_get ADMIN_USERNAME)"
+if [ -z "$admin_user" ] || [ "$admin_user" = "admin" ]; then
+    sg_report 警告 "ADMIN_USERNAME 未配置或为默认演示值 admin——生产环境必须修改"
+fi
+admin_pwd="$(sg_get ADMIN_PASSWORD)"
+if [ -z "$admin_pwd" ] || [ "$admin_pwd" = "admin123456" ]; then
+    sg_report 警告 "ADMIN_PASSWORD 未配置或为默认演示值 admin123456——生产环境必须修改"
 fi
 
 # ───────────────────────── 8. 占位符全局扫描 ─────────────────────────

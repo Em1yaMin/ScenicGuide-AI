@@ -76,7 +76,7 @@ scripts/smoke_ops.sh backend adhweb
 | 警告 | EMBEDDING_API_KEY 为空 | Embedding 降级 TF-IDF（检索质量下降） |
 | 警告 | AMAP_WEB_KEY 为空 | GPS 工具不可用（对话返回 amap_not_configured） |
 | 警告 | QWEN_API_KEY 与 EMBEDDING_API_KEY 均为空 | ADH TTS 无声 |
-| 警告 | ADMIN_API_TOKEN / JWT_SECRET / ADMIN_PASSWORD 默认值 | 管理端/会话安全（prod 必改） |
+| 警告 | ADMIN_API_TOKEN / JWT_SECRET / ADMIN_USERNAME / ADMIN_PASSWORD 默认值 | 管理端/会话安全（prod 必改） |
 | 警告 | 占位符残留（your-/xxx/placeholder 等） | 全局扫描，列出键名（不回显值，防泄漏密钥） |
 
 安全约定：脚本只输出键名与结论，**绝不回显任何值内容**（值可能含密钥）。
