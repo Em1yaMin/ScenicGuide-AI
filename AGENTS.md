@@ -67,7 +67,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 - 前端：`digitalHumanVue/src/stores/auth.ts`（Pinia）+ `src/api/auth.ts` + `src/views/LoginView.vue` / `RegisterView.vue`（顶层路由 `/login` `/register`，访客端布局直达；管理后台侧栏仅管理身份区、无用户登录区）
 - token 持久化：`localStorage` 的 `auth_token`（用户/游客 JWT）+ `auth_user`（用户信息 JSON）；键名沿用 snake_case 风格（`visitor_id`、`admin_api_token`）
-- 游客兜底：未登录可用全部公开能力；对话页（ChatView）自动签发短期游客 token 并随 iframe `auth_token` 参数透传给 ADH（ADH 侧消费待后续任务）
+- 游客兜底：未登录可用全部公开能力；对话页（ChatView）自动签发短期游客 token 并随 iframe `auth_token` 参数透传给 ADH（ADH-Web 侧已消费：会话级解析并注入对话请求 `LLM_API_TOKEN` → Bearer 透传 → 后端解析真实用户身份，登录用户长期记忆/对话落库按 user 生效；未登录不注入维持 visitor 兜底，详见「ADH 本地数字人」注意事项「嵌入身份透传」条目）
 - 对话页布局（2026-08-07 改造）：数字人 iframe 占满整页，无独立聊天面板；推荐问句为底部浮层（半透明毛玻璃、可折叠），点击经 postMessage `SET_INPUT` 注入 ADH 输入框（不自动发送，注入后自动收起）；对话/SSE 逻辑已随 `useDialogueStream.ts` 删除（ADH 内置完整对话功能）
 - 刷新恢复：`App.vue` 启动时调 `restoreSession()` 用 `/auth/me` 校验 localStorage token，401 则清除登录态；网络失败保留本地缓存
 - 错误提示：`fetchWithCodeEnvelope` 解析 FastAPI `detail`（401 "用户名或密码错误"、409 "用户名已存在"、422 校验字段）
@@ -349,7 +349,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 ### 凭证位置（不存真实值）
 - **腾讯云 ASR**: AK/SK 来自腾讯云控制台下载的 SecretKey.csv；APPID、REGION `ap-guangzhou` 配置在 tencentAPI.yaml
-- **LangChainAgent**: `LLM_API_URL` 指向本后端（默认 `http://127.0.0.1:8000`），无鉴权场景可不填 token；`LLM_API_USER` 默认 `visitor`（可选 JWT token 走 Bearer 透传，见下方 SSE 契约）
+- **LangChainAgent**: `LLM_API_URL` 指向本后端（默认 `http://127.0.0.1:8000`），无鉴权场景可不填 token；`LLM_API_USER` 默认 `visitor`（可选 JWT token 走 Bearer 透传；**嵌入模式 URL `auth_token` 参数由 web 端 `app/lib/embedAuth.ts` 自动注入 `LLM_API_TOKEN`**，未登录不注入维持 visitor 兜底，见下方 SSE 契约与「ADH 注意事项」嵌入身份透传条目）
 - **Dify Agent**: URL `http://<dify-server-ip>/v1` + `app-` 开头的 Key + User，由 Dify 部署方提供（切换回 DifyAgent 时填写）
 - **QwenAPI TTS**: API Key 从环境变量 `QWEN_API_KEY` 读取（部署时 export；yaml 的 API_KEY 留空占位）；如改用配置文件则填 DashScope API Key（`sk-` 开头）
 - **MiniMax TTS**: API Key 与 Group ID 来自 MiniMax 开放平台，Model `speech-2.8-hd`
@@ -375,10 +375,11 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 - `digitalHuman/server/agentApi.py` — `/v0/infer` 将产出流中的 `StepMessage` 编码为步骤帧（`\x02{json}\x03`，json 含 tool/label）、`RouteMessage` 编码为**路线帧**（`{"type": "route", "data": ...}`，B3）透出给前端；回答文本原样透出
 - `digitalHuman/agent/core/difyAgent.py` — 新增 `ThinkFilter`，流式过滤 `<think>` 标签
 - `digitalHuman/server/asrApi.py` — DEBUG 音频保存到 `debug_audio/`
-- `web/app/lib/comm.ts` — `streamingChat` 新增步骤帧解析（缓冲拼接 `\x02{json}\x03` 帧，兼容 fetch 分块切碎）与 `callbackStep` 回调；**B3 路线帧**（json 含 `type: "route"`）解析与 `callbackRoute` 回调；**#70-5b 修复**：try/catch/finally 保证 `callbackEnd` 在流中断/异常时也触发（不再吞错后永久卡死输入），`releaseLock` 兜底；文本流/索引语义不变（TTS 断句与音频队列依赖）
+- `web/app/lib/comm.ts` — `streamingChat` 新增步骤帧解析（缓冲拼接 `\x02{json}\x03` 帧，兼容 fetch 分块切碎）与 `callbackStep` 回调；**B3 路线帧**（json 含 `type: "route"`）解析与 `callbackRoute` 回调；**#70-5b 修复**：try/catch/finally 保证 `callbackEnd` 在流中断/异常时也触发（不再吞错后永久卡死输入），`releaseLock` 兜底；文本流/索引语义不变（TTS 断句与音频队列依赖）；**嵌入身份透传（2026-08-12）**：`streamingChat` 入口对 settings 幂等注入 `LLM_API_TOKEN`（`getEmbedAuth`，防其它调用路径遗漏，未登录不注入，见 embedAuth.ts）
 - `web/app/lib/amap.ts`（新建，2026-08-09 B3）— 高德 JS API 按需加载器：首次需要地图时注入 script（`webapi.amap.com/maps?v=2.0`，key + `window._AMapSecurityConfig`），幂等 Promise、失败可重试；`formatDistance`/`formatDuration`/`parseLocation` 工具函数
+- `web/app/lib/embedAuth.ts`（新建，2026-08-12 问题4 修复：长期记忆根因）— 嵌入身份透传：`parseEmbedAuth`（纯函数解析 URL `auth_token`/`visitor_id`，零依赖可单测）+ `getEmbedAuth`（会话级惰性缓存，SSR 安全）；供 chatbot.tsx 构建 settings 与 comm.ts 幂等兜底注入 `LLM_API_TOKEN`；单测 `web/tests/embedAuth.test.ts`（`npm run test:embed-auth`，tsc 编译 + node assert，零测试框架）
 - `web/app/ui/home/routeCard.tsx`（新建，2026-08-09 B3）— 路线卡片：成功信封渲染 AMap 地图（起点/终点 Marker + 路径 Polyline + 距离/时长摘要 + 步骤列表）；**地图加载失败（网络/白名单/key 未配置）或坐标非法自动降级文字路线**（步骤列表 + 距离时长照常展示，不阻断对话）；失败信封（amap_* 错误码）如实展示
-- `web/app/ui/home/chatbot.tsx` — 录音改用原生 `MediaRecorder` + 客户端 webm→WAV（16kHz 重采样）；**实时分段渲染（2026-08-10 船长反馈，替代同日独立气泡方案）**：`store.ts` ChatMessage 增 `type` 字段（text/step/route，缺省 text 兼容既有用法）；token 回调把当前文本片段累积进 `streamingText` 实时逐字渲染；step/route 回调到达时先固化当前片段（append 为 text 消息）再 append 该 step/route 消息，流完成时固化最后片段——**文本按 step 边界切成多个独立气泡、步骤小气泡与路线卡片均按发生顺序固化进 chatRecord 多轮保留（不再清空）**；渲染按 type 分支：step=🔍 小灰气泡（保留既有样式，圆点静态不脉冲）、route=RouteCard、text=Markdown 气泡；连续重复步骤去重（`lastStep` 闭包变量，文本固化后重置）；TTS 断句（基于流式 data 累积）不变；**📍 定位按钮（可选）**：`navigator.geolocation` 填入坐标文本，仅 secure context（HTTPS/localhost）显示（`geoSupported` 探测，局域网 IP 演示环境自动隐藏）；**「工具调用后文字气泡不显示」修复（#70-5b，2026-08-11）**：`comm.ts` `streamingChat` 改 try/catch/finally 保证 `callbackEnd` 在流中断/异常时也触发（旧 catch 吞错后直接返回 → isProcessing 永久 true 输入卡死、已流文本不固化）；实测模型叙述被工具调用在句中截断属后端 suppress 语义泄漏（文本仍完整、按序渲染即正常，**勿在 step 回调做句末感知/暂存步骤——会打乱 text/step 相对顺序，曾致回答后仍渲染步骤**）；前端 TTS 改 promise 链串行化（见 QwenAPI 行）
+- `web/app/ui/home/chatbot.tsx` — 录音改用原生 `MediaRecorder` + 客户端 webm→WAV（16kHz 重采样）；**实时分段渲染（2026-08-10 船长反馈，替代同日独立气泡方案）**：`store.ts` ChatMessage 增 `type` 字段（text/step/route，缺省 text 兼容既有用法）；token 回调把当前文本片段累积进 `streamingText` 实时逐字渲染；step/route 回调到达时先固化当前片段（append 为 text 消息）再 append 该 step/route 消息，流完成时固化最后片段——**文本按 step 边界切成多个独立气泡、步骤小气泡与路线卡片均按发生顺序固化进 chatRecord 多轮保留（不再清空）**；渲染按 type 分支：step=🔍 小灰气泡（保留既有样式，圆点静态不脉冲）、route=RouteCard、text=Markdown 气泡；连续重复步骤去重（`lastStep` 闭包变量，文本固化后重置）；TTS 断句（基于流式 data 累积）不变；**📍 定位按钮（可选）**：`navigator.geolocation` 填入坐标文本，仅 secure context（HTTPS/localhost）显示（`geoSupported` 探测，局域网 IP 演示环境自动隐藏）；**「工具调用后文字气泡不显示」修复（#70-5b，2026-08-11）**：`comm.ts` `streamingChat` 改 try/catch/finally 保证 `callbackEnd` 在流中断/异常时也触发（旧 catch 吞错后直接返回 → isProcessing 永久 true 输入卡死、已流文本不固化）；实测模型叙述被工具调用在句中截断属后端 suppress 语义泄漏（文本仍完整、按序渲染即正常，**勿在 step 回调做句末感知/暂存步骤——会打乱 text/step 相对顺序，曾致回答后仍渲染步骤**）；前端 TTS 改 promise 链串行化（见 QwenAPI 行）；**嵌入身份透传（2026-08-12 问题4 修复）**：构建 settings 时以 URL `auth_token` 覆盖 yaml 默认空 token 注入 `LLM_API_TOKEN`（未登录不注入，visitor 兜底无回归，见 embedAuth.ts）
 - `scripts/smoke_langchain_agent.py`（新建）— LangChainAgent 链路冒烟（需本后端已启动，`PYTHONPATH=. ./venv/bin/python scripts/smoke_langchain_agent.py`）
 
 ### ASR 已知问题
@@ -396,6 +397,7 @@ nohup node node_modules/next/dist/bin/next dev -p 3000 > ../frontend.log 2>&1 &
 - **LangChainAgent 依赖本后端**: 默认引擎 `langchainAgent.yaml` 的 `LLM_API_URL` 指向主后端 8000，主后端未启动时对话不可用（可临时切回 DifyAgent 直连 Dify）；引擎切换在数字人前端设置页
 - **工具调用步骤可视化（2026-08-07）**: 主后端 SSE step 事件 → ADH `langchainAgent.py` 透出 `StepMessage` → `agentApi.py` 编码 `\x02{json}\x03` 步骤帧 → `comm.ts` 解析 → `chatbot.tsx` 消息区渲染（🔍 步骤小气泡按序追加）；真实环境实测（真实主后端 + 真实 LLM）触发规划类对话产出 6 个步骤帧（plan→search_knowledge→search_spots→filter_by_tags→recommend_routes→summarize），文本流不受影响；步骤帧协议见 `agentApi.py` 与 `comm.ts` 注释
 - **路线卡片（2026-08-09 B3）**: 主后端 done 事件 `route_data`（plan_route 工具结果信封，契约见主仓库 doc/amap-gps-api.md）→ ADH 透出 `RouteMessage` → 路线帧（`{"type":"route","data":...}`）→ `comm.ts` callbackRoute → `chatbot.tsx` 渲染 RouteCard；高德 JS key 环境变量按 Next.js 约定命名 `NEXT_PUBLIC_AMAP_JS_KEY`/`NEXT_PUBLIC_AMAP_SECURITY_CODE`（对应任务约定的 VITE_AMAP_* 名，写入 web/.env 不入库）；**无 key/加载失败/失败信封均不崩**——降级文字路线或错误提示；联调已验证（Playwright 冒烟：步骤气泡+路线卡片+文字兜底+AMap 脚本按需注入，无 key 不发起外网请求）
+- **嵌入身份透传（2026-08-12 问题4 修复，长期记忆根因）**: 主站 5173 ChatView iframe URL 带 `auth_token`（登录用户/游客 JWT）与 `visitor_id`；web 端 `app/lib/embedAuth.ts` 会话级解析并缓存，chatbot.tsx 构建 settings 时注入 `LLM_API_TOKEN`（comm.ts 幂等兜底）→ ADH 后端 `langchainAgent._build_headers` 加 `Bearer ` 前缀 → 主后端 `resolve_dialogue_user` 解析真实用户（对话落库 visitor_id=用户 id、长期记忆 save/extract/recall 按 user 隔离生效）；未登录（URL 无 auth_token）不注入，行为与现状一致（visitor 兜底，无回归）；单测 `web/tests/embedAuth.test.ts`（`npm run test:embed-auth`）
 - **重启后端**: 改 yaml 或 Python 代码后必须重启后端；前端代码由 Next HMR 自动热更
 </important>
 
