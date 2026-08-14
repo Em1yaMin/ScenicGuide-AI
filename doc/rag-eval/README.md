@@ -2,7 +2,7 @@
 
 船长要求：RAG 景区信息准确率 ≥90%、尽可能高，评测可复跑，报告留存。
 
-**最终成绩：100%（59/59，TF-IDF 离线评测，可复现）**，全量 pytest 783 绿无回归。
+**最终成绩：100%（59/59，TF-IDF 离线评测，可复现）**，全量 pytest 829 绿无回归。
 
 ## 目录
 
@@ -40,6 +40,23 @@ python -m pytest tests/test_rag_eval.py -v
 ```
 
 评测每次从零建索引（独立临时持久化目录），TF-IDF 为确定性算法，结果可精确复现。
+
+## 确定性保证（flaky 修复，2026-08-14）
+
+评测结果跨进程/跨平台可精确复现：
+
+- **词汇表同频 token 字典序 tie-break**（`rag.py TFIDFEmbeddings._build_vocabulary`）：
+  旧实现仅按文档频率降序稳定排序，同频（尤其 df==1 截断边界）token 的相对顺序
+  依赖 Counter 插入顺序（= 各文档 `set()` 迭代顺序，受 PYTHONHASHSEED 随机化
+  影响）——词汇表 10000 截断边界取舍随进程 hash seed 变化，检索排名偶发翻转，
+  pytest 门禁 flaky。修复后按 `(-df, token)` 排序，与 hash seed/文档顺序解耦。
+- **文档加载顺序固定**（`rag_service._load_documents` 对 `rglob` 结果 `sorted()`）：
+  文件系统遍历顺序跨平台不一致，排序后 chunk 索引/并列检索 tie-break/sidecar
+  摘要跨平台稳定。
+
+验证：8 个 PYTHONHASHSEED 下评测结果逐字节一致（准确率 100%、MRR 0.9057）；
+回归测试 `tests/test_rag.py::test_tfidf_vocabulary_{tie_break_is_lexicographic,independent_of_doc_order}`
+（修复前 doc_order 用例失败）。
 
 ## 轮次分数
 
