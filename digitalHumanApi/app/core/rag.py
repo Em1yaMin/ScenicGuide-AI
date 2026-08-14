@@ -333,8 +333,16 @@ class SimpleVectorStore:
 
     @property
     def embedding_backend(self) -> str:
-        """当前生效的 embedding 后端（minimax / tfidf），用于可观测标记。"""
-        return getattr(self._active_embedding, "backend_name", "unknown")
+        """当前生效的 embedding 后端（minimax / qwen-dashscope / tfidf），用于可观测标记。
+
+        MinimaxEmbeddings 类名保留历史命名，其 backend_name 恒为 "minimax"；
+        当请求体风格为 openai（Qwen/DashScope compatible-mode）时按实际后端展示。
+        """
+        emb = self._active_embedding
+        name = getattr(emb, "backend_name", "unknown")
+        if isinstance(emb, MinimaxEmbeddings) and emb.api_style == "openai":
+            return "qwen-dashscope"
+        return name
 
     @property
     def _docs_path(self) -> Path:

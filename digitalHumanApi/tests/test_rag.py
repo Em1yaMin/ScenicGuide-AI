@@ -324,6 +324,8 @@ def test_vector_cache_invalidated_on_embedding_config_change(tmp_path):
     )
     assert calls2["count"] > 0, "配置变更后必须重新向量化"
     assert store2.count() == 10
+    # 可观测标记按实际后端展示（openai 风格 = Qwen/DashScope）
+    assert store2.embedding_backend == "qwen-dashscope"
 
     # sidecar 绑定已更新为新配置
     with open(tmp_path / "cfg_change_vectors.json", encoding="utf-8") as f:
