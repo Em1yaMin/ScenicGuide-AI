@@ -96,6 +96,13 @@ watch(auditAction, () => {
   fetchAudits()
 })
 
+watch(activeTab, (tab) => {
+  if (tab === 'audit') {
+    auditPage.value = 1
+    fetchAudits()
+  }
+})
+
 // ── 账号列表 ──
 async function fetchUsers() {
   const seq = ++usersRequestSeq
