@@ -51,6 +51,7 @@
 | id 派生（B5） | `memory_service.memory_id_of(entry: MemoryEntry) -> str` | 条目对外 memory_id 单一派生规则：uuid，旧条目 `legacy:{归一化 content}`（deepagents `_entry_to_json` 与管理端同规则） |
 | 按 id 查找（B5） | `memory_service.find_memory_by_id(memory_id: str) -> Optional[MemoryEntry]` | 跨用户按 memory_id 查找（含 legacy 派生 id 兼容）；未找到返回 None（管理端管理员例外用） |
 | 批量统计（B5） | `memory_service.count_memories_per_user() -> Dict[str, int]` | 各用户记忆条数 `{user: count}`（单次持锁批量统计，管理端用户列表用） |
+| 级联删除（2026-08-13） | `memory_service.delete_all_user_memories(user: str) -> int` | 删除指定用户的全部长期记忆（账号管理删除用户时级联清理）；游客/匿名返回 0 |
 | 提取钩子 | `memory_service.extract_and_store(user, conversation_id, query, answer) -> dict` | 对话完成后台调用：LLM 提取 + 写入；游客/关闭/失败均静默降级 |
 | 提取（同步） | `memory_service.extract_facts(query, answer, llm=None) -> List[MemoryEntry]` | LLM 单次调用提取事实；可注入 llm 供测试；失败返回空列表 |
 

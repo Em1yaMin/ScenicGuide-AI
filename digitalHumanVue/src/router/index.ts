@@ -47,6 +47,11 @@ const router = createRouter({
           name: 'admin-usage',
           component: () => import('@/views/admin/UsageView.vue'),
         },
+        {
+          path: 'users',
+          name: 'admin-users',
+          component: () => import('@/views/admin/UserAdminView.vue'),
+        },
       ],
     },
     // 认证页为顶层路由：访客端与管理后台均可直达

@@ -8,6 +8,7 @@ from app.models.knowledge import KnowledgeBase
 from app.models.user import User
 from app.models.announcement import Announcement
 from app.models.usage import LLMUsage
+from app.models.admin_audit import AdminAuditLog
 
 __all__ = [
     "Base",
@@ -19,4 +20,5 @@ __all__ = [
     "User",
     "Announcement",
     "LLMUsage",
+    "AdminAuditLog",
 ]

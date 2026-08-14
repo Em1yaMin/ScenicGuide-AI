@@ -19,7 +19,9 @@ models/
   evaluation.py       # Evaluation — AI 评估结果（FK→dialogues, UNIQUE）
   stat.py             # Stat — 聚合统计（独立表，无外键）
   knowledge.py        # KnowledgeBase — 知识库条目（id/title/category/content/tags）
-  user.py             # User — 注册用户（username 唯一；登录用户才有长期记忆）
+  user.py             # User — 注册用户（username 唯一；登录用户才有长期记忆；2026-08-13 软禁用字段 is_disabled/disabled_at）
+  usage.py            # LLMUsage — token 用量记账（C5）
+  admin_audit.py      # AdminAudit — 管理员操作审计日志（operator/action/target/detail，账号管理 2026-08-13）
   __init__.py         # 重导出 Base + 所有模型（使 autogenerate/Base.metadata 发现所有表）
 ```
 

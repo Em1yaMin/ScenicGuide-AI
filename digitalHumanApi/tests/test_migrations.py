@@ -10,6 +10,7 @@
 测试全部使用临时文件 SQLite，不触碰真实 digital_human.db。
 """
 import asyncio
+import re
 import sqlite3
 from pathlib import Path
 
@@ -27,6 +28,7 @@ MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 
 # 业务表集合（不含 alembic_version / sqlite_* 系统表）
 BUSINESS_TABLES = {
+    "admin_audit_logs",
     "announcements",
     "dialogues",
     "evaluations",
@@ -140,18 +142,44 @@ def test_empty_db_upgrade_head_creates_all_tables(tmp_path):
     assert set(_table_sql(db)["tables"]) == BUSINESS_TABLES
 
 
+def _normalize_sql(sql: str) -> str:
+    """归一化 DDL 文本：折叠全部空白（\n/\t/连续空格 → 单空格）。
+
+    SQLite 的 ALTER TABLE ADD COLUMN 会把追加列内联到原 CREATE TABLE
+    文本末行（如账号管理的 users 加列迁移），与 create_all 的逐列换行格式
+    不同——比较前归一化空白，仍可捕获真实漂移（缺表/缺列/类型/约束/索引），
+    仅容忍空白排版差异。
+    """
+    return re.sub(r"\s+", " ", sql or "").strip()
+
+
 def test_upgraded_schema_matches_orm_metadata(tmp_path):
-    """迁移产出的 DDL 与 ORM metadata（create_all）逐字节一致。
+    """迁移产出的 DDL 与 ORM metadata（create_all）逐字节一致（空白归一化后）。
 
     该等价性是遗留库 stamp 基线安全的前提：历史 create_all 建出的库
-    与初始迁移产物相同，stamp 后无 schema 漂移。
+    与初始迁移产物相同，stamp 后无 schema 漂移。归一化仅折叠空白——
+    SQLite 的 ALTER TABLE ADD COLUMN 会把追加列内联进原 CREATE TABLE
+    文本（users 加列迁移），逐字节比对无法通过；空白归一化后列/类型/约束/索引
+    的逐 token 一致性仍严格校验。
     """
     migrated = tmp_path / "migrated.db"
     orm = tmp_path / "orm.db"
     command.upgrade(_make_config(migrated), "head")
     asyncio.run(_create_orm_schema(orm))
 
-    assert _table_sql(migrated) == _table_sql(orm)
+    def _normalized(sql_map: dict) -> dict:
+        return {
+            "tables": {
+                name: _normalize_sql(sql)
+                for name, sql in sql_map["tables"].items()
+            },
+            "indexes": {
+                name: _normalize_sql(sql)
+                for name, sql in sql_map["indexes"].items()
+            },
+        }
+
+    assert _normalized(_table_sql(migrated)) == _normalized(_table_sql(orm))
 
 
 # ---------- 路径 2：遗留库 stamp → upgrade no-op ----------
@@ -228,13 +256,18 @@ def test_announcements_migration_upgrade_downgrade(tmp_path):
     finally:
         conn.close()
 
-    # 回退到基线：仅删除 announcements（llm_usage 在基线之后引入，同被回退），
-    # 其余早期表保留
+    # 回退到基线：仅删除 announcements / llm_usage / admin_audit_logs
+    #（均在基线之后引入，同被回退），其余早期表保留
     command.downgrade(cfg, "04436fda61c5")
     tables = _table_sql(db)["tables"]
     assert "announcements" not in tables
     assert "llm_usage" not in tables
-    assert set(tables) == BUSINESS_TABLES - {"announcements", "llm_usage"}
+    assert "admin_audit_logs" not in tables
+    assert set(tables) == BUSINESS_TABLES - {
+        "announcements",
+        "llm_usage",
+        "admin_audit_logs",
+    }
 
     # 再次升级可重建
     command.upgrade(cfg, "head")
@@ -267,16 +300,156 @@ def test_llm_usage_migration_upgrade_downgrade(tmp_path):
     finally:
         conn.close()
 
-    # 回退到公告表版本：仅删除 llm_usage，其余表保留
+    # 回退到公告表版本：仅删除 llm_usage / admin_audit_logs，其余表保留
     command.downgrade(cfg, "e06ede5acb5a")
     tables = _table_sql(db)["tables"]
     assert "llm_usage" not in tables
-    assert set(tables) == BUSINESS_TABLES - {"llm_usage"}
+    assert "admin_audit_logs" not in tables
+    assert set(tables) == BUSINESS_TABLES - {"llm_usage", "admin_audit_logs"}
 
     # 再次升级可重建
     command.upgrade(cfg, "head")
     assert "llm_usage" in _table_sql(db)["tables"]
     assert _current_revision(db) == _head_revision(cfg)
+
+
+# ---------- 批次8 账号管理：users 加列 + admin_audit_logs 建表迁移 ----------
+
+def test_users_disabled_columns_migration_upgrade_downgrade(tmp_path):
+    """users 加列迁移：upgrade 加 is_disabled/disabled_at（含默认值/列序）→
+    downgrade 回退删列，其余表不受影响，数据保留。"""
+    db = tmp_path / "users.db"
+    cfg = _make_config(db)
+    command.upgrade(cfg, "head")
+
+    conn = sqlite3.connect(db)
+    try:
+        cols = {r[1]: r for r in conn.execute("PRAGMA table_info(users)")}
+        assert "is_disabled" in cols
+        assert "disabled_at" in cols
+        # 列序：is_disabled 在 disabled_at 之前（与 ORM metadata 一致）
+        order = [r[1] for r in conn.execute("PRAGMA table_info(users)")]
+        assert order.index("is_disabled") < order.index("disabled_at")
+        # 新列可正常读写（默认启用）
+        conn.execute(
+            "INSERT INTO users (username, password_hash, created_at) "
+            "VALUES ('alice', 'x', '2026-01-01 00:00:00')"
+        )
+        conn.commit()
+        assert conn.execute(
+            "SELECT is_disabled FROM users WHERE username='alice'"
+        ).fetchone()[0] == 0
+    finally:
+        conn.close()
+
+    # 回退到加列前版本：两列删除、数据保留
+    command.downgrade(cfg, "c5f1a2b3d4e5")
+    conn = sqlite3.connect(db)
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
+        assert "is_disabled" not in cols
+        assert "disabled_at" not in cols
+        assert conn.execute(
+            "SELECT username FROM users"
+        ).fetchone()[0] == "alice"
+    finally:
+        conn.close()
+
+    # 再次升级可重建
+    command.upgrade(cfg, "head")
+    conn = sqlite3.connect(db)
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
+        assert "is_disabled" in cols
+        assert "disabled_at" in cols
+    finally:
+        conn.close()
+
+
+def test_admin_audit_logs_migration_upgrade_downgrade(tmp_path):
+    """审计表迁移：upgrade 建表（含索引）→ downgrade 回退删表，其余表不受影响。"""
+    db = tmp_path / "audit.db"
+    cfg = _make_config(db)
+    command.upgrade(cfg, "head")
+
+    assert "admin_audit_logs" in _table_sql(db)["tables"]
+    assert "ix_admin_audit_logs_created_at" in _table_sql(db)["indexes"]
+    assert "ix_admin_audit_logs_operator" in _table_sql(db)["indexes"]
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "INSERT INTO admin_audit_logs (operator, action, target_username, "
+            "created_at) VALUES ('admin', 'delete', 'alice', '2026-08-13 00:00:00')"
+        )
+        conn.commit()
+        assert conn.execute(
+            "SELECT COUNT(*) FROM admin_audit_logs"
+        ).fetchone()[0] == 1
+    finally:
+        conn.close()
+
+    command.downgrade(cfg, "b4c3d2e1f0a9")
+    tables = _table_sql(db)["tables"]
+    assert "admin_audit_logs" not in tables
+
+    command.upgrade(cfg, "head")
+    assert "admin_audit_logs" in _table_sql(db)["tables"]
+    assert _current_revision(db) == _head_revision(cfg)
+
+
+def test_old_shape_legacy_db_gets_user_columns(tmp_path, monkeypatch):
+    """旧形状遗留库（users 表无新列、无版本表）经 run_migrations：
+    create_all 补表 + stamp 基线 + upgrade head 后新列补齐、数据保留。"""
+    import app.core.migrations as migrations_mod
+    from app.core import config as config_mod
+
+    db = tmp_path / "oldlegacy.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db}")
+    monkeypatch.setattr(migrations_mod, "engine", engine)
+    monkeypatch.setattr(
+        config_mod.settings, "DATABASE_URL", f"sqlite+aiosqlite:///{db}"
+    )
+    # 手工按旧形状建 users（无 is_disabled/disabled_at），模拟历史 create_all 产物
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        """
+        CREATE TABLE users (
+            id INTEGER NOT NULL,
+            username VARCHAR(64) NOT NULL,
+            password_hash VARCHAR(255) NOT NULL,
+            nickname VARCHAR(64),
+            created_at DATETIME NOT NULL,
+            last_login_at DATETIME,
+            PRIMARY KEY (id)
+        );
+        CREATE UNIQUE INDEX ix_users_username ON users (username);
+        INSERT INTO users (username, password_hash, created_at)
+            VALUES ('alice', 'x', '2026-01-01 00:00:00');
+        """
+    )
+    conn.close()
+    # 旧形状遗留库无版本表
+    assert _current_revision(db) is None
+
+    from app.core.migrations import run_migrations
+
+    try:
+        asyncio.run(run_migrations())
+    finally:
+        asyncio.run(engine.dispose())
+
+    conn = sqlite3.connect(db)
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(users)")}
+        assert "is_disabled" in cols
+        assert "disabled_at" in cols
+        assert conn.execute(
+            "SELECT username, is_disabled FROM users"
+        ).fetchone() == ("alice", 0)
+        # 版本表存在且指向 head
+        assert _current_revision(db) == _head_revision(_make_config(db))
+    finally:
+        conn.close()
 
 
 # ---------- 程序化入口 run_migrations（app/core/migrations.py） ----------

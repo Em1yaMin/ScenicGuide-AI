@@ -5,12 +5,16 @@ main.py lifespan 与独立 CLI（app/tasks/backfill.py）调用 run_migrations()
 
 - 空库（无任何表）          → alembic upgrade head：从零建齐全部表
 - 遗留库（有业务表、无版本表） → 先幂等 create_all（IF NOT EXISTS）补建历史增量引入的
-                            缺失业务表（knowledge_base/users 等），再 alembic stamp head
-                            基线化当前版本（schema 与初始迁移等价，升级前先写死版本号）
+                            缺失业务表，再 alembic stamp 基线并 upgrade head：重放全部迁移
+                            ——迁移全部防御性（幂等）编写，create_all 已建的表/索引/列自动
+                            跳过，仅「对既有表的列变更」（如账号管理的 users 加列）在旧形状
+                            遗留库上真正执行；新形状遗留库（create_all 产物已含最新列）零 DDL
 - 已版本化库（有 alembic_version） → alembic upgrade head：应用待执行迁移
 
 注意：Alembic 命令为同步 API，且 env.py 内部使用 asyncio.run（async 模板），
 因此必须在独立线程（asyncio.to_thread）中执行，避免与运行中事件循环冲突。
+新增迁移必须防御性（幂等）编写（建表前查 has_table、加列前查列存在性、
+建索引前查索引存在性），否则遗留库路径（stamp 基线 + 重放全部迁移）会报重复 DDL。
 """
 import asyncio
 import logging
@@ -62,24 +66,48 @@ async def run_migrations() -> None:
     """程序化执行 Alembic 迁移（幂等，可重复调用）。
 
     按数据库当前状态自动选择 stamp / upgrade，保证：
-    - 已部署的现有库平滑过渡（stamp 基线，零 DDL、零数据丢失）；
+    - 已部署的现有库平滑过渡（遗留库 create_all 补表后 stamp 上一版本再 upgrade，
+      使既有表的列变更迁移生效；已版本化库直接 upgrade）；
     - 新库从零建齐全部表；
     - 已有版本表的库应用待执行迁移。
+
+    遗留库 stamp 到 head 上一版本的说明：直接 stamp head 会把旧形状遗留库
+    （历史 create_all 产物，无新增列）永久钉死在缺失列状态；stamp 上一版本后
+    upgrade 只应用 head 与上一版本之间的迁移（当前为 b4c3d2e1f0a9 加列迁移，
+    内含列存在性防御检查）。新增迁移须遵循同样防御性写法（create_all 已建表/
+    已加列的库上 upgrade 应幂等跳过），避免对既有表的重复 DDL 报错。
     """
     tables = await _list_tables()
     if "alembic_version" in tables:
-        cmd = "upgrade"
-    elif tables:
-        # 遗留库：无版本表但有业务表 → 先幂等 create_all 补建缺失业务表再 stamp 基线
-        #（业务表历史增量引入，直接 stamp 会把缺表状态永久钉死在当前版本）
+        await asyncio.to_thread(_run_alembic, "upgrade")
+        logger.info("数据库迁移完成（upgrade head）")
+        return
+    if tables:
+        # 遗留库：无版本表但有业务表 → 先幂等 create_all 补建缺失业务表，
+        # 再 stamp 基线 + upgrade head 重放全部迁移（迁移全部防御性编写：
+        # create_all 已建的表/索引/列自动跳过，仅旧形状遗留库缺的列变更真正执行）
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-        cmd = "stamp"
+        cfg = _alembic_config()
+        from alembic.script import ScriptDirectory
+
+        sd = ScriptDirectory.from_config(cfg)
+        head = sd.get_current_head()
+        # 沿 down_revision 链回溯到基线（down_revision=None 的起始迁移）
+        rev = sd.get_revision(head)
+        while rev is not None and rev.down_revision is not None:
+            rev = sd.get_revision(rev.down_revision)
+        base_rev = rev.revision if rev is not None else None
+        await asyncio.to_thread(command.stamp, cfg, base_rev)
+        await asyncio.to_thread(command.upgrade, cfg, "head")
         logger.info(
-            "检测到遗留数据库（无 alembic_version），create_all 补建缺失表后 stamp 基线为当前 head"
+            "检测到遗留数据库（无 alembic_version），create_all 补建缺失表后 "
+            "stamp 基线 %s 并 upgrade 到 head %s",
+            base_rev,
+            head,
         )
-    else:
-        cmd = "upgrade"
-        logger.info("检测到空数据库，alembic upgrade head 建齐全部表")
-    await asyncio.to_thread(_run_alembic, cmd)
-    logger.info("数据库迁移完成（%s head）", cmd)
+        logger.info("数据库迁移完成（stamp+upgrade head）")
+        return
+    await asyncio.to_thread(_run_alembic, "upgrade")
+    logger.info("检测到空数据库，alembic upgrade head 建齐全部表")
+    logger.info("数据库迁移完成（upgrade head）")

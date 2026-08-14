@@ -32,3 +32,6 @@ export const API_ADMIN_USAGE_EXPORT = '/api/admin/usage/export'
 // 景区结构化数据（spots/routes，导览 agent 数据单一来源，批次 e3 灵山化）
 export const API_ADMIN_SCENIC_SPOTS = '/api/admin/scenic/spots'
 export const API_ADMIN_SCENIC_ROUTES = '/api/admin/scenic/routes'
+// 账号管理（2026-08-13 船长需求：账号全生命周期 + 操作审计日志）
+export const API_ADMIN_USERS = '/api/admin/users'
+export const API_ADMIN_USERS_AUDIT_LOGS = '/api/admin/users/audit-logs'

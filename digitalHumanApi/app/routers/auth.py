@@ -88,6 +88,13 @@ async def login(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误"
         )
+    if user.is_disabled:
+        # 软禁用账号拒绝登录（2026-08-13 账号管理：登录受控）；
+        # 不计入失败次数（账号状态明确，非爆破信号）
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="账号已被禁用，请联系管理员",
+        )
     if settings.AUTH_RATE_LIMIT_ENABLED:
         # 登录成功清零失败计数，防误伤正常用户
         _limiter.record_success(ip, request.username)
@@ -130,6 +137,13 @@ async def me(
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在或已注销"
+        )
+    if user.is_disabled:
+        # 软禁用账号：/auth/me 拒绝（前端据此清除本地登录态，见 stores/auth.ts
+        # restoreSession 对 401/403 的处理）；与登录端点语义一致
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="账号已被禁用，请联系管理员",
         )
     return UserResponse.model_validate(user)
 

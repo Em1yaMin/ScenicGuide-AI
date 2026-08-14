@@ -25,6 +25,7 @@ schemas/
   recommend.py  # RecommendRequest / RecommendResponse + RouteRecommendation
   auth.py       # RegisterRequest / LoginRequest / UserResponse / AuthResponse / GuestResponse
   memory_admin.py # 记忆管理（B5）：AdminMemoryItem/CreateRequest/UpdateRequest/DeleteResponse + AdminUserItem/ListResponse，契约见 doc/memory-admin-api.md
+  user_admin.py   # 账号管理（2026-08-13）：AdminUserItem/ListResponse/CreateRequest/SetDisabledRequest/ResetPasswordRequest/ResetPasswordResponse/DeleteResponse + AdminAuditLogItem/ListResponse，契约见 doc/account-admin-api.md
 ```
 
 ## Request/Response Pair Pattern

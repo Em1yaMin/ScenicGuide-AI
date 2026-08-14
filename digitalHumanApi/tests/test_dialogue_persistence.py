@@ -76,6 +76,15 @@ async def test_guest_dialogue_persisted_to_db(client, db_session, monkeypatch):
 
 async def test_login_user_dialogue_persisted(client, db_session, monkeypatch):
     """登录用户（Bearer JWT）对话后落库，visitor_id=用户 id。"""
+    # 先落库用户 id=42（2026-08-13 对话门禁：注册用户 id 须在 users 表中存在）
+    from app.models.user import User
+    from app.services import auth_service
+
+    db_session.add(
+        User(id=42, username="persist_user", password_hash=auth_service.hash_password("x"))
+    )
+    await db_session.commit()
+
     token, _ = create_access_token(subject="42")
     async def fake_chat(**kwargs):
         assert kwargs["user"] == "42"

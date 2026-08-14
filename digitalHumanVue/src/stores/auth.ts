@@ -131,6 +131,7 @@ export const useAuthStore = defineStore('auth', () => {
   /**
    * 页面刷新后恢复登录态：依据 localStorage token 调用 /auth/me 校验。
    * - 401（token 无效/过期）→ 清除本地登录态
+   * - 403（账号被禁用，2026-08-13 账号管理）→ 清除本地登录态
    * - 网络失败等其它错误 → 保留本地缓存，不打断浏览（后端未就绪时前端可用）
    */
   async function restoreSession(): Promise<void> {
@@ -144,7 +145,7 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = me
       localStorage.setItem(USER_KEY, JSON.stringify(me))
     } catch (e) {
-      if (e instanceof FetchError && e.httpStatus === 401) {
+      if (e instanceof FetchError && (e.httpStatus === 401 || e.httpStatus === 403)) {
         clearSession()
       }
     } finally {
