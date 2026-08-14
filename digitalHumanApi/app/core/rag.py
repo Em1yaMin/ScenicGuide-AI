@@ -179,8 +179,16 @@ class TFIDFEmbeddings(Embeddings):
             for token in tokens:
                 doc_freq[token] += 1
 
-        # 构建词汇表（按文档频率排序，取前 10000 个）
-        sorted_tokens = sorted(doc_freq.items(), key=lambda x: -x[1])[:10000]
+        # 构建词汇表（按文档频率降序，取前 10000 个）。
+        # 排序必须带 token 字典序 tie-break：旧实现仅按 df 排序，稳定排序的
+        # tie-break 依赖 Counter 插入顺序（= 各文档 set() 迭代顺序，受
+        # PYTHONHASHSEED 随机化影响），导致词汇表截断边界（df==1 token）的
+        # 取舍随进程 hash seed 变化——检索排名偶发翻转（RAG 评测门禁 flaky
+        # 根因，doc/rag-eval/README.md）。字典序 tie-break 与 hash seed、
+        # 文档顺序完全解耦，构建结果跨进程/跨平台可精确复现。
+        sorted_tokens = sorted(
+            doc_freq.items(), key=lambda x: (-x[1], x[0])
+        )[:10000]
         for idx, (token, df) in enumerate(sorted_tokens):
             self._vocabulary[token] = idx
             # IDF = log((N + 1) / (df + 1)) + 1 (smooth)

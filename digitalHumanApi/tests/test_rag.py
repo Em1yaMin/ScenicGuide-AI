@@ -135,6 +135,52 @@ def test_tfidf_embedding_dimension_and_zero_guard():
     assert math.isfinite(sum(vec))
 
 
+def test_tfidf_vocabulary_tie_break_is_lexicographic():
+    """词汇表同频 token 按字典序 tie-break，构建确定性（RAG 评测门禁 flaky 回归）。
+
+    旧实现仅按 df 降序稳定排序，同频 token 的相对顺序依赖 Counter 插入顺序
+    （= 各文档 set() 迭代顺序，受 PYTHONHASHSEED 随机化影响）；词汇表截断边界
+    （df==1 token）的取舍随之变化，检索排名偶发翻转。修复后同 df token 必须
+    按字典序排列，与 hash seed/文档顺序完全解耦。
+    """
+    emb = TFIDFEmbeddings()
+    # 同 df 组内故意乱序插入：aaa/bbb/ccc 各出现于 2 篇文档（df=2），
+    # dd/ee 各出现于 1 篇文档（df=1）——两组的相对顺序与组内顺序均须确定
+    docs = [
+        Document(page_content="词 aaa bbb"),
+        Document(page_content="词 aaa bbb"),
+        Document(page_content="词 ccc dd"),
+        Document(page_content="词 ccc ee"),
+    ]
+    emb.fit(docs)
+    ids = emb._vocabulary
+    assert ids["aaa"] < ids["bbb"] < ids["ccc"] < ids["dd"] < ids["ee"]
+
+
+def test_tfidf_vocabulary_independent_of_doc_order():
+    """词汇表构建与文档顺序无关（RAG 评测门禁 flaky 回归之二）。
+
+    文档顺序影响 Counter 插入顺序 → 旧实现同频 token tie-break 随之变化；
+    _load_documents 的 rglob 顺序跨文件系统不保证一致。修复后任意顺序
+    fit 的词汇表必须完全相同。
+    """
+    texts = [
+        "文档甲 灵山胜境 大佛 梵宫 九龙灌浴 佛足坛 菩提大道",
+        "文档乙 灵山胜境 禅意 拈花湾 禅行 曼飞龙塔 五印坛城",
+        "文档丙 灵山胜境 大佛 梵宫 祥符禅寺 百子戏弥勒 五智门",
+        "文档丁 灵山胜境 禅意 拈花湾 灵山小镇 拈花塔 微笑广场",
+        "文档戊 灵山胜境 大佛 梵宫 九龙灌浴 阿育王柱 天下第一掌",
+        "文档己 灵山胜境 禅意 拈花湾 禅行 半山衔日 香月花街",
+    ]
+    docs = [Document(page_content=t) for t in texts]
+    emb_a = TFIDFEmbeddings()
+    emb_a.fit(docs)
+    emb_b = TFIDFEmbeddings()
+    emb_b.fit(list(reversed(docs)))
+    assert emb_a._vocabulary == emb_b._vocabulary
+    assert emb_a._idf == emb_b._idf
+
+
 def test_delete_documents_and_filtered_search(tmp_path):
     """delete_documents 按谓词删除（向量同步清除、持久化一致）；
     similarity_search_with_score_filtered 仅在该谓词子集内检索。

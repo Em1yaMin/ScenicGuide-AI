@@ -121,7 +121,10 @@ def _load_documents(doc_dir: Optional[Path] = None) -> List[Document]:
     extensions = ("*.md", "*.txt")
 
     for ext in extensions:
-        for file_path in doc_dir.rglob(ext):
+        # sorted() 固定遍历顺序：rglob 顺序依赖文件系统/创建序，跨平台不一致，
+        # 影响文档顺序（chunk 索引、并列检索 tie-break、sidecar 摘要均顺序敏感）——
+        # 排序后加载顺序跨平台可复现（RAG 评测确定性的一部分）。
+        for file_path in sorted(doc_dir.rglob(ext)):
             try:
                 content = file_path.read_text(encoding="utf-8")
                 if not content.strip():
