@@ -3,17 +3,36 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useVisitorStore } from '@/stores/visitor'
 import { useAuthStore } from '@/stores/auth'
 import { API_VISITOR_RECOMMENDED_QUESTIONS } from '@/api'
+import { fetchPublicCharacter } from '@/api/dhCharacter'
 import { fetchWithCodeEnvelope } from '@/utils/fetchWithCodeEnvelope'
 
 const store = useVisitorStore()
 const auth = useAuthStore()
+
+/**
+ * 当前数字人形象：页面加载时先调公开接口 GET /api/v1/dh-character 取后端
+ * 配置（管理后台形象管理页保存的全局形象），取到用接口值；失败/未取到
+ * 回退 VITE_LIVE2D_MODEL || 'Hiyori'。
+ */
+const live2dModel = ref(import.meta.env.VITE_LIVE2D_MODEL || 'Hiyori')
+
+async function loadLive2dModel() {
+  try {
+    const data = await fetchPublicCharacter()
+    if (data.character) {
+      live2dModel.value = data.character
+    }
+  } catch {
+    // 失败/接口不可达：保持默认（VITE_LIVE2D_MODEL || 'Hiyori'），不阻断对话页
+  }
+}
 
 const iframeSrc = computed(() => {
   const base = import.meta.env.VITE_LIGHT4AI_URL
   if (!base) return ''
   const params = new URLSearchParams()
   params.set('visitor_id', store.visitorId)
-  params.set('live2d_model', import.meta.env.VITE_LIVE2D_MODEL || 'hiyori')
+  params.set('live2d_model', live2dModel.value)
   // 嵌入模式：隐藏 ADH 顶部菜单/设置/画廊（配置由本后端定死）
   params.set('hide_menu', '1')
   // 登录用户 / 游客 token：供数字人端透传对话接口（Bearer），实现「对话携带 token」
@@ -89,8 +108,10 @@ onMounted(async () => {
   if (!auth.isAuthenticated) {
     await auth.enterGuestMode()
   }
+  // 动态形象 + 游客登记 + 推荐问句并行加载，全部就绪后再渲染 iframe
+  //（live2d_model 参数以后端配置为准，接口失败回退 env/Hiyori）
+  await Promise.all([loadLive2dModel(), store.registerVisitor(), fetchRecommendedQuestions()])
   iframeReady.value = true
-  await Promise.all([store.registerVisitor(), fetchRecommendedQuestions()])
   if (iframeSrc.value) {
     startLoadingTimeout()
   }

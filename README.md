@@ -228,7 +228,7 @@
 |------|------|
 | `VITE_LIGHT4AI_URL` | 数字人 iframe 地址（局域网部署必填 `http://<服务器IP>:3000`，不能填 localhost） |
 | `VITE_API_BASE` | 后端地址（默认 `http://localhost:8000`，Vite 代理目标） |
-| `VITE_LIVE2D_MODEL` | Live2D 模型名（默认 `hiyori`） |
+| `VITE_LIVE2D_MODEL` | Live2D 模型名回退值（大小写敏感，须与 ADH `public/characters/` 目录名一致，默认 `Hiyori`；对话页优先取后端 `/api/v1/dh-character` 配置，接口不可达时回退该值） |
 
 **ADH 前端**（`live2d-frontend/web/.env`）：
 

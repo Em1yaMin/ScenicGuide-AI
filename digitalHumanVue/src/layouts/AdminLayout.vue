@@ -37,6 +37,10 @@ function adminLogout() {
           <span class="nav-icon">▤</span>
           <span>公告管理</span>
         </RouterLink>
+        <RouterLink to="/admin/character" class="nav-item">
+          <span class="nav-icon">◍</span>
+          <span>形象管理</span>
+        </RouterLink>
         <RouterLink to="/admin/memories" class="nav-item">
           <span class="nav-icon">◉</span>
           <span>记忆管理</span>
