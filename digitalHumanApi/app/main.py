@@ -18,6 +18,7 @@ from app.routers import (
     announcement,
     auth,
     dialogue,
+    dh_character,
     home,
     knowledge,
     memory_admin,
@@ -143,6 +144,8 @@ app.include_router(recommend.router)
 app.include_router(knowledge.router)
 app.include_router(announcement.admin_router)
 app.include_router(announcement.public_router)
+app.include_router(dh_character.public_router)
+app.include_router(dh_character.admin_router)
 app.include_router(memory_admin.router)
 app.include_router(user_admin.router)
 app.include_router(admin_agent.router)

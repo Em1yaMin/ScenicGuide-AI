@@ -50,6 +50,10 @@ from langgraph.prebuilt import InjectedState
 from sqlalchemy import func, select
 
 from app.core.database import async_session_factory
+from app.models.app_setting import (
+    DIGITAL_HUMAN_CHARACTERS,
+    DIGITAL_HUMAN_CHARACTER_KEY,
+)
 from app.models.evaluation import Evaluation
 from app.models.knowledge import KnowledgeBase
 from app.models.user import User
@@ -68,6 +72,7 @@ from app.services import (
     auth_service,
     home_service,
     knowledge_service,
+    dh_character_service,
     memory_service,
     rag_service,
     user_admin_service,
@@ -774,6 +779,78 @@ async def view_home_highlights(
     )
 
 
+# ── 数字人形象工具（2026-08：形象管理后端部分） ────────────────────────
+
+
+@tool
+async def list_character_models(
+    is_admin: Annotated[bool, InjectedState("is_admin")] = False,
+) -> str:
+    """查询数字人形象列表（只读）。
+
+    返回当前形象与全部可选形象（与 ADH 本地数字人 public/characters
+    目录一致）；可用于 set_character_model 前确认可选范围。"""
+    _require_admin(is_admin)
+    try:
+        async with _db_session() as db:
+            current = await dh_character_service.get_character(db)
+    except Exception as e:
+        logger.warning("list_character_models 工具失败: %s", e)
+        return _empty_result("数字人形象查询暂时不可用")
+    return _json_dumps(
+        {
+            "status": "ok",
+            "current": current,
+            "available": DIGITAL_HUMAN_CHARACTERS,
+            "message": (
+                f"当前形象：{current}，可选：{'/'.join(DIGITAL_HUMAN_CHARACTERS)}"
+            ),
+        }
+    )
+
+
+@tool
+async def set_character_model(
+    character: str,
+    is_admin: Annotated[bool, InjectedState("is_admin")] = False,
+) -> str:
+    """设置数字人形象（写操作，系统自动记录审计日志）。
+
+    character 为形象名，必须在本工具可选列表内（如 Hiyori/Chitose/…）；
+    非法形象名返回错误。设置后访客端/ADH 读取的新形象立即生效。"""
+    _require_admin(is_admin)
+    name = character.strip()
+    if name not in DIGITAL_HUMAN_CHARACTERS:
+        return _json_dumps(
+            {
+                "status": "error",
+                "message": (
+                    f"形象 {name!r} 不在可选列表内（可选：{'/'.join(DIGITAL_HUMAN_CHARACTERS)}）"
+                ),
+            }
+        )
+    try:
+        async with _db_session() as db:
+            saved = await dh_character_service.set_character(db, name)
+    except Exception as e:
+        logger.warning("set_character_model 工具失败: %s", e)
+        return _empty_result("数字人形象设置失败")
+    _audit_log(
+        "set_character_model",
+        DIGITAL_HUMAN_CHARACTER_KEY,
+        "update",
+        f"ok character={saved}",
+    )
+    return _json_dumps(
+        {
+            "status": "ok",
+            "character": saved,
+            "available": DIGITAL_HUMAN_CHARACTERS,
+            "message": f"数字人形象已设置为 {saved}",
+        }
+    )
+
+
 # ── 账号管理工具（2026-08-13：敏感操作二次确认 + 落库审计） ──────────────
 
 
@@ -1207,6 +1284,8 @@ ADMIN_TOOLS: List[Any] = [
     query_statistics,
     rebuild_rag_index,
     view_home_highlights,
+    list_character_models,
+    set_character_model,
     list_users,
     get_user_detail,
     create_user,

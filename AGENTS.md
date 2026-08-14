@@ -254,6 +254,16 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - 测试：`tests/test_admin_agent_confirm.py`（7）+ `test_admin_agent_tools.py`（29，含两阶段全流程/越权拒绝/审计/公告增删改）+ `test_admin_agent.py`（8，装配/SSE 契约/缓存）+ `test_admin_agent_api.py`（7，鉴权 401/非流式/SSE）；新增 43 用例，全量 529 绿（pytest 收集 529：497 测试函数 + 34 参数化用例）
 - **前端（批次6 B4 前端任务，2026-08-09）**：`digitalHumanVue/src/views/admin/AdminAgentView.vue`（路由 `/admin/agent`，菜单「管理员 Agent」）+ `src/api/adminAgent.ts`（SSE 流解析：fetch ReadableStream + TextDecoder 增量解码，统一剔 \r 后按 `\n\n` 分帧、按行取 `data:` 前缀解析 JSON，兼容 `\r\n`；非流式 `chatWithAdminAgent` 备用）+ `src/types/adminAgent.ts`；页面：token 逐字渲染（marked+DOMPurify，同知识库页）+ 步骤气泡（🔍 样式与 ADH 一致）+ done 收尾；**二次确认前端闭环**——`extractPending` 用非 hex 字符边界正则匹配 32 位 hex 提取 operation_id（联调实测 agent 以反引号包裹，如「操作 ID：`cb64...`」，勿用标点白名单），气泡内「确认执行/取消」按钮：确认注入文本消息 `确认执行 operation_id: xxx` 自动发送（后端无会话持久化，新请求内 agent 调 confirm_operation 闭环；取消仅本地标记，待确认项 120s 自动过期）；**确认回执防误判**：上一条用户消息为确认注入时，本条回答（agent 常回显 operation_id）不再解析待确认项，避免虚假二次确认框（消息模型 `isConfirm` 标记）；conversation_id 存页面状态跨轮透传；Enter 发送/Shift+Enter 换行（`e.isComposing` 防中文输入法误触发）；**约束（实测）**：公告新建默认草稿（create_announcement 支持 status=published 一步发布上首页）；知识库演示建议「新增讲解词 → 删除（二次确认）」组合
 
+## 数字人形象管理（2026-08-14 后端部分：app_settings 表 + API + agent 工具）
+
+赛题（软件杯 A5）「数字人形象管理」薄弱项改造——ADH 内置 13 个 Live2D 形象（live2d-frontend/web/public/characters/），此前仅 ADH 前端 localStorage 可选，主站管理后台无入口。本批次实现**后端部分**（前端任务另行派发，按此契约对接）。
+
+- **持久化**：新建通用 key-value 配置表 `app_settings`（key TEXT PK / value TEXT / updated_at DATETIME，Python 侧默认值/onupdate），Alembic 迁移 `d1e2f3a4b5c6`（防御性幂等写法，downgrade 删表）；形象配置 key=`digital_human_character`，**无记录时默认 Hiyori（不写库，读取回退）**，库内非法值同样回退（防御脏数据）
+- **形象常量**：`app/models/app_setting.py` 定义 `DIGITAL_HUMAN_CHARACTERS`（13 个：Hiyori/Chitose/Epsilon/Haru-1/Haru-2/Hibiki/Izumi/Kei/Mao/Miara/Rice/Shizuku/Tsumiki，与 ADH public/characters 目录一致）、`DIGITAL_HUMAN_CHARACTER_KEY`、`DIGITAL_HUMAN_CHARACTER_DEFAULT`（schema/服务/工具同源导入）
+- **API**（`app/routers/dh_character.py`，main.py 注册 public+admin 两个 router）：`GET /api/v1/dh-character`（公开，访客端/ADH 用）、`GET /api/admin/dh-character`（verify_admin_token）、`PUT /api/admin/dh-character`（body `{"character": ...}`，非法形象名 schema 校验 422；写库 + logger 审计 operator=admin，风格同记忆管理 B5）；响应契约 `{"character", "available"}`；`app/services/dh_character_service.py` 读写（upsert 单行，调用方提交事务）；`app/schemas/dh_character.py`（DhCharacterResponse/DhCharacterUpdateRequest，field_validator 校验列表）
+- **管理员 agent 工具**（`admin_agent/tools.py` 加入 ADMIN_TOOLS，agent.py _STEP_LABELS 同步）：`list_character_models`（只读：当前形象 + 可选列表 + 一句话描述）、`set_character_model`（写操作：校验合法后写库 + `_audit_log` 审计；**非删除类，无需两阶段二次确认**）
+- 测试：`tests/test_dh_character.py`（9：公开默认/写后读回/非法值回退/管理端鉴权 401/PUT 持久化 upsert/非法名 422/空白 422）+ `tests/test_dh_character_tools.py`（7：越权拒绝/列表默认/设置后读取/成功+审计/覆盖 upsert/非法名/空白）+ test_migrations.py 更新（BUSINESS_TABLES 加 app_settings + 升级/回退用例 + 既有回退断言同步）；全量 844 绿
+
 ## 安全加固（批次6 C3：认证限流 + CORS 白名单 + 管理端 RBAC）
 
 船长决策的企业级改造项（演示环境 192.168.16.132 本机宿主机访问，加固兼顾演示便利不锁死本机）：

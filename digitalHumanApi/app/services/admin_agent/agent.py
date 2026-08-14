@@ -115,6 +115,8 @@ _STEP_LABELS: Dict[str, str] = {
     "query_statistics": "正在查询运营数据…",
     "rebuild_rag_index": "正在重建知识库索引…",
     "view_home_highlights": "正在查询首页数据…",
+    "list_character_models": "正在查询数字人形象…",
+    "set_character_model": "正在设置数字人形象…",
     "list_users": "正在查询账号列表…",
     "get_user_detail": "正在查询账号详情…",
     "create_user": "正在创建账号…",
