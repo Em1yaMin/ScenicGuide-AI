@@ -2,9 +2,9 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useVisitorStore } from '@/stores/visitor'
 import { useAuthStore } from '@/stores/auth'
-import { API_VISITOR_RECOMMENDED_QUESTIONS, API_PUBLIC_DH_CHARACTER } from '@/api'
+import { API_VISITOR_RECOMMENDED_QUESTIONS } from '@/api'
+import { fetchPublicCharacter } from '@/api/dhCharacter'
 import { fetchWithCodeEnvelope } from '@/utils/fetchWithCodeEnvelope'
-import type { DhCharacterResponse } from '@/types/dhCharacter'
 
 const store = useVisitorStore()
 const auth = useAuthStore()
@@ -12,18 +12,18 @@ const auth = useAuthStore()
 /**
  * 当前数字人形象：页面加载时先调公开接口 GET /api/v1/dh-character 取后端
  * 配置（管理后台形象管理页保存的全局形象），取到用接口值；失败/未取到
- * 回退 VITE_LIVE2D_MODEL || 'hiyori'。
+ * 回退 VITE_LIVE2D_MODEL || 'Hiyori'。
  */
-const live2dModel = ref(import.meta.env.VITE_LIVE2D_MODEL || 'hiyori')
+const live2dModel = ref(import.meta.env.VITE_LIVE2D_MODEL || 'Hiyori')
 
 async function loadLive2dModel() {
   try {
-    const data = await fetchWithCodeEnvelope<DhCharacterResponse>(API_PUBLIC_DH_CHARACTER)
+    const data = await fetchPublicCharacter()
     if (data.character) {
       live2dModel.value = data.character
     }
   } catch {
-    // 失败/接口不可达：保持默认（VITE_LIVE2D_MODEL || 'hiyori'），不阻断对话页
+    // 失败/接口不可达：保持默认（VITE_LIVE2D_MODEL || 'Hiyori'），不阻断对话页
   }
 }
 
@@ -109,7 +109,7 @@ onMounted(async () => {
     await auth.enterGuestMode()
   }
   // 动态形象 + 游客登记 + 推荐问句并行加载，全部就绪后再渲染 iframe
-  //（live2d_model 参数以后端配置为准，接口失败回退 env/hiyori）
+  //（live2d_model 参数以后端配置为准，接口失败回退 env/Hiyori）
   await Promise.all([loadLive2dModel(), store.registerVisitor(), fetchRecommendedQuestions()])
   iframeReady.value = true
   if (iframeSrc.value) {

@@ -8,10 +8,7 @@
  * 目录一致），预览图 URL 按名称拼接 VITE_LIGHT4AI_URL + /characters/{name}/{name}.png。
  */
 import { computed, onMounted, reactive, ref } from 'vue'
-import { fetchWithCodeEnvelope } from '@/utils/fetchWithCodeEnvelope'
-import { adminApiHeaders } from '@/utils/adminHeaders'
-import { API_ADMIN_DH_CHARACTER } from '@/api'
-import type { DhCharacterResponse } from '@/types/dhCharacter'
+import { fetchAdminCharacter, updateAdminCharacter } from '@/api/dhCharacter'
 
 // ── State ──
 const character = ref('') // 当前生效形象
@@ -43,10 +40,7 @@ async function fetchList() {
   isLoading.value = true
   error.value = null
   try {
-    const data = await fetchWithCodeEnvelope<DhCharacterResponse>(
-      API_ADMIN_DH_CHARACTER,
-      { headers: adminApiHeaders(false) },
-    )
+    const data = await fetchAdminCharacter()
     character.value = data.character
     available.value = data.available ?? []
   } catch (e) {
@@ -74,14 +68,7 @@ async function doSave() {
   saveError.value = null
   saveSuccess.value = false
   try {
-    const data = await fetchWithCodeEnvelope<DhCharacterResponse>(
-      API_ADMIN_DH_CHARACTER,
-      {
-        method: 'PUT',
-        headers: adminApiHeaders(),
-        body: JSON.stringify({ character: pendingName.value }),
-      },
-    )
+    const data = await updateAdminCharacter(pendingName.value)
     character.value = data.character
     showConfirm.value = false
     saveSuccess.value = true
