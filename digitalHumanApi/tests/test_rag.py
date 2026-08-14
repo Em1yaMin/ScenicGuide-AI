@@ -237,6 +237,7 @@ def _make_minimax_emb(model: str = "embo-01", calls: dict = None):
         api_key="test-key",
         api_base="https://api.minimaxi.com/v1",
         model=model,
+        api_style="minimax",
         _transport=_counting_transport(calls),
     )
 
@@ -562,6 +563,7 @@ def test_degraded_api_session_keeps_sidecar_tfidf_restart_recomputes(tmp_path):
         api_key="test-key",
         api_base="https://api.minimaxi.com/v1",
         model="embo-01",
+        api_style="minimax",
         _transport=httpx.MockTransport(failing_handler),
     )
     store2 = SimpleVectorStore(
