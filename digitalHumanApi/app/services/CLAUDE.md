@@ -31,6 +31,7 @@ services/
   admin_agent/        # 管理端 agent（批次6 B4，deepagents 装配模式变体，X-Admin-Token 鉴权由路由层保证）— agent.py（get_agent 缓存/chat/chat_stream，复用 harness 装配常量，SSE 契约与用户侧一致）、tools.py（管理工具集：知识库/记忆/公告/统计/RAG 索引/首页数据/账号管理，复用既有 service；删除/禁用/重置密码类两阶段二次确认 + 写操作审计）、confirm.py（待确认项存储，短 TTL）；无会话持久化
   user_admin_service.py # 账号管理（2026-08-13）：用户列表/详情/创建/禁用启用/重置密码/删除（单目标级联 evaluations→dialogues→visitors→长期记忆→users），敏感操作 RBAC 由路由层把关，契约见 doc/account-admin-api.md
   admin_audit_service.py # 管理员操作审计落库（2026-08-13）：record_audit 写 admin_audit_logs（与业务同一事务），供查询接口与管理页展示
+  dh_character_service.py # 数字人形象配置（2026-08-14）：get_character/set_character（app_settings 表 upsert 单行，key=digital_human_character；无记录/非法值回退默认 Hiyori 不写库，见 AGENTS.md「数字人形象管理」专节）
   dify_stream.py      # stream_dify_chat() — Dify Chat Agent 流式客户端（response_mode=streaming，SSE 解析 + ThinkFilter 过滤 think 块，双轨流式的兜底链路）
 ```
 

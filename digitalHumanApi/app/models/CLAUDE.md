@@ -22,6 +22,7 @@ models/
   user.py             # User — 注册用户（username 唯一；登录用户才有长期记忆；2026-08-13 软禁用字段 is_disabled/disabled_at）
   usage.py            # LLMUsage — token 用量记账（C5）
   admin_audit.py      # AdminAudit — 管理员操作审计日志（operator/action/target/detail，账号管理 2026-08-13）
+  app_setting.py      # AppSetting — 通用 key-value 配置表（key PK/value/updated_at）+ 数字人形象常量（DIGITAL_HUMAN_CHARACTERS 13 个，2026-08-14，见 AGENTS.md「数字人形象管理」专节）
   __init__.py         # 重导出 Base + 所有模型（使 autogenerate/Base.metadata 发现所有表）
 ```
 
