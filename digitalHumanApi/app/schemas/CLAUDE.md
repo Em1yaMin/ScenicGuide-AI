@@ -26,6 +26,7 @@ schemas/
   auth.py       # RegisterRequest / LoginRequest / UserResponse / AuthResponse / GuestResponse
   memory_admin.py # 记忆管理（B5）：AdminMemoryItem/CreateRequest/UpdateRequest/DeleteResponse + AdminUserItem/ListResponse，契约见 doc/memory-admin-api.md
   user_admin.py   # 账号管理（2026-08-13）：AdminUserItem/ListResponse/CreateRequest/SetDisabledRequest/ResetPasswordRequest/ResetPasswordResponse/DeleteResponse + AdminAuditLogItem/ListResponse，契约见 doc/account-admin-api.md
+  dh_character.py # 数字人形象（2026-08-14）：DhCharacterResponse（character/available）/DhCharacterUpdateRequest（field_validator 校验形象名 ∈ 常量列表，非法 422，见 AGENTS.md「数字人形象管理」专节）
 ```
 
 ## Request/Response Pair Pattern

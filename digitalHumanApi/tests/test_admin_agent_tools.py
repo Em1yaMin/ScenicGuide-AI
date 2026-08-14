@@ -118,6 +118,8 @@ async def test_all_tools_reject_non_admin_context():
         (tools.query_statistics, {}),
         (tools.rebuild_rag_index, {}),
         (tools.view_home_highlights, {}),
+        (tools.list_character_models, {}),
+        (tools.set_character_model, {"character": "Mao"}),
         (tools.confirm_operation, {"operation_id": "abc"}),
     ]
     for t, args in cases:

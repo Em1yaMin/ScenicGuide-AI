@@ -30,6 +30,7 @@ MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 BUSINESS_TABLES = {
     "admin_audit_logs",
     "announcements",
+    "app_settings",
     "dialogues",
     "evaluations",
     "knowledge_base",
@@ -256,22 +257,59 @@ def test_announcements_migration_upgrade_downgrade(tmp_path):
     finally:
         conn.close()
 
-    # 回退到基线：仅删除 announcements / llm_usage / admin_audit_logs
+    # 回退到基线：仅删除 announcements / llm_usage / admin_audit_logs / app_settings
     #（均在基线之后引入，同被回退），其余早期表保留
     command.downgrade(cfg, "04436fda61c5")
     tables = _table_sql(db)["tables"]
     assert "announcements" not in tables
     assert "llm_usage" not in tables
     assert "admin_audit_logs" not in tables
+    assert "app_settings" not in tables
     assert set(tables) == BUSINESS_TABLES - {
         "announcements",
         "llm_usage",
         "admin_audit_logs",
+        "app_settings",
     }
 
     # 再次升级可重建
     command.upgrade(cfg, "head")
     assert "announcements" in _table_sql(db)["tables"]
+    assert _current_revision(db) == _head_revision(cfg)
+
+
+# ---------- 批次8 数字人形象：app_settings 表迁移 ----------
+
+def test_app_settings_migration_upgrade_downgrade(tmp_path):
+    """app_settings 表迁移：upgrade 建表 → downgrade 回退删表，其余表不受影响。"""
+    db = tmp_path / "settings.db"
+    cfg = _make_config(db)
+    command.upgrade(cfg, "head")
+
+    assert "app_settings" in _table_sql(db)["tables"]
+    # 新表可正常读写（key 主键 upsert）
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "INSERT INTO app_settings (key, value, updated_at) "
+            "VALUES ('digital_human_character', 'Hiyori', '2026-08-14 00:00:00')"
+        )
+        conn.commit()
+        assert conn.execute(
+            "SELECT value FROM app_settings WHERE key='digital_human_character'"
+        ).fetchone()[0] == "Hiyori"
+    finally:
+        conn.close()
+
+    # 回退到审计表版本：仅删除 app_settings，其余表保留
+    command.downgrade(cfg, "a9f0e1d2c3b4")
+    tables = _table_sql(db)["tables"]
+    assert "app_settings" not in tables
+    assert set(tables) == BUSINESS_TABLES - {"app_settings"}
+
+    # 再次升级可重建
+    command.upgrade(cfg, "head")
+    assert "app_settings" in _table_sql(db)["tables"]
     assert _current_revision(db) == _head_revision(cfg)
 
 
@@ -300,12 +338,13 @@ def test_llm_usage_migration_upgrade_downgrade(tmp_path):
     finally:
         conn.close()
 
-    # 回退到公告表版本：仅删除 llm_usage / admin_audit_logs，其余表保留
+    # 回退到公告表版本：仅删除 llm_usage / admin_audit_logs / app_settings，其余表保留
     command.downgrade(cfg, "e06ede5acb5a")
     tables = _table_sql(db)["tables"]
     assert "llm_usage" not in tables
     assert "admin_audit_logs" not in tables
-    assert set(tables) == BUSINESS_TABLES - {"llm_usage", "admin_audit_logs"}
+    assert "app_settings" not in tables
+    assert set(tables) == BUSINESS_TABLES - {"llm_usage", "admin_audit_logs", "app_settings"}
 
     # 再次升级可重建
     command.upgrade(cfg, "head")

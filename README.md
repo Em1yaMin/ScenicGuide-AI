@@ -67,8 +67,9 @@
 
 | 能力 | 说明 |
 |------|------|
-| **管理员 AI Agent** | 后台自然语言运维：知识库/用户记忆/公告/账号管理/运营统计/RAG 重建索引/首页数据；删除类两阶段二次确认（TTL 过期自动失效）+ 写操作审计日志；SSE 事件契约与用户侧一致 |
+| **管理员 AI Agent** | 后台自然语言运维：知识库/用户记忆/公告/账号管理/数字人形象/运营统计/RAG 重建索引/首页数据；删除类两阶段二次确认（TTL 过期自动失效）+ 写操作审计日志；SSE 事件契约与用户侧一致 |
 | **账号管理 + 操作审计** | 账号全生命周期（创建/禁用/重置密码/删除，敏感操作要求 admin 角色，删除为单目标级联）；管理员敏感操作审计日志落库 `admin_audit_logs` 表，后台可查询 |
+| **数字人形象管理** | 13 个 Live2D 形象（与 ADH `public/characters/` 一致，默认 Hiyori）持久化于 `app_settings` 表；公开/管理端 API + 管理员 Agent 工具（list_character_models / set_character_model，写操作审计，非法形象名 422） |
 | **AI 运营分析** | 数据大屏 + 报告：情感趋势/满意度/热点关注/景点热度；LLM 分析失败自动回退纯 DB 统计（`llm_analysis` 降级标记） |
 | **本地量化评估** | 对话内容本地 LLM 量化评估（情感/满意度/关注点/涉及景点/改进建议）写入 Evaluation 表，驱动管理后台数据（已脱离 Dify Workflow） |
 | **token 成本仪表盘** | 统一埋点（对话/推荐/评估/压缩/管理 agent 全链路）+ 批量写库 + 报表 API（趋势/维度聚合/明细/CSV 导出）+ 前端成本仪表盘页（ECharts 柱状趋势图） |
@@ -110,7 +111,7 @@
 ```
 
 - **访客端**：首页（公告 + 热门景点 + 推荐问句）+ 数字人对话页（iframe 嵌入 ADH，内置完整对话/语音功能）
-- **管理后台**：数据大屏、分析报告、知识库管理、公告管理、记忆管理、管理员 Agent、成本仪表盘、账号管理（含操作审计）
+- **管理后台**：数据大屏、分析报告、知识库管理、公告管理、记忆管理、管理员 Agent、成本仪表盘、账号管理（含操作审计）、数字人形象管理
 - **ADH 本地数字人**：基于 awesome-digital-human-live2d 定制，引擎化架构（Registry + Factory + Pool），LangChainAgent 默认引擎直连本后端对话接口
 
 ### 技术栈
@@ -150,7 +151,7 @@
 │   │   │                       # memory_store.py（短期记忆）/ migrations.py（启动自动迁移）
 │   │   │                       # security.py / rate_limiter.py / logging_config.py
 │   │   ├── models/             # SQLAlchemy ORM 实体（dialogue/evaluation/stat/user/visitor/
-│   │   │                       #   knowledge/announcement/usage/admin_audit）
+│   │   │                       #   knowledge/announcement/usage/admin_audit/app_setting）
 │   │   ├── schemas/            # Pydantic v2 请求/响应模型
 │   │   ├── data/               # 本地 JSON 数据源（景点、路线）
 │   │   ├── services/           # 业务逻辑
@@ -165,11 +166,11 @@
 │   │   │   └── usage_tracker.py / usage_report.py            # token 记账 / 报表
 │   │   ├── routers/            # FastAPI 端点（auth/dialogue/recommend/analysis/admin/
 │   │   │                       #   knowledge/announcement/memory_admin/admin_agent/user_admin/
-│   │   │                       #   rag/usage/home/visitor）
+│   │   │                       #   scenic/dh_character/rag/usage/home/visitor）
 │   │   └── tasks/              # 后台循环（polling/analysis/recommend_questions/
 │   │                           #   memory_cleanup）+ backfill CLI
-│   ├── migrations/             # Alembic（versions/：初始基线 + 公告表 + llm_usage 表 + 审计表 + users 加列）
-│   ├── tests/                  # pytest 测试套件（827 用例）
+│   ├── migrations/             # Alembic（versions/：初始基线 + 公告表 + llm_usage 表 + 审计表 + users 加列 + app_settings 表）
+│   ├── tests/                  # pytest 测试套件（844 用例）
 │   ├── scripts/                # smoke_llm / smoke_amap / backup_db.sh
 │   └── doc/                    # 后端权威契约文档（见文档索引）
 ├── digitalHumanVue/            # Vue 3 前端（:5173）
@@ -346,6 +347,7 @@ docker-compose up -d --build
 | `/api/admin/users*` | 账号管理（列表/详情/创建/禁用/重置密码/删除 + 审计日志查询；敏感操作要求 admin 角色，删除单目标级联） |
 | `/api/admin/agent/chat`（+ `/chat/stream`） | 管理员 Agent 对话（两阶段删除确认 + 审计） |
 | `/api/admin/usage/overview` / `details` / `export` | token 用量报表（趋势/明细/CSV 导出） |
+| `GET /api/v1/dh-character` / `GET·PUT /api/admin/dh-character` | 数字人形象（公开读取 / 管理端读取+设置；写操作审计，非法形象名 422） |
 | `POST /api/rag/search` / `index` / `GET /api/rag/status` | RAG 统一检索 / 重建索引 / 状态（含 embedding 后端与降级标记） |
 
 ## 文档索引
@@ -389,7 +391,7 @@ docker-compose up -d --build
 ```bash
 cd digitalHumanApi
 pip install -r requirements-dev.txt
-pytest -v                                   # 全量 827 用例（内存 SQLite，无外部依赖）
+pytest -v                                   # 全量 844 用例（内存 SQLite，无外部依赖）
 pytest -q --cov=app --cov-report=term:skip-covered --cov-fail-under=75   # 覆盖率门禁（阈值 75%，基线 84%+）
 ```
 

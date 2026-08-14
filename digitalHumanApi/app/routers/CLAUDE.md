@@ -23,6 +23,7 @@ routers/
   memory_admin.py # /api/admin/memories*（users 列表 + 按用户查/增/改/删记忆）— X-Admin-Token 认证，管理员例外跨用户操作，删除需 admin 角色（RBAC，批次6 C3），审计日志见 doc/memory-admin-api.md
   user_admin.py   # /api/admin/users*（账号管理：列表/详情/创建/禁用/重置密码/删除 + 审计日志查询，2026-08-13）— X-Admin-Token 认证，敏感操作（禁用/重置密码/删除）要求 admin 角色，契约见 doc/account-admin-api.md
   admin_agent.py # /api/admin/agent/chat + /chat/stream（管理 agent 对话，非流式 + SSE）— X-Admin-Token 认证，删除类两阶段二次确认 + 写操作审计，无 Dify 兜底（装配/工具集见 AGENTS.md「管理员 agent」专节）
+  dh_character.py # GET /api/v1/dh-character（公开）+ GET/PUT /api/admin/dh-character（X-Admin-Token 认证）— 数字人形象管理（2026-08-14），形象常量/校验见 app/models/app_setting.py，契约见 AGENTS.md「数字人形象管理」专节
   dialogue.py  # POST /api/v1/dialogue/chat（双轨：deepagents 装配层主链路 + Dify 回落；streaming=true 时返回 SSE 流式事件，见 README「SSE 流式对话」）、/rag-context（ADH 用）、/sync-now（任务触发器，绕过服务层）
   analysis.py  # POST /api/v1/analysis/run-now — 任务触发器
   recommend.py # POST /api/v1/recommend — 个性化路线推荐
