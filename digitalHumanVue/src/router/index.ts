@@ -33,6 +33,11 @@ const router = createRouter({
           component: () => import('@/views/admin/AnnouncementView.vue'),
         },
         {
+          path: 'character',
+          name: 'admin-character',
+          component: () => import('@/views/admin/CharacterView.vue'),
+        },
+        {
           path: 'memories',
           name: 'admin-memories',
           component: () => import('@/views/admin/MemoryView.vue'),

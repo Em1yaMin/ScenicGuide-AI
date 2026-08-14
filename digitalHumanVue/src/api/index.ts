@@ -35,3 +35,6 @@ export const API_ADMIN_SCENIC_ROUTES = '/api/admin/scenic/routes'
 // 账号管理（2026-08-13 船长需求：账号全生命周期 + 操作审计日志）
 export const API_ADMIN_USERS = '/api/admin/users'
 export const API_ADMIN_USERS_AUDIT_LOGS = '/api/admin/users/audit-logs'
+// 数字人形象管理（2026-08-14 后端 PR #99：app_settings 表 + 访客/管理端 API）
+export const API_PUBLIC_DH_CHARACTER = '/api/v1/dh-character'
+export const API_ADMIN_DH_CHARACTER = '/api/admin/dh-character'

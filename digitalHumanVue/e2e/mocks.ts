@@ -99,6 +99,29 @@ export const recommendedQuestions = {
   questions: ['灵山有哪些必打卡景点？', '带老人小孩玩一天怎么安排？', '推荐一条适合拍照的路线'],
 }
 
+/**
+ * 数字人形象（GET /api/v1/dh-character 与 /api/admin/dh-character，
+ * 后端 PR #99 契约 { character, available }；available 13 个与后端常量一致）
+ */
+export const dhCharacter = {
+  character: 'Hiyori',
+  available: [
+    'Chitose',
+    'Epsilon',
+    'Haru-1',
+    'Haru-2',
+    'Hibiki',
+    'Hiyori',
+    'Izumi',
+    'Kei',
+    'Mao',
+    'Miara',
+    'Rice',
+    'Shizuku',
+    'Tsumiki',
+  ],
+}
+
 /** 游客 token 签发（POST /api/v1/auth/guest） */
 export const guestResponse = {
   access_token: 'e2e-guest-token',
@@ -360,9 +383,18 @@ export async function mockApiRoutes(page: Page): Promise<void> {
         return respond({ ok: true })
       case 'GET /api/v1/visitor/recommended-questions':
         return respond(recommendedQuestions)
+      case 'GET /api/v1/dh-character':
+        return respond(dhCharacter)
       // ── 管理端 ──
       case 'GET /api/admin/knowledge':
         return respond(knowledgeList)
+      case 'GET /api/admin/dh-character':
+        return respond(dhCharacter)
+      case 'PUT /api/admin/dh-character': {
+        // 契约：返回设置后的形象（后端 set_admin_character 回显新值）
+        const body = req.postDataJSON() as { character?: string } | null
+        return respond({ ...dhCharacter, character: body?.character ?? dhCharacter.character })
+      }
       case 'GET /api/admin/scenic/spots':
         return respond(scenicSpots)
       case 'GET /api/admin/scenic/routes':

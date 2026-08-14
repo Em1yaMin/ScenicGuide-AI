@@ -166,4 +166,35 @@ test.describe('管理端', () => {
 
     expect(errors).toEqual([])
   })
+
+  test('形象管理页：卡片网格渲染 + 当前形象高亮 + 切换保存', async ({ page }) => {
+    const errors = attachPageErrorCollector(page)
+    await presetAdminLogin(page)
+    await mockApiRoutes(page)
+    await page.goto('/admin/character')
+
+    // 侧栏导航 + 页面头部
+    await expect(page.locator('.sidebar-nav')).toContainText('形象管理')
+    await expect(page.locator('.page-header h1')).toContainText('形象管理')
+
+    // 13 个形象卡片渲染（mock available 与后端常量一致）
+    const cards = page.locator('.character-card')
+    await expect(cards).toHaveCount(13)
+
+    // 当前形象徽标 + 卡片高亮（mock character=Hiyori）
+    await expect(page.locator('.current-badge')).toContainText('Hiyori')
+    await expect(page.locator('.character-card.active')).toHaveCount(1)
+    await expect(page.locator('.character-card.active')).toContainText('Hiyori')
+    await expect(page.locator('.character-card.active .active-seal')).toHaveText('当前')
+
+    // 点击另一形象 → 确认弹窗 → 确认保存 → 高亮切换 + 成功提示
+    await cards.filter({ hasText: 'Mao' }).click()
+    await expect(page.locator('.modal-panel')).toContainText('确认切换形象')
+    await page.getByRole('button', { name: '确认切换' }).click()
+    await expect(page.locator('.success-tip')).toContainText('Mao')
+    await expect(page.locator('.character-card.active')).toContainText('Mao')
+    await expect(page.locator('.current-badge')).toContainText('Mao')
+
+    expect(errors).toEqual([])
+  })
 })

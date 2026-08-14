@@ -27,7 +27,12 @@ export default function Live2d() {
         }
 
         LAppDelegate.getInstance().run();
-        CharacterManager.getInstance().setCharacter(character);
+        // live2d_model URL 参数：主站管理后台配置的全局形象（优先级高于本地
+        // 记忆/localStorage 默认，嵌入模式经主站 ChatView iframe 透传）；
+        // 无参数或为空时保持本地所选形象不变（现有行为）
+        const urlModel = new URLSearchParams(window.location.search).get('live2d_model');
+        const active = urlModel && urlModel.trim() !== '' ? urlModel : character;
+        CharacterManager.getInstance().setCharacter(active);
 
     }
 
