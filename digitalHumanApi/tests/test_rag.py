@@ -237,6 +237,7 @@ def _make_minimax_emb(model: str = "embo-01", calls: dict = None):
         api_key="test-key",
         api_base="https://api.minimaxi.com/v1",
         model=model,
+        api_style="minimax",
         _transport=_counting_transport(calls),
     )
 
@@ -324,6 +325,8 @@ def test_vector_cache_invalidated_on_embedding_config_change(tmp_path):
     )
     assert calls2["count"] > 0, "配置变更后必须重新向量化"
     assert store2.count() == 10
+    # 可观测标记按实际后端展示（openai 风格 = Qwen/DashScope）
+    assert store2.embedding_backend == "qwen-dashscope"
 
     # sidecar 绑定已更新为新配置
     with open(tmp_path / "cfg_change_vectors.json", encoding="utf-8") as f:
@@ -560,6 +563,7 @@ def test_degraded_api_session_keeps_sidecar_tfidf_restart_recomputes(tmp_path):
         api_key="test-key",
         api_base="https://api.minimaxi.com/v1",
         model="embo-01",
+        api_style="minimax",
         _transport=httpx.MockTransport(failing_handler),
     )
     store2 = SimpleVectorStore(

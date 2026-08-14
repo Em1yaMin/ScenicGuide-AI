@@ -130,6 +130,7 @@ def test_minimax_embeddings_native_request():
         api_key="test-key",
         api_base="https://api.minimaxi.com/v1",
         model="embo-01",
+        api_style="minimax",
         _transport=_mock_minimax_transport(captured),
     )
     vecs = emb.embed_documents(["你好", "世界"])
@@ -166,6 +167,7 @@ def test_minimax_embeddings_parses_openai_compat_response():
         api_key="k",
         api_base="https://api.minimaxi.com/v1",
         model="embo-01",
+        api_style="minimax",
         _transport=httpx.MockTransport(handler),
     )
     vecs = emb.embed_documents(["a", "b"])
@@ -193,6 +195,7 @@ def test_minimax_embeddings_batches_large_inputs():
         api_key="k",
         api_base="https://api.minimaxi.com/v1",
         model="embedding-1",
+        api_style="minimax",
         batch_size=2,
         _transport=httpx.MockTransport(handler),
     )
@@ -343,6 +346,7 @@ def test_minimax_embeddings_base_resp_business_error():
         api_key="k",
         api_base="https://api.minimaxi.com/v1",
         model="embo-01",
+        api_style="minimax",
         _transport=httpx.MockTransport(handler),
     )
     with pytest.raises(RuntimeError, match="1008") as exc_info:
@@ -555,6 +559,7 @@ def test_store_with_minimax_mock_end_to_end(tmp_path):
         api_key="test-key",
         api_base="https://api.minimaxi.com/v1",
         model="embedding-1",
+        api_style="minimax",
         _transport=_mock_minimax_transport(captured),
     )
     store = SimpleVectorStore(
