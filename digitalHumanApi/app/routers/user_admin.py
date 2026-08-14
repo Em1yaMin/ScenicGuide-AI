@@ -18,8 +18,10 @@
 
 **审计（落库强制）**：全部敏感操作（创建/禁用启用/重置密码/删除）经
 admin_audit_service.record_audit 写入 admin_audit_logs 表（操作人 = 管理员
-账号名 / X-Admin-Token 值），与业务同一事务提交；删除类操作由管理员 agent
-两阶段二次确认（confirm.py）执行后同样落审计（operator=admin-agent）。
+账号名；X-Admin-Token 路径记录固定标签 x-admin-token、不落凭证明文——
+审计列表 operator 角色可读，防 token 经审计面泄露），与业务同一事务提交；
+删除类操作由管理员 agent 两阶段二次确认（confirm.py）执行后同样落审计
+（operator=admin-agent）。
 """
 import logging
 from typing import Optional
@@ -52,11 +54,12 @@ def _resolve_operator(
     x_admin_token: str = "",
     authorization: str = "",
 ) -> str:
-    """解析操作人标识（审计用）：优先管理员 JWT 的账号名，回退 X-Admin-Token 值。"""
+    """解析操作人标识（审计用）：优先管理员 JWT 的账号名；X-Admin-Token 路径
+    使用固定标签（不落凭证明文，防 operator 经审计列表读取 admin token 提权）。"""
     payload = decode_bearer(authorization)
     if payload is not None and payload.get("typ") == "admin":
         return str(payload.get("sub") or "admin")
-    return x_admin_token or "admin"
+    return "x-admin-token" if x_admin_token else "admin"
 
 
 def _http_error(e: user_admin_service.UserAdminError) -> HTTPException:

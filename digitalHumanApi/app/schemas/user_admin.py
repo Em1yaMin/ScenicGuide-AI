@@ -6,7 +6,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.auth import USERNAME_PATTERN
 
@@ -62,7 +62,7 @@ class AdminUserSetDisabledRequest(BaseModel):
 
 
 class AdminUserResetPasswordRequest(BaseModel):
-    """重置密码请求：new_password 为空时由服务端生成临时密码。"""
+    """重置密码请求：new_password 为空（缺省或空串）时由服务端生成临时密码。"""
 
     new_password: Optional[str] = Field(
         None,
@@ -70,6 +70,11 @@ class AdminUserResetPasswordRequest(BaseModel):
         max_length=64,
         description="新密码（至少 6 位；留空则由系统生成临时密码）",
     )
+
+    @field_validator("new_password", mode="before")
+    @classmethod
+    def _empty_to_none(cls, value: Optional[str]) -> Optional[str]:
+        return None if value == "" else value
 
 
 class AdminUserResetPasswordResponse(BaseModel):

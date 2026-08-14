@@ -214,10 +214,10 @@ async def test_create_user_success_and_audit(client: AsyncClient, db_session: As
     assert data["is_disabled"] is False
     assert "password" not in data
 
-    # 审计落库（操作人 = X-Admin-Token 值）
+    # 审计落库（操作人 = X-Admin-Token 固定标签，不落凭证明文）
     rows = await _audit_rows(db_session)
     assert len(rows) == 1
-    assert rows[0].operator == ADMIN_TOKEN
+    assert rows[0].operator == "x-admin-token"
     assert rows[0].action == "create"
     assert rows[0].target_username == "newbie"
 
@@ -419,6 +419,23 @@ async def test_reset_password_generated_temp(client: AsyncClient, db_session: As
 
 
 @pytest.mark.asyncio
+async def test_reset_password_empty_string_generates_temp(
+    client: AsyncClient, db_session: AsyncSession
+):
+    """显式传空串 new_password 与缺省等价：生成临时密码而非 422。"""
+    uid = await _seed_user(db_session, "empty_pw")
+    resp = await client.post(
+        f"{API}/{uid}/reset-password",
+        json={"new_password": ""},
+        headers=_auth(),
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["generated"] is True
+    assert len(data["new_password"]) >= 8
+
+
+@pytest.mark.asyncio
 async def test_reset_password_not_found(client: AsyncClient):
     resp = await client.post(
         f"{API}/9999/reset-password", json={}, headers=_auth()
@@ -571,10 +588,10 @@ async def test_rbac_operator_read_only(
     ).status_code == 403
     assert (await client.delete(f"{API}/{uid}", headers=op_headers)).status_code == 403
 
-    # 被 403 拒绝的敏感操作未执行、未写审计；仅创建写了一条审计（operator=op-token）
+    # 被 403 拒绝的敏感操作未执行、未写审计；仅创建写了一条审计（operator=x-admin-token 标签）
     user = await db_session.get(User, uid)
     assert user is not None and user.is_disabled is False
     rows = await _audit_rows(db_session)
     assert [r.action for r in rows] == ["create"]
-    assert rows[0].operator == OPERATOR_TOKEN
+    assert rows[0].operator == "x-admin-token"
     assert rows[0].target_username == "op_created"
