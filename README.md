@@ -151,7 +151,7 @@
 │   │   │                       # memory_store.py（短期记忆）/ migrations.py（启动自动迁移）
 │   │   │                       # security.py / rate_limiter.py / logging_config.py
 │   │   ├── models/             # SQLAlchemy ORM 实体（dialogue/evaluation/stat/user/visitor/
-│   │   │                       #   knowledge/announcement/usage/admin_audit）
+│   │   │                       #   knowledge/announcement/usage/admin_audit/app_setting）
 │   │   ├── schemas/            # Pydantic v2 请求/响应模型
 │   │   ├── data/               # 本地 JSON 数据源（景点、路线）
 │   │   ├── services/           # 业务逻辑
@@ -166,11 +166,11 @@
 │   │   │   └── usage_tracker.py / usage_report.py            # token 记账 / 报表
 │   │   ├── routers/            # FastAPI 端点（auth/dialogue/recommend/analysis/admin/
 │   │   │                       #   knowledge/announcement/memory_admin/admin_agent/user_admin/
-│   │   │                       #   rag/usage/home/visitor）
+│   │   │                       #   scenic/dh_character/rag/usage/home/visitor）
 │   │   └── tasks/              # 后台循环（polling/analysis/recommend_questions/
 │   │                           #   memory_cleanup）+ backfill CLI
-│   ├── migrations/             # Alembic（versions/：初始基线 + 公告表 + llm_usage 表 + 审计表 + users 加列）
-│   ├── tests/                  # pytest 测试套件（827 用例）
+│   ├── migrations/             # Alembic（versions/：初始基线 + 公告表 + llm_usage 表 + 审计表 + users 加列 + app_settings 表）
+│   ├── tests/                  # pytest 测试套件（844 用例）
 │   ├── scripts/                # smoke_llm / smoke_amap / backup_db.sh
 │   └── doc/                    # 后端权威契约文档（见文档索引）
 ├── digitalHumanVue/            # Vue 3 前端（:5173）
