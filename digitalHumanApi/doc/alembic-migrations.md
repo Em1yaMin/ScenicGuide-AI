@@ -12,16 +12,19 @@
   | 库状态 | 动作 | 说明 |
   |--------|------|------|
   | 空库（无任何表） | `upgrade head` | 从零建齐全部表 |
-  | 遗留库（有业务表、无 `alembic_version`） | 幂等 `create_all` → `stamp head` | 先补建历史增量引入的缺失业务表，再基线化当前版本，**不丢数据** |
+  | 遗留库（有业务表、无 `alembic_version`） | 幂等 `create_all` → `stamp` 基线 → `upgrade head` | 先补建历史增量引入的缺失业务表，再重放全部迁移（**迁移全部防御性/幂等编写**，create_all 已建的表/索引/列自动跳过，仅旧形状库缺失的列变更真正执行），**不丢数据** |
   | 已版本化库（有 `alembic_version`） | `upgrade head` | 应用待执行迁移 |
 - 遗留库补表原因：业务表历史上增量引入（knowledge_base 在 #3、users 在 #14 才加入），直接 stamp
-  会把缺表状态永久钉死在当前版本（后续 upgrade 为 no-op），因此 stamp 前先执行幂等 `create_all`
-  （IF NOT EXISTS 语义）补齐缺失业务表。
+  会把缺表状态永久钉死在当前版本，因此 stamp 前先执行幂等 `create_all`（IF NOT EXISTS 语义）补齐缺失业务表。
+  **2026-08-13 起遗留库 stamp 到基线（down_revision=None 的起始迁移）再 `upgrade head` 重放全部迁移**——
+  直接 stamp head 会让旧形状遗留库（历史 create_all 产物）缺失「对既有表的列变更」（如账号管理的 users 加列）；
+  stamp 基线后 upgrade 只应用 head 与基线之间的迁移（内含列存在性防御检查）。
 - 迁移失败自动回退 `create_all`（幂等 IF NOT EXISTS），不阻断启动（仅告警日志）。
 - 独立 CLI（`app/tasks/backfill.py`）同样调用 `run_migrations()`，与 lifespan 行为一致。
 - 初始迁移（`04436fda61c5`）由 autogenerate 生成并复核：**其 DDL 产物与 ORM create_all
   逐字节一致**（测试 `test_upgraded_schema_matches_orm_metadata` 守护），这是遗留库
-  stamp 基线不产生 schema 漂移的前提。
+  stamp 基线不产生 schema 漂移的前提。**该迁移与后续全部迁移均以防御性（幂等）写法维护**
+  （建表前查表存在性、建索引前查索引存在性），保证遗留库路径重放不报重复 DDL。
 
 ## 二、命令入口（均在 `digitalHumanApi/` 目录下执行）
 
@@ -52,6 +55,11 @@ alembic history               # 迁移历史
 
 - **SQLite 改列**：环境已开 `render_as_batch=True`，autogenerate 会产出
   `op.batch_alter_table(...)`（表重建模式），直接沿用即可；不要手写裸 `ALTER TABLE`。
+- **加列优先原生 `op.add_column`**（2026-08-13 约定）：batch 重建会带引号改写 sqlite_master，
+  破坏 `test_upgraded_schema_matches_orm_metadata` 的 DDL 等价性验收；同时保持列序与 ORM 声明一致。
+- **全部迁移须防御性（幂等）编写**（2026-08-13 约定）：建表前 `has_table`、加列前列存在性检查、
+  建索引前索引存在性检查，downgrade 同样防御——否则遗留库路径（create_all + stamp 基线 + upgrade head）
+  重放全部迁移时会重复 DDL 报错（详见 `doc/account-admin-api.md`「迁移说明」）。
 - 新增表/索引等常规变更无特殊要求。
 - 禁止删除或改名生产表（约束：不删除现有数据表）；确需结构性变更先在文档与代码评审中说明。
 
@@ -67,10 +75,12 @@ alembic history               # 迁移历史
 - `migrations/versions/` — 版本文件（`04436fda61c5_初始_schema_基线.py` 为初始基线，
   `down_revision = None`）。
 - `app/core/migrations.py` — 程序化入口 `run_migrations()`（三态分流：空库 upgrade / 遗留库先幂等
-  create_all 补缺表再 stamp / 版本化库 upgrade；线程池执行，因 env.py 内部 `asyncio.run` 不能在运行中事件循环里直接调用）。
-- 测试 `tests/test_migrations.py` — 空库建齐 / DDL 与 ORM 等价 / 遗留库 stamp 后
-  upgrade no-op 不丢数据 / **遗留库缺表场景（仅部分表的遗留库 stamp 前 create_all 补齐缺失表、数据不丢）** /
-  版本化库幂等 / `run_migrations` 三态路径（全部用临时文件库，不触碰真实 digital_human.db）。
+  create_all 补缺表再 stamp 基线 + upgrade head 重放全部迁移 / 版本化库 upgrade；线程池执行，因 env.py 内部 `asyncio.run` 不能在运行中事件循环里直接调用）。
+- 测试 `tests/test_migrations.py`（13 用例） — 空库建齐 / DDL 与 ORM 等价 / 遗留库 stamp 后
+  upgrade 重放不丢数据 / **遗留库缺表场景（仅部分表的遗留库 stamp 前 create_all 补齐缺失表、数据不丢）** /
+  版本化库幂等 / `run_migrations` 三态路径 / 公告表、llm_usage、users 加列（`b4c3d2e1f0a9`）、审计表
+  （`a9f0e1d2c3b4`）升级回退 / **旧形状遗留库补列（仅部分表的旧形状库 upgrade 后补齐 users 新列）**
+  （全部用临时文件库，不触碰真实 digital_human.db）。
 
 ## 四、部署与升级（Docker）
 

@@ -8,7 +8,8 @@
 - **纯本地对话主链路**：deepagents 装配层（langgraph + langchain 1.x），Dify 仅作演示兜底（双轨回落）
 - **AI 记忆系统**：短期会话记忆（SQLite 落盘）+ 长期用户画像（向量库提取/检索/工具化四工具），登录用户个性化回答
 - **本地 RAG 知识库**：Qwen Embedding 向量化 + 向量落盘复用，无外部向量库依赖，管理后台 CRUD 自动同步索引
-- **管理员 AI Agent**：后台自然语言运维——知识库/公告/记忆/统计，删除类操作两阶段二次确认 + 审计日志
+- **管理员 AI Agent**：后台自然语言运维——知识库/公告/记忆/统计/账号管理，删除类操作两阶段二次确认 + 审计日志
+- **账号管理 + 操作审计**：账号全生命周期（创建/禁用/重置密码/删除，敏感操作要求 admin 角色），管理员敏感操作审计日志落库可查
 - **可观测、可运营**：token 成本仪表盘、AI 运营分析、本地 LLM 量化评估、多环境部署与数据库备份
 
 ---
@@ -66,7 +67,8 @@
 
 | 能力 | 说明 |
 |------|------|
-| **管理员 AI Agent** | 后台自然语言运维：知识库/用户记忆/公告/运营统计/RAG 重建索引/首页数据；删除类两阶段二次确认（TTL 过期自动失效）+ 写操作审计日志；SSE 事件契约与用户侧一致 |
+| **管理员 AI Agent** | 后台自然语言运维：知识库/用户记忆/公告/账号管理/运营统计/RAG 重建索引/首页数据；删除类两阶段二次确认（TTL 过期自动失效）+ 写操作审计日志；SSE 事件契约与用户侧一致 |
+| **账号管理 + 操作审计** | 账号全生命周期（创建/禁用/重置密码/删除，敏感操作要求 admin 角色，删除为单目标级联）；管理员敏感操作审计日志落库 `admin_audit_logs` 表，后台可查询 |
 | **AI 运营分析** | 数据大屏 + 报告：情感趋势/满意度/热点关注/景点热度；LLM 分析失败自动回退纯 DB 统计（`llm_analysis` 降级标记） |
 | **本地量化评估** | 对话内容本地 LLM 量化评估（情感/满意度/关注点/涉及景点/改进建议）写入 Evaluation 表，驱动管理后台数据（已脱离 Dify Workflow） |
 | **token 成本仪表盘** | 统一埋点（对话/推荐/评估/压缩/管理 agent 全链路）+ 批量写库 + 报表 API（趋势/维度聚合/明细/CSV 导出）+ 前端成本仪表盘页（ECharts 柱状趋势图） |
@@ -91,7 +93,7 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │  digitalHumanVue (Vue 3, :5173)                                 │
 │  访客端（首页/对话页）  +  管理后台（数据大屏/报告/知识库/公告/   │
-│  记忆管理/管理员Agent/成本仪表盘）                                │
+│  记忆管理/管理员Agent/成本仪表盘/账号管理）                       │
 └───────────────┬─────────────────────────────────────────────────┘
                 │ fetch(/api/*) → Vite proxy
 ┌───────────────▼─────────────────────────────────────────────────┐
@@ -108,7 +110,7 @@
 ```
 
 - **访客端**：首页（公告 + 热门景点 + 推荐问句）+ 数字人对话页（iframe 嵌入 ADH，内置完整对话/语音功能）
-- **管理后台**：数据大屏、分析报告、知识库管理、公告管理、记忆管理、管理员 Agent、成本仪表盘
+- **管理后台**：数据大屏、分析报告、知识库管理、公告管理、记忆管理、管理员 Agent、成本仪表盘、账号管理（含操作审计）
 - **ADH 本地数字人**：基于 awesome-digital-human-live2d 定制，引擎化架构（Registry + Factory + Pool），LangChainAgent 默认引擎直连本后端对话接口
 
 ### 技术栈
@@ -148,7 +150,7 @@
 │   │   │                       # memory_store.py（短期记忆）/ migrations.py（启动自动迁移）
 │   │   │                       # security.py / rate_limiter.py / logging_config.py
 │   │   ├── models/             # SQLAlchemy ORM 实体（dialogue/evaluation/stat/user/visitor/
-│   │   │                       #   knowledge/announcement/usage）
+│   │   │                       #   knowledge/announcement/usage/admin_audit）
 │   │   ├── schemas/            # Pydantic v2 请求/响应模型
 │   │   ├── data/               # 本地 JSON 数据源（景点、路线）
 │   │   ├── services/           # 业务逻辑
@@ -162,12 +164,12 @@
 │   │   │   ├── analytics_service.py / evaluation_service.py  # 运营分析 / 量化评估
 │   │   │   └── usage_tracker.py / usage_report.py            # token 记账 / 报表
 │   │   ├── routers/            # FastAPI 端点（auth/dialogue/recommend/analysis/admin/
-│   │   │                       #   knowledge/announcement/memory_admin/admin_agent/
+│   │   │                       #   knowledge/announcement/memory_admin/admin_agent/user_admin/
 │   │   │                       #   rag/usage/home/visitor）
 │   │   └── tasks/              # 后台循环（polling/analysis/recommend_questions/
 │   │                           #   memory_cleanup）+ backfill CLI
-│   ├── migrations/             # Alembic（versions/：初始基线 + 公告表 + llm_usage 表）
-│   ├── tests/                  # pytest 测试套件（680 用例）
+│   ├── migrations/             # Alembic（versions/：初始基线 + 公告表 + llm_usage 表 + 审计表 + users 加列）
+│   ├── tests/                  # pytest 测试套件（827 用例）
 │   ├── scripts/                # smoke_llm / smoke_amap / backup_db.sh
 │   └── doc/                    # 后端权威契约文档（见文档索引）
 ├── digitalHumanVue/            # Vue 3 前端（:5173）
@@ -266,7 +268,7 @@ node node_modules/next/dist/bin/next dev -p 3000
 | 访客端首页 | http://localhost:5173/visitor |
 | 数字人对话页 | http://localhost:5173/visitor/chat（iframe 嵌入 ADH） |
 | 管理后台（数据大屏） | http://localhost:5173/admin |
-| 管理后台（报告/知识库/公告/记忆/管理员Agent/成本仪表盘） | http://localhost:5173/admin/report · /admin/knowledge · /admin/announcements · /admin/memories · /admin/agent · /admin/usage |
+| 管理后台（报告/知识库/公告/记忆/管理员Agent/成本仪表盘/账号管理） | http://localhost:5173/admin/report · /admin/knowledge · /admin/announcements · /admin/memories · /admin/agent · /admin/usage · /admin/users |
 | ADH 数字人前端（调试） | http://localhost:3000 |
 | 后端 API 文档 | http://localhost:8000/docs |
 | 健康检查 | http://localhost:8000/api/v1/health（含 `app_env` 字段） |
@@ -339,6 +341,7 @@ docker-compose up -d --build
 | `/api/admin/knowledge*` | 知识库 CRUD + 导入（删除要求 admin 角色） |
 | `/api/admin/announcements*` | 公告管理（CRUD + 发布状态切换 + 置顶） |
 | `/api/admin/memories*` | 长期记忆管理（用户列表/按用户查/增改删，删除要求 admin） |
+| `/api/admin/users*` | 账号管理（列表/详情/创建/禁用/重置密码/删除 + 审计日志查询；敏感操作要求 admin 角色，删除单目标级联） |
 | `/api/admin/agent/chat`（+ `/chat/stream`） | 管理员 Agent 对话（两阶段删除确认 + 审计） |
 | `/api/admin/usage/overview` / `details` / `export` | token 用量报表（趋势/明细/CSV 导出） |
 | `POST /api/rag/search` / `index` / `GET /api/rag/status` | RAG 统一检索 / 重建索引 / 状态（含 embedding 后端与降级标记） |
@@ -353,6 +356,7 @@ docker-compose up -d --build
 | 高德 GPS 接口契约 | [`doc/amap-gps-api.md`](doc/amap-gps-api.md) | 错误码信封/工具用法/凭据 |
 | 公告模块契约 | [`digitalHumanApi/doc/announcement-api.md`](digitalHumanApi/doc/announcement-api.md) | 路径/请求响应 schema/鉴权/排序约定 |
 | 记忆管理 API 契约 | [`digitalHumanApi/doc/memory-admin-api.md`](digitalHumanApi/doc/memory-admin-api.md) | 管理端记忆增删改查契约 |
+| 账号管理 API 契约 | [`digitalHumanApi/doc/account-admin-api.md`](digitalHumanApi/doc/account-admin-api.md) | 账号 CRUD/禁用/重置密码/删除级联/审计表契约 |
 | token 记账契约 | [`digitalHumanApi/doc/usage-tracking.md`](digitalHumanApi/doc/usage-tracking.md) | 埋点/表/报表 API/单价映射 |
 | 长期记忆设计 | [`digitalHumanApi/doc/long-term-memory.md`](digitalHumanApi/doc/long-term-memory.md) | 记忆 schema/接口/注入契约 |
 | Alembic 迁移 | [`digitalHumanApi/doc/alembic-migrations.md`](digitalHumanApi/doc/alembic-migrations.md) | 迁移流程/坑位/权威约定 |
@@ -383,7 +387,7 @@ docker-compose up -d --build
 ```bash
 cd digitalHumanApi
 pip install -r requirements-dev.txt
-pytest -v                                   # 全量 680 用例（内存 SQLite，无外部依赖）
+pytest -v                                   # 全量 827 用例（内存 SQLite，无外部依赖）
 pytest -q --cov=app --cov-report=term:skip-covered --cov-fail-under=75   # 覆盖率门禁（阈值 75%，基线 84%+）
 ```
 
