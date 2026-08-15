@@ -183,7 +183,7 @@ function onQuestionClick(text: string) {
             :key="iframeKey"
             :src="iframeSrc"
             title="数字人"
-            allow="microphone"
+            allow="microphone; geolocation"
             class="digital-human-frame"
             @load="onIframeLoad"
             @error="onIframeError"
