@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 import app.tasks.analysis as analysis_mod
 from app.core.config import settings
@@ -413,6 +413,56 @@ async def test_overview_db_stale_triggers_background_refresh(db_session, monkeyp
     assert r2.cached is True
     assert r2.analysis_timestamp != old_snapshot.analysis_timestamp  # 已是新结果
     assert chain.calls == 2
+
+
+@pytest.mark.anyio
+async def test_overview_empty_refresh_removes_stale_report(db_session, monkeypatch):
+    """窗口对话清空后过期报告收敛：后台刷新空结果删除陈旧落库行与进程内缓存条目。
+
+    覆盖「过期后台刷新 × 空数据不落库」组合——报告过期后每次请求秒回旧结果
+    （cached=True）并调度刷新；若刷新结果为空时不清理，旧报告将永久陈旧。
+    验证删除后后续请求走「无记录 + 窗口无对话 → 真实空态」路径。
+    """
+    await _seed_overview_data(db_session)
+    chain = _CountingChain()
+    _enable_fake_llm(monkeypatch, chain)
+    await analytics_service._compute_and_persist_ai_overview(
+        db_session, "overview:30", 30
+    )
+    assert await analytics_service._load_latest_report(db_session, 30) is not None
+
+    # 清空窗口内对话（模拟 30 天窗口无新对话），并把库记录改为过期
+    from app.models.dialogue import Dialogue
+    from app.models.evaluation import Evaluation
+
+    await db_session.execute(delete(Evaluation))
+    await db_session.execute(delete(Dialogue))
+    await db_session.commit()
+    analytics_service.reset_ai_overview_cache()
+    report = await analytics_service._load_latest_report(db_session, 30)
+    report.updated_at = datetime.now(timezone.utc) - timedelta(
+        seconds=analytics_service.OVERVIEW_CACHE_TTL_SECONDS + 1
+    )
+    await db_session.commit()
+
+    # 过期报告路径：秒回旧快照 + 调度后台刷新（真实实现，刷新结果为空）
+    _enable_real_background_refresh(monkeypatch, db_session)
+    response = await analytics_service.get_ai_overview(db_session, days=30)
+    assert response.cached is True
+    assert response.total_dialogues == 1  # 旧快照（窗口对话已清空）
+
+    task = analytics_service._ai_overview_inflight["overview:30"]
+    await task
+
+    # 收敛：陈旧落库行与进程内缓存条目均被清理
+    assert await analytics_service._load_latest_report(db_session, 30) is None
+    assert "overview:30" not in analytics_service._ai_overview_cache
+
+    # 后续请求走真实空态路径，不再秒回过期数据
+    r2 = await analytics_service.get_ai_overview(db_session, days=30)
+    assert r2.total_dialogues == 0
+    assert r2.cached is False
+    assert "暂无对话数据" in r2.ai_summary
 
 
 @pytest.mark.anyio

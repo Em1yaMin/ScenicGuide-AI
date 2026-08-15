@@ -52,7 +52,8 @@ LLM_ANALYSIS_TIMEOUT = 240
 # ── 结果缓存 + 持久化（船长 2026-08-15：落库持久化） ──
 # 进程内 TTL 缓存：键含 days 参数；命中直接返回（保留原 analysis_timestamp + cached 命中标记）。
 # 同键并发请求合并（in-flight 共享同一任务），防管理后台反复点刷新并发堆积 LLM 分析请求。
-# TTL 过期自然失效（下次调用重新分析）；多进程部署下内存缓存不共享（本项目单进程部署，可接受）。
+# TTL 过期自然失效（进程内过期条目不主动清理，持续流量下后台刷新周期约 2×TTL）；
+# 多进程部署下内存缓存不共享（本项目单进程部署，可接受）。
 # 空数据结果（total_dialogues==0）不缓存/不落库：空库查询本身毫秒级，且避免新数据入库后 TTL 内被旧空结果遮蔽。
 #
 # 落库持久化（2026-08-15）：分析结果写入 analysis_reports 表（按 days 参数每行一条，upsert 覆盖），
@@ -604,6 +605,12 @@ async def _upsert_report(
     await db.commit()
 
 
+async def _delete_report(db: AsyncSession, days: int) -> None:
+    """按 days 删除落库报告（窗口内无对话时清理陈旧报告，使 stale 报告收敛）。"""
+    await db.execute(delete(AnalysisReport).where(AnalysisReport.days == days))
+    await db.commit()
+
+
 def _build_empty_response(days: int) -> AIOverviewResponse:
     """窗口内无对话时的真实空态响应（「暂无对话数据」文案；不缓存、不落库）。
 
@@ -697,7 +704,9 @@ async def _compute_and_persist_ai_overview(
     """执行分析并写入进程内缓存与持久化表（由后台刷新任务调度）。
 
     空数据结果（total_dialogues==0）不缓存/不落库（见模块注释）：
-    避免新数据入库后 TTL 内被旧空结果遮蔽。
+    避免新数据入库后 TTL 内被旧空结果遮蔽；若该 days 已有陈旧落库
+    报告（窗口内对话被删除或自然过期），一并删除使 stale 报告收敛——
+    后续请求走「无记录 + 窗口无对话 → 真实空态」路径，不再秒回过期数据。
     """
     response = await _compute_ai_overview(db, days)
     if response.total_dialogues > 0:
@@ -706,6 +715,9 @@ async def _compute_and_persist_ai_overview(
             response=response,
         )
         await _upsert_report(db, days, response)
+    else:
+        _ai_overview_cache.pop(key, None)
+        await _delete_report(db, days)
     return response
 
 
