@@ -315,7 +315,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - **启动自动迁移**：`app/core/migrations.py::run_migrations()`（main.py lifespan Phase 1 替代 create_all；独立 CLI backfill.py 同用）三态分流——空库 `upgrade head` 建齐 / **遗留库（有业务表无版本表）先幂等 create_all 补建缺失业务表再 `stamp head` 基线化（不丢数据）** / 版本化库 `upgrade head`；迁移失败回退 create_all（幂等）不阻断启动；Alembic 命令为同步 API 且 env.py 内部 asyncio.run，必须 `asyncio.to_thread` 执行。**2026-08-13 起遗留库路径改为 `create_all + stamp 基线 + upgrade head`**（重放全部迁移）——因直接 stamp head 会让旧形状遗留库缺失「对既有表的列变更」（如 users 加列）；**配套约定：全部迁移须防御性（幂等）编写**（建表前 has_table、加列前列存在性、建索引前索引存在性、downgrade 同样防御），否则遗留库路径重复 DDL 报错（见 `doc/account-admin-api.md`「迁移说明」）；DDL 等价性验收按空白归一化比较（SQLite ALTER ADD COLUMN 会把追加列内联进原 CREATE TABLE 文本）
 - URL 解析优先级：`alembic -x db_url=...` > ini `sqlalchemy.url`（留空；测试 Config.set_main_option 覆盖）> `settings.DATABASE_URL`；env.py 已显式把 digitalHumanApi/ 加入 sys.path
 - 开发流程：改 models → `alembic revision --autogenerate -m "..."`（草稿必须 review，补 downgrade）→ `alembic upgrade head` 验证 → `pytest -q` → 合并；SQLite 删列用 `op.batch_alter_table`（已开 `render_as_batch=True`）；**加列优先原生 `op.add_column`（batch 重建会带引号改写 sqlite_master，破坏 `test_upgraded_schema_matches_orm_metadata` 的 DDL 等价性）且保持列序与 ORM 一致**；所有迁移须防御性（幂等）编写（见「数据库迁移」专节 2026-08-13 约定）
-- 权威文档：`doc/alembic-migrations.md`；测试：`tests/test_migrations.py`（14 用例，含各表升级/回退与三态路径，详见该文档）
+- 权威文档：`doc/alembic-migrations.md`；测试：`tests/test_migrations.py`（15 用例，含各表升级/回退与三态路径，详见该文档）
 
 ## 多环境配置 + 数据库备份（批次8 C7）
 
