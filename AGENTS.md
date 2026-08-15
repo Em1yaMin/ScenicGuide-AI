@@ -391,6 +391,8 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 
 一键起停/健康检查/.env 校验统一用仓库根 `scripts/` 运维脚本（`start_all.sh`/`stop_all.sh`/`health_check.sh`/`check_env.sh`），服务拓扑、用法与集成坑位（含 ADH 启动所需 `QWEN_API_KEY` 自动注入）见权威文档 `scripts/README.md`。
 
+**ADH SSL（2026-08-15）**：宿主机浏览器语音输入需安全上下文，ADH 后端支持 HTTPS——启动前设置环境变量 `ADH_SSL_CERTFILE`/`ADH_SSL_KEYFILE`（指向 certs/ 下 mkcert 证书/私钥，certs/ 已 gitignore）后 `python main.py`，uvicorn 自动以 https 监听（实现见 `digitalHuman/bin/app.py` runServer）；两者任一为空则保持纯 HTTP。
+
 ### 关键修改文件（相对于 ADH 根目录）
 - `configs/config_template.yaml` — SUPPORT_LIST 精简为仅目标引擎；AGENTS 默认 LangChainAgent（DifyAgent 保留可切换）
 - `configs/engines/asr/tencentAPI.yaml`、`configs/engines/tts/qwenTTS.yaml`（新建，默认 TTS）、`configs/engines/tts/minimaxTTS.yaml`、`configs/agents/difyAgent.yaml`、`configs/agents/langchainAgent.yaml`（新建）— 引擎凭证/参数
