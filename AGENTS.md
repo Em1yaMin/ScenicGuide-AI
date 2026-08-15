@@ -108,7 +108,7 @@ live2d-frontend/          # ADH 本地数字人（见下方专节）
 - **与 agent 工具数据一致（核心验收）**：写入即 `_invalidate_agent_tool_cache` → `tool_cache.invalidate_scenic()`（新增方法，清除 search_spots/search_routes/get_spot_detail/get_route_detail/filter_by_tags/recommend_routes 缓存条目）——静态数据工具 TTL 1h，不失效则管理端改完数据 agent 最长 1 小时读到旧结果；`_STATIC_DATA_TOOLS` 与 agent.py `_CACHEABLE_TOOLS` 同源（新增工具须两边同步）
 - **前端**：`src/api/scenic.ts` + `src/types/scenic.ts` + `api/index.ts` 端点常量（API_ADMIN_SCENIC_SPOTS/ROUTES）；KnowledgeView 三页签（知识文档=既有 CRUD/景点数据/路线数据），景点表单（名称/介绍/标签/时长/难度/位置/亮点）、路线表单（名称/介绍/**途经景点勾选**（从景点数据加载）/标签/适合人群/时长/难度/推荐理由），保存提示「数字人导览 Agent 实时生效」
 - 测试：`tests/test_scenic_data_api.py`（25：鉴权/RBAC/灵山数据列表/CRUD/名称唯一/spot_ids 引用/删除被引用景点 422 与解除引用后可删/纯空白字段 422/agent 工具实时读到页面写入数据/数据文件原子性/工具缓存失效联动）
-- 首页静态兜底（`digitalHumanVue/src/views/HomeView.vue` FALLBACK_SPOTS/FALLBACK_ROUTES）已替换为灵山地标（灵山大佛/九龙灌浴/灵山梵宫 + 三条灵山路线）
+- 首页静态兜底（`digitalHumanVue/src/views/HomeView.vue` FALLBACK_SPOTS/FALLBACK_ROUTES）已替换为灵山地标（灵山大照壁/佛足坛/菩提大道 + 三条灵山路线，与活数据前三景点同源并配实景图；首页热门景点卡片渲染实景图、缺省回退 emoji 意象占位，见 doc/redesign-v1.md）
 
 ## 公告模块 + 首页活数据（批次4 B2：首个真实 Alembic 迁移）
 

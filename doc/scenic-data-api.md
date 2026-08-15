@@ -27,6 +27,7 @@ filter_by_tags / recommend_routes）、首页活数据（`/api/v1/home/highlight
 {
   "id": "spot_001",
   "name": "灵山大佛",
+  "image": "/images/spots/spot_001.jpg",
   "description": "世界最高露天青铜释迦牟尼立像，通高88米…",
   "tags": ["历史人文", "宗教", "地标", "拍照打卡", "祈福"],
   "duration_minutes": 120,
@@ -37,6 +38,7 @@ filter_by_tags / recommend_routes）、首页活数据（`/api/v1/home/highlight
 ```
 
 - `id`：服务端自动生成（`spot_011`，编号 = 现有最大值 + 1，删除后不复用）
+- `image`：**可选**，实景图 URL（前端 `public/images/spots/` 静态资源；首页热门景点卡片有图渲染实景图、缺省回退 emoji 意象占位，前端契约见 `digitalHumanVue/src/types/home.ts` HomeSpot.image；管理端景点表单未暴露该字段，经 schema `extra=allow` 透传保持原值）
 - `difficulty`：仅支持 `轻松` / `中等` / `挑战`
 
 ### 路线 Route
