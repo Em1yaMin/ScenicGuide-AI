@@ -3,6 +3,8 @@ export interface HomeSpot {
   id: string
   name: string
   description: string
+  /** 实景图 URL（public/images/spots/ 静态资源；缺省时前端回退 emoji 占位） */
+  image?: string
   tags: string[]
   duration_minutes: number
   difficulty: string

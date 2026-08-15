@@ -24,6 +24,13 @@ test.describe('访客首页', () => {
     await expect(page.locator('.spot-card h3').first()).toContainText('灵山大照壁')
     await expect(page.getByRole('heading', { name: '祥符禅寺' })).toBeVisible()
 
+    // 热门景点实景图：mock 仅首条带 image → 渲染 <img>（余下回退 emoji 占位）
+    await expect(page.locator('.spot-card-img img')).toHaveCount(1)
+    await expect(page.locator('.spot-card-img img').first()).toHaveAttribute(
+      'src',
+      '/images/spots/spot_001.jpg',
+    )
+
     // 推荐路线活数据（3 条；mock 数据含静态兜底没有的「历史文化深度游」）
     await expect(page.locator('.route-card')).toHaveCount(3)
     await expect(page.locator('.route-card h3').first()).toContainText('历史文化深度游')

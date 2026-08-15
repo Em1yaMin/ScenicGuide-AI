@@ -20,6 +20,7 @@ export const homeHighlights = {
       difficulty: 'easy',
       location: '景区入口处',
       highlights: ['赵朴初题字'],
+      image: '/images/spots/spot_001.jpg',
     },
     {
       id: 'spot-2',
