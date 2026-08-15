@@ -9,9 +9,11 @@ from sqlalchemy import select
 
 import app.tasks.analysis as analysis_mod
 from app.core.config import settings
+from app.models.analysis_report import AnalysisReport
 from app.models.dialogue import Dialogue, DialogueRole
 from app.models.evaluation import Evaluation
 from app.models.visitor import Visitor
+from app.schemas.analysis import AIOverviewResponse
 from app.services import analytics_service
 from app.tasks.analysis import _normalize_string_list, analysis_loop, batch_evaluate
 
@@ -62,7 +64,7 @@ def test_extract_json_invalid_returns_none():
 
 @pytest.mark.anyio
 async def test_analysis_overview_empty(client):
-    """Overview 端点在无数据时返回空结构。"""
+    """Overview 端点在无落库记录时返回待生成空结构（后台分析不阻塞当前响应）。"""
     response = await client.get("/api/v1/analysis/overview?days=30")
     assert response.status_code == 200
     body = response.json()
@@ -120,6 +122,11 @@ async def test_analysis_overview_with_data(client, db_session):
     )
     db_session.add_all([e1, e2])
     await db_session.commit()
+
+    # 预热：等价后台分析已完成（落库 + 进程内缓存），端点秒回真实结果
+    await analytics_service._compute_and_persist_ai_overview(
+        db_session, "overview:30", 30
+    )
 
     response = await client.get("/api/v1/analysis/overview?days=30")
     assert response.status_code == 200
@@ -180,7 +187,7 @@ async def test_analysis_overview_days_param(client):
     assert body["total_dialogues"] == 0  # 空数据但不会报错
 
 
-# ── AI 运营概览结果缓存（提速：进程内 TTL + 并发防抖） ──
+# ── AI 运营概览结果落库持久化（2026-08-15：库命中秒回 + 后台静默刷新） ──
 
 
 class _CountingChain:
@@ -231,157 +238,335 @@ def _enable_fake_llm(monkeypatch, chain):
     monkeypatch.setattr(analytics_service, "_get_analysis_chain", lambda: chain)
 
 
+def _enable_real_background_refresh(monkeypatch, db_session):
+    """恢复真实后台刷新实现，并注入指向测试 db_session 的 session 工厂。
+
+    conftest autouse 把 _background_refresh patch 为 noop（防写真实文件库）；
+    需要真实后台行为（落库/刷新链路）的测试显式覆盖。
+    """
+
+    @contextlib.asynccontextmanager
+    async def _factory():
+        yield db_session
+
+    monkeypatch.setattr(analytics_service, "_db_session_factory", _factory)
+
+    async def _real_background_refresh(key: str, days: int) -> None:
+        async with _factory() as session:
+            await analytics_service._compute_and_persist_ai_overview(
+                session, key, days
+            )
+
+    monkeypatch.setattr(
+        analytics_service, "_background_refresh", _real_background_refresh
+    )
+
+
 @pytest.mark.anyio
-async def test_overview_cache_hit_returns_cached(db_session, monkeypatch):
-    """同 days 二次调用命中缓存：LLM 只调用一次，命中响应带 cached=True 且 analysis_timestamp 不变。"""
+async def test_overview_persists_report_to_db(db_session, monkeypatch):
+    """分析完成后落库：analysis_reports 一行（days/响应快照/分析时间戳正确），upsert 不膨胀。"""
     await _seed_overview_data(db_session)
     chain = _CountingChain()
     _enable_fake_llm(monkeypatch, chain)
 
+    await analytics_service._compute_and_persist_ai_overview(
+        db_session, "overview:30", 30
+    )
+
+    reports = (
+        await db_session.execute(select(AnalysisReport))
+    ).scalars().all()
+    assert len(reports) == 1
+    report = reports[0]
+    assert report.days == 30
+    parsed = AIOverviewResponse.model_validate_json(report.response_json)
+    assert parsed.total_dialogues == 1
+    assert parsed.hot_questions[0].question == "门票多少钱"
+    assert report.analysis_timestamp == datetime.fromisoformat(
+        parsed.analysis_timestamp
+    ).replace(tzinfo=None)  # SQLite 读回 naive UTC
+    assert report.created_at is not None and report.updated_at is not None
+    # 进程内缓存同步填充
+    assert "overview:30" in analytics_service._ai_overview_cache
+
+    # upsert 语义：再次分析覆盖同一行，不膨胀
+    await analytics_service._compute_and_persist_ai_overview(
+        db_session, "overview:30", 30
+    )
+    reports = (
+        await db_session.execute(select(AnalysisReport))
+    ).scalars().all()
+    assert len(reports) == 1
+    assert chain.calls == 2
+
+
+@pytest.mark.anyio
+async def test_overview_db_hit_seconds_fast(db_session, monkeypatch):
+    """冷启动（等价服务重启）后库中新鲜记录秒回 + 后台静默刷新一次；后续访问命中缓存不再刷新。"""
+    await _seed_overview_data(db_session)
+    chain = _CountingChain()
+    _enable_fake_llm(monkeypatch, chain)
+    # 模拟上次分析已落库，随后进程内缓存丢失（等价服务重启）
+    await analytics_service._compute_and_persist_ai_overview(
+        db_session, "overview:30", 30
+    )
+    analytics_service.reset_ai_overview_cache()
+
+    started = {"n": 0}
+
+    async def _fake_refresh(key, days):
+        started["n"] += 1
+
+    monkeypatch.setattr(analytics_service, "_background_refresh", _fake_refresh)
+
     first = await analytics_service.get_ai_overview(db_session, days=30)
-    assert first.cached is False
-    assert chain.calls == 1
+    assert first.cached is True
+    assert first.total_dialogues == 1
+    assert first.hot_questions[0].question == "门票多少钱"
+    assert chain.calls == 1  # 秒回不触发同步 LLM 分析
+    # 冷启动触发一次后台刷新（验收：后台自动重新分析并更新库）
+    assert analytics_service._ai_overview_inflight.get("overview:30") is not None
+    task = analytics_service._ai_overview_inflight["overview:30"]
+    await task
+    assert started["n"] == 1
 
     second = await analytics_service.get_ai_overview(db_session, days=30)
     assert second.cached is True
-    assert chain.calls == 1  # 缓存命中不触发第二次 LLM 分析
+    assert chain.calls == 1  # 进程内缓存命中，无新分析
+    assert started["n"] == 1  # 不重复触发刷新
     assert second.analysis_timestamp == first.analysis_timestamp
-    assert second.total_dialogues == first.total_dialogues == 1
-    assert second.hot_questions == first.hot_questions
 
 
 @pytest.mark.anyio
-async def test_overview_cache_isolated_by_days(db_session, monkeypatch):
-    """不同 days 参数互不串缓存：各自首次调用触发分析，随后各自命中。"""
+async def test_overview_db_isolated_by_days(db_session, monkeypatch):
+    """不同 days 参数互不串库记录：各自落库一行，各自秒回。"""
     await _seed_overview_data(db_session)
     chain = _CountingChain()
     _enable_fake_llm(monkeypatch, chain)
+    await analytics_service._compute_and_persist_ai_overview(
+        db_session, "overview:7", 7
+    )
+    await analytics_service._compute_and_persist_ai_overview(
+        db_session, "overview:30", 30
+    )
+    analytics_service.reset_ai_overview_cache()
 
     r7 = await analytics_service.get_ai_overview(db_session, days=7)
     r30 = await analytics_service.get_ai_overview(db_session, days=30)
-    assert chain.calls == 2  # 7 天与 30 天各自分析一次
-    assert r7.cached is False and r30.cached is False
-
-    r7b = await analytics_service.get_ai_overview(db_session, days=7)
-    r30b = await analytics_service.get_ai_overview(db_session, days=30)
-    assert chain.calls == 2  # 各自命中缓存，无新增分析
-    assert r7b.cached is True and r30b.cached is True
-    assert r7b.analysis_timestamp == r7.analysis_timestamp
-    assert r30b.analysis_timestamp == r30.analysis_timestamp
+    assert r7.cached is True and r30.cached is True
+    reports = (
+        await db_session.execute(
+            select(AnalysisReport).order_by(AnalysisReport.days)
+        )
+    ).scalars().all()
+    assert [r.days for r in reports] == [7, 30]
+    assert chain.calls == 2  # 7/30 天各自分析一次，后续全部命中
 
 
 @pytest.mark.anyio
-async def test_overview_cache_ttl_expiry_recomputes(db_session, monkeypatch):
-    """TTL 过期后重新分析（cached=False），缓存重新写入。"""
+async def test_overview_db_stale_triggers_background_refresh(db_session, monkeypatch):
+    """库记录旧于阈值：秒回旧结果 + 后台刷新；完成后库更新、后续命中新结果。"""
     await _seed_overview_data(db_session)
     chain = _CountingChain()
     _enable_fake_llm(monkeypatch, chain)
-    # TTL 设为负数：写入即过期，下次调用必然重新分析
-    monkeypatch.setattr(analytics_service, "OVERVIEW_CACHE_TTL_SECONDS", -1)
+    await analytics_service._compute_and_persist_ai_overview(
+        db_session, "overview:30", 30
+    )
+    analytics_service.reset_ai_overview_cache()
+    # 把库记录改旧（超过 TTL 阈值）
+    report = await analytics_service._load_latest_report(db_session, 30)
+    old_updated = report.updated_at
+    report.updated_at = datetime.now(timezone.utc) - timedelta(
+        seconds=analytics_service.OVERVIEW_CACHE_TTL_SECONDS + 1
+    )
+    await db_session.commit()
+    old_snapshot = AIOverviewResponse.model_validate_json(report.response_json)
 
-    first = await analytics_service.get_ai_overview(db_session, days=30)
-    assert first.cached is False
-    assert chain.calls == 1
+    started = {"n": 0}
 
-    second = await analytics_service.get_ai_overview(db_session, days=30)
-    assert second.cached is False
+    async def _fake_refresh(key, days):
+        started["n"] += 1
+        await analytics_service._compute_and_persist_ai_overview(
+            db_session, key, days
+        )
+
+    monkeypatch.setattr(analytics_service, "_background_refresh", _fake_refresh)
+
+    response = await analytics_service.get_ai_overview(db_session, days=30)
+    assert response.cached is True  # 秒回旧结果，不阻塞
+    assert response.analysis_timestamp == old_snapshot.analysis_timestamp
+    # 后台刷新已调度（in-flight 登记）
+    assert analytics_service._ai_overview_inflight.get("overview:30") is not None
+
+    # 等待后台刷新完成：库更新 + 进程内缓存填充
+    task = analytics_service._ai_overview_inflight["overview:30"]
+    await task
+    assert started["n"] == 1  # 恰好一次刷新
+    report2 = await analytics_service._load_latest_report(db_session, 30)
+    # SQLite 往返后 updated_at 为 naive；写入侧 aware —— 归一化后比较
+    assert report2.updated_at.replace(tzinfo=None) > old_updated.replace(
+        tzinfo=None
+    )  # 刷新后落库时间更新
     assert chain.calls == 2
-    assert second.analysis_timestamp != first.analysis_timestamp
+
+    r2 = await analytics_service.get_ai_overview(db_session, days=30)
+    assert r2.cached is True
+    assert r2.analysis_timestamp != old_snapshot.analysis_timestamp  # 已是新结果
+    assert chain.calls == 2
 
 
 @pytest.mark.anyio
-async def test_overview_concurrent_requests_share_inflight(db_session, monkeypatch):
-    """同键并发请求合并：in-flight 共享同一 LLM 调用，刷新堆积不放大成本。"""
-    await _seed_overview_data(db_session)
-    chain = _CountingChain(delay=0.3)
+async def test_overview_empty_result_not_persisted(db_session, monkeypatch):
+    """空数据结果不落库/不缓存：新对话入库后立即重新分析，不被旧空结果遮蔽。"""
+    chain = _CountingChain()
     _enable_fake_llm(monkeypatch, chain)
 
-    start = time.monotonic()
+    await analytics_service._compute_and_persist_ai_overview(
+        db_session, "overview:30", 30
+    )
+    assert (
+        await db_session.execute(select(AnalysisReport))
+    ).scalars().all() == []
+    assert analytics_service._ai_overview_cache == {}
+    assert chain.calls == 0  # 空库早返回，不触发 LLM
+
+    await _seed_overview_data(db_session)
+    await analytics_service._compute_and_persist_ai_overview(
+        db_session, "overview:30", 30
+    )
+    reports = (
+        await db_session.execute(select(AnalysisReport))
+    ).scalars().all()
+    assert len(reports) == 1  # 有数据后正常落库
+    assert chain.calls == 1
+
+
+@pytest.mark.anyio
+async def test_overview_concurrent_requests_share_refresh(db_session, monkeypatch):
+    """并发请求合并后台刷新：只启动一次分析任务，全部秒回 pending 空结果。"""
+    await _seed_overview_data(db_session)
+    chain = _CountingChain(delay=0.2)
+    _enable_fake_llm(monkeypatch, chain)
+    started = {"n": 0}
+
+    async def _slow_refresh(key, days):
+        started["n"] += 1
+        await analytics_service._compute_and_persist_ai_overview(
+            db_session, key, days
+        )
+
+    monkeypatch.setattr(analytics_service, "_background_refresh", _slow_refresh)
+
     r1, r2, r3 = await asyncio.gather(
         analytics_service.get_ai_overview(db_session, days=30),
         analytics_service.get_ai_overview(db_session, days=30),
         analytics_service.get_ai_overview(db_session, days=30),
     )
-    elapsed = time.monotonic() - start
+    assert started["n"] == 1  # 三次并发仅启动一次后台刷新
+    assert all(r.total_dialogues == 0 for r in (r1, r2, r3))  # 全部秒回不阻塞
+    assert all(r.cached is False for r in (r1, r2, r3))
 
-    assert chain.calls == 1  # 三次并发仅触发一次 LLM 分析
-    assert r1.analysis_timestamp == r2.analysis_timestamp == r3.analysis_timestamp
-    assert elapsed < 0.8  # 远小于 3×0.3s 串行耗时
-    # in-flight 清理干净：后续请求不再共享旧任务，而是命中已写入的缓存
-    assert analytics_service._ai_overview_inflight == {}
+    # 后台完成后：落库 + 缓存命中，LLM 仅调用一次
+    task = analytics_service._ai_overview_inflight["overview:30"]
+    await task
+    assert chain.calls == 1
     r4 = await analytics_service.get_ai_overview(db_session, days=30)
     assert r4.cached is True
+    assert r4.total_dialogues == 1
     assert chain.calls == 1
 
 
 @pytest.mark.anyio
-async def test_overview_empty_result_not_cached(db_session, monkeypatch):
-    """空数据结果不缓存：新对话入库后立即重新分析，不被旧空结果遮蔽。"""
-    chain = _CountingChain()
+async def test_overview_no_db_record_pending_then_refresh(db_session, monkeypatch):
+    """库中无记录：秒回待生成空结果 + 后台首次分析；完成后落库、再次访问命中。"""
+    await _seed_overview_data(db_session)
+    chain = _CountingChain(delay=0.2)
     _enable_fake_llm(monkeypatch, chain)
+    _enable_real_background_refresh(monkeypatch, db_session)
 
     first = await analytics_service.get_ai_overview(db_session, days=30)
-    assert first.total_dialogues == 0
+    assert first.total_dialogues == 0  # 待生成空结果（不阻塞等待分析）
     assert first.cached is False
-    assert chain.calls == 0  # 空库早返回，不触发 LLM
+    assert chain.calls == 0  # 当前响应未同步等待 LLM
 
-    await _seed_overview_data(db_session)
+    task = analytics_service._ai_overview_inflight["overview:30"]
+    await task
+    assert chain.calls == 1
+    reports = (
+        await db_session.execute(select(AnalysisReport))
+    ).scalars().all()
+    assert len(reports) == 1  # 后台完成已落库
+
     second = await analytics_service.get_ai_overview(db_session, days=30)
-    assert second.total_dialogues == 1  # 未命中旧空结果
-    assert second.cached is False
+    assert second.total_dialogues == 1  # 命中真实结果
+    assert second.cached is True
     assert chain.calls == 1
 
 
 @pytest.mark.anyio
 async def test_overview_endpoint_second_call_cached(client, db_session, monkeypatch):
-    """HTTP 端点同 days 二次调用命中缓存：带 cached 标记且不重复调 LLM。"""
+    """HTTP 端点：后台分析完成后访问，同 days 二次调用命中缓存（cached 标记 + 不重复调 LLM）。"""
     await _seed_overview_data(db_session, visitor_id="v-cache-http")
     chain = _CountingChain()
     _enable_fake_llm(monkeypatch, chain)
+    # 预热：等价后台刷新已完成（落库 + 进程内缓存）
+    await analytics_service._compute_and_persist_ai_overview(
+        db_session, "overview:30", 30
+    )
 
     r1 = await client.get("/api/v1/analysis/overview?days=30")
     r2 = await client.get("/api/v1/analysis/overview?days=30")
     assert r1.status_code == r2.status_code == 200
-    assert r1.json()["cached"] is False
+    assert r1.json()["cached"] is True
     assert r2.json()["cached"] is True
     assert r2.json()["total_dialogues"] == 1
     assert chain.calls == 1
 
 
 @pytest.mark.anyio
-async def test_overview_creator_cancel_keeps_shared_task(db_session, monkeypatch):
-    """创建者请求被取消时共享 in-flight 任务不受影响：等待者拿到结果且缓存照常写入。"""
-    await _seed_overview_data(db_session)
-    chain = _CountingChain(delay=0.3)
+async def test_overview_endpoint_pending_then_background_refresh(
+    client, db_session, monkeypatch
+):
+    """HTTP 端点首次访问秒回 pending 空结果（不阻塞），后台完成后再访问命中真实结果。
+
+    后台完成以手动执行持久化分析等价驱动（client 请求与后台任务共用测试 session
+    会交错事务；真实后台任务链路由 test_overview_no_db_record_pending_then_refresh 覆盖）。
+    """
+    await _seed_overview_data(db_session, visitor_id="v-http-pending")
+    chain = _CountingChain()
     _enable_fake_llm(monkeypatch, chain)
 
-    creator = asyncio.create_task(
-        analytics_service.get_ai_overview(db_session, days=30)
-    )
-    await asyncio.sleep(0.05)
-    waiter = asyncio.create_task(
-        analytics_service.get_ai_overview(db_session, days=30)
-    )
-    await asyncio.sleep(0.05)
-    creator.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await creator
+    r1 = await client.get("/api/v1/analysis/overview?days=30")
+    assert r1.status_code == 200
+    body1 = r1.json()
+    assert body1["total_dialogues"] == 0  # 秒回待生成空结果，不阻塞等待分析
+    assert body1["cached"] is False
+    assert "后台" in body1["ai_summary"]
 
-    result = await waiter
-    assert result.total_dialogues == 1
-    assert chain.calls == 1  # 创建者取消未中断共享分析
-
-    cached = await analytics_service.get_ai_overview(db_session, days=30)
-    assert cached.cached is True  # 后台任务完成时已写缓存
+    # 等价后台刷新完成（落库 + 进程内缓存）
+    await analytics_service._compute_and_persist_ai_overview(
+        db_session, "overview:30", 30
+    )
     assert chain.calls == 1
+
+    r2 = await client.get("/api/v1/analysis/overview?days=30")
+    assert r2.status_code == 200
+    body2 = r2.json()
+    assert body2["total_dialogues"] == 1  # 后台分析完成已落库
+    assert body2["cached"] is True
+    assert chain.calls == 1  # 未重复触发 LLM
 
 
 @pytest.mark.anyio
 async def test_overview_returned_object_isolated_from_cache(db_session, monkeypatch):
-    """调用方改动返回对象不影响缓存：命中路径读到的仍是原结果。"""
+    """调用方改动返回对象不影响缓存：库命中/缓存命中路径读到的仍是原结果。"""
     await _seed_overview_data(db_session)
     chain = _CountingChain()
     _enable_fake_llm(monkeypatch, chain)
+    await analytics_service._compute_and_persist_ai_overview(
+        db_session, "overview:30", 30
+    )
+    analytics_service.reset_ai_overview_cache()
 
     first = await analytics_service.get_ai_overview(db_session, days=30)
     assert first.hot_questions
@@ -392,7 +577,7 @@ async def test_overview_returned_object_isolated_from_cache(db_session, monkeypa
     assert second.hot_questions[0].question == "门票多少钱"
 
 
-# ── LLM 降级链测试（DB 统计兜底） ──
+# ── LLM 降级链测试（DB 统计兜底，直接测 _compute_ai_overview 分析层） ──
 
 
 class _FakeChain:
@@ -418,7 +603,7 @@ def _raise_llm_failure():
 
 
 @pytest.mark.anyio
-async def test_overview_llm_failure_falls_back_to_db_stats(client, db_session, monkeypatch):
+async def test_overview_llm_failure_falls_back_to_db_stats(db_session, monkeypatch):
     """LLM 分析异常时回退 DB 统计：不失败、输出确定性摘要、降级标记 llm_analysis=False。"""
     now = datetime.now(timezone.utc)
     visitor_id = "v-llm-fail"
@@ -447,24 +632,22 @@ async def test_overview_llm_failure_falls_back_to_db_stats(client, db_session, m
     monkeypatch.setattr(settings, "OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(analytics_service, "_get_analysis_chain", _raise_llm_failure)
 
-    response = await client.get("/api/v1/analysis/overview?days=30")
-    assert response.status_code == 200
-    body = response.json()
-    assert body["llm_analysis"] is False
-    assert body["total_dialogues"] == 2
+    overview = await analytics_service._compute_ai_overview(db_session, days=30)
+    assert overview.llm_analysis is False
+    assert overview.total_dialogues == 2
     # DB 统计兜底：热门问题来自 concern_tags
-    assert any(h["question"] in ("路线指引", "票务咨询") for h in body["hot_questions"])
+    assert any(h.question in ("路线指引", "票务咨询") for h in overview.hot_questions)
     # 满意度方向由 DB 趋势计算（day0 均分 2 < day1 均分 4 → 上升）
-    assert body["satisfaction_direction"] == "上升"
+    assert overview.satisfaction_direction == "上升"
     # 摘要包含 DB 统计信息与兜底标记
-    assert "数据库统计" in body["ai_summary"]
-    assert "数据库统计" in body["satisfaction_summary"]
-    assert len(body["suggestions"]) > 0
-    assert body["peak_hours"]
+    assert "数据库统计" in overview.ai_summary
+    assert "数据库统计" in overview.satisfaction_summary
+    assert len(overview.suggestions) > 0
+    assert overview.peak_hours
 
 
 @pytest.mark.anyio
-async def test_overview_llm_success_marks_llm_analysis(client, db_session, monkeypatch):
+async def test_overview_llm_success_marks_llm_analysis(db_session, monkeypatch):
     """LLM 分析成功时 llm_analysis=True，字段来自 LLM 输出。"""
     now = datetime.now(timezone.utc)
     visitor_id = "v-llm-ok"
@@ -486,22 +669,16 @@ async def test_overview_llm_success_marks_llm_analysis(client, db_session, monke
         analytics_service, "_get_analysis_chain", lambda: _FakeChain()
     )
 
-    response = await client.get("/api/v1/analysis/overview?days=30")
-    assert response.status_code == 200
-    body = response.json()
-    assert body["llm_analysis"] is True
-    assert body["hot_questions"] == [
-        {"question": "门票多少钱", "count": 3, "category": "票务"}
-    ]
-    assert body["suggestions"] == ["优化退票流程"]
-    assert body["unanswered_questions"] == [
-        {"question": "怎么退票", "reason": "游客反复追问"}
-    ]
-    assert "数据库统计" not in body["ai_summary"]
+    overview = await analytics_service._compute_ai_overview(db_session, days=30)
+    assert overview.llm_analysis is True
+    assert [h.question for h in overview.hot_questions] == ["门票多少钱"]
+    assert overview.suggestions == ["优化退票流程"]
+    assert [u.question for u in overview.unanswered_questions] == ["怎么退票"]
+    assert "数据库统计" not in overview.ai_summary
 
 
 @pytest.mark.anyio
-async def test_overview_without_key_uses_db_fallback(client, db_session):
+async def test_overview_without_key_uses_db_fallback(db_session):
     """未配置 OPENAI_API_KEY 时跳过 LLM，直接 DB 统计兜底（llm_analysis=False）。"""
     now = datetime.now(timezone.utc)
     visitor_id = "v-nokey"
@@ -521,43 +698,10 @@ async def test_overview_without_key_uses_db_fallback(client, db_session):
     # conftest 已固定 settings.OPENAI_API_KEY 为空；此处再显式确保
     assert not settings.OPENAI_API_KEY
 
-    response = await client.get("/api/v1/analysis/overview?days=30")
-    assert response.status_code == 200
-    body = response.json()
-    assert body["llm_analysis"] is False
-    assert any(h["question"] == "路线指引" for h in body["hot_questions"])
-    assert "数据库统计" in body["ai_summary"]
-
-
-@pytest.mark.anyio
-async def test_analysis_loop_survives_batch_failure(monkeypatch):
-    """分析定时任务在 batch_evaluate 异常时记录日志并继续下一轮，不中断。"""
-    calls = {"n": 0}
-
-    async def flaky_batch() -> int:
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise RuntimeError("simulated local LLM evaluation outage")
-        return 0
-
-    original_sleep = asyncio.sleep
-
-    async def short_sleep(_seconds: float) -> None:
-        # 用原始 sleep 避免 patch 后的递归
-        await original_sleep(0.01)
-
-    monkeypatch.setattr(analysis_mod, "batch_evaluate", flaky_batch)
-    monkeypatch.setattr(asyncio, "sleep", short_sleep)
-
-    task = asyncio.create_task(analysis_loop())
-    # 测试自身的等待也用原始 sleep（asyncio.sleep 已被 patch 成 0.01s）
-    await original_sleep(0.1)
-    task.cancel()
-    # analysis_loop 在 except asyncio.CancelledError 中记录日志后正常退出（不 re-raise）
-    await task
-
-    # 第一轮失败后循环仍继续执行了后续轮次
-    assert calls["n"] >= 2
+    overview = await analytics_service._compute_ai_overview(db_session, days=30)
+    assert overview.llm_analysis is False
+    assert any(h.question == "路线指引" for h in overview.hot_questions)
+    assert "数据库统计" in overview.ai_summary
 
 
 # ── 本地 LLM 量化评估（阶段4：Dify Workflow 评估本地化） ──
