@@ -41,6 +41,9 @@ Thumbs.db
 rag_data/
 chroma_data/
 
+# SSL 证书(本地生成,私钥不入库)
+certs/
+
 
 # 船长本地交付文档（不入库、不跟踪）
 /doc/产品总体设计文档.md
