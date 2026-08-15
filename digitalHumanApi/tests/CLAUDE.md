@@ -15,6 +15,8 @@ _reset_memory_store (autouse, 重置短期记忆存储为 :memory:，防跨测�
 _reset_auth_rate_limiter (autouse, 重置认证限流器 auth._limiter，防既有登录/注册测试被 429 误伤；批次6 C3)
 _pin_embedding_api_key_off (autouse, 固定 EMBEDDING_API_KEY 为空 → 走本地 TF-IDF)
 _pin_openai_api_key_off (autouse, 固定 OPENAI_API_KEY 为空 → 运营分析不触发真实 LLM 调用；LLM 成功/失败路径由测试显式 monkeypatch `_get_analysis_chain` 模拟，见 test_analysis.py)
+_reset_ai_overview_cache (autouse, 依赖 db_session：重置 AI 运营概览进程内缓存 + 清空 analysis_reports 落库记录，防跨测试污染；2026-08-15 落库持久化扩展，见 test_analysis.py)
+_pin_ai_overview_background_refresh (autouse, 把 analytics_service._background_refresh 固定为 noop，防测试触发后台刷新写真实文件库；需真实落库链路的测试显式 monkeypatch 覆盖并注入测试 session 工厂)
 db_engine → db_session → client
   (3 个函数级 fixture，链式依赖，每个测试完全隔离)
 ```
