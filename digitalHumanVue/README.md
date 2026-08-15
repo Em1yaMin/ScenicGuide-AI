@@ -35,6 +35,8 @@ npm install
 npm run dev
 ```
 
+可选 HTTPS（浏览器安全上下文）：设置 `SSL_CERT` / `SSL_KEY`（或 `VITE_SSL_CERT` / `VITE_SSL_KEY`）指向证书/私钥文件路径（如 `../certs/192.168.16.132+2.pem`），两者均非空且文件存在时 dev server 以 HTTPS 启动，否则保持纯 HTTP。
+
 ### Type-Check, Compile and Minify for Production
 
 ```sh
