@@ -15,6 +15,8 @@ interface SpotCard {
   description: string
   icon: string
   meta: string
+  /** 实景图 URL；缺省时模板回退 emoji 占位 */
+  image?: string
 }
 
 interface RouteCard {
@@ -27,28 +29,31 @@ interface RouteCard {
 /** 路线序数：卷轴式中文数字（结构即信息，替代通用 01/02 编号） */
 const ROUTE_NUMERALS = ['一', '二', '三', '四', '五']
 
-/** 静态兜底数据：首页活数据接口不可用时的热门景点（原写死卡片内容） */
+/** 静态兜底数据：首页活数据接口不可用时的热门景点（与前三景点同源配实景图；原写死卡片内容） */
 const FALLBACK_SPOTS: SpotCard[] = [
   {
-    name: '灵山大佛',
-    tag: '佛教地标',
-    description: '世界最高露天青铜佛像，登顶抱佛脚俯瞰太湖全景',
-    icon: '🏯',
-    meta: '无锡 · 约 2 小时',
-  },
-  {
-    name: '九龙灌浴',
-    tag: '动态景观',
-    description: '花开见佛的音乐动态群雕，九龙吐水可接圣水祈福',
-    icon: '💦',
-    meta: '无锡 · 约 1 小时',
-  },
-  {
-    name: '灵山梵宫',
-    tag: '艺术殿堂',
-    description: '东方卢浮宫，琉璃华藏世界与星空穹顶的艺术震撼',
+    name: '灵山大照壁',
+    tag: '历史人文',
+    description: '华夏第一壁，赵朴初题写鎏金「灵山胜境」，景区标志性打卡点',
     icon: '🏛',
-    meta: '无锡 · 约 2 小时',
+    meta: '景区入口处 · 约 0.5 小时',
+    image: '/images/spots/spot_001.jpg',
+  },
+  {
+    name: '佛足坛',
+    tag: '历史人文',
+    description: '青铜铸造巨型佛足印，足心刻千辐轮相等 32 种吉祥瑞相',
+    icon: '🏯',
+    meta: '菩提大道起点 · 约 0.5 小时',
+    image: '/images/spots/spot_002.jpg',
+  },
+  {
+    name: '菩提大道',
+    tag: '自然风光',
+    description: '近百棵印度菩提树对称成荫，枝叶交错形成天然禅意拱廊',
+    icon: '🌲',
+    meta: '五智门北侧 · 约 0.7 小时',
+    image: '/images/spots/spot_003.jpg',
   },
 ]
 
@@ -135,6 +140,7 @@ async function fetchHighlights() {
         description: s.description,
         icon: spotIcon(s.tags),
         meta: spotMeta(s),
+        image: s.image,
       }))
     }
     if (data.routes?.length) {
@@ -262,7 +268,8 @@ function scrollToRecommendedRoutes() {
       <div class="spots-grid">
         <div v-for="spot in spots" :key="spot.name" class="spot-card">
           <div class="spot-card-img">
-            <div class="img-placeholder">
+            <img v-if="spot.image" :src="spot.image" :alt="spot.name" loading="lazy" />
+            <div v-else class="img-placeholder">
               <span class="img-placeholder-icon">{{ spot.icon }}</span>
             </div>
           </div>
@@ -636,6 +643,19 @@ function scrollToRecommendedRoutes() {
   aspect-ratio: 16/8;
   background: var(--overlay);
   overflow: hidden;
+}
+
+/* 实景图：object-fit 裁切填满容器（不变形不拉伸），hover 微缩放与卡片描边动效呼应 */
+.spot-card-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform var(--duration-slow) var(--ease-out);
+}
+
+.spot-card:hover .spot-card-img img {
+  transform: scale(1.05);
 }
 
 .img-placeholder {
