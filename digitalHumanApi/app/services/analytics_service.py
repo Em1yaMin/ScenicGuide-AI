@@ -19,10 +19,12 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.database import async_session_factory as _db_session_factory
+from app.models.analysis_report import AnalysisReport
 from app.models.dialogue import Dialogue, DialogueRole
 from app.models.evaluation import Evaluation
 from app.schemas.analysis import (
@@ -47,11 +49,16 @@ logger = logging.getLogger(__name__)
 LLM_REQUEST_TIMEOUT = 180
 LLM_ANALYSIS_TIMEOUT = 240
 
-# ── 结果缓存（实机测试问题 9：overview 每次调用实时拉 200 条样本调 LLM，实测 60~140s） ──
+# ── 结果缓存 + 持久化（船长 2026-08-15：落库持久化） ──
 # 进程内 TTL 缓存：键含 days 参数；命中直接返回（保留原 analysis_timestamp + cached 命中标记）。
 # 同键并发请求合并（in-flight 共享同一任务），防管理后台反复点刷新并发堆积 LLM 分析请求。
-# TTL 过期自然失效（下次调用重新分析）；多进程部署下内存缓存不共享（本项目单进程部署，可接受）。
-# 空数据结果（total_dialogues==0）不缓存：空库查询本身毫秒级，且避免新数据入库后 TTL 内被旧空结果遮蔽。
+# TTL 过期自然失效（进程内过期条目不主动清理，持续流量下后台刷新周期约 2×TTL）；
+# 多进程部署下内存缓存不共享（本项目单进程部署，可接受）。
+# 空数据结果（total_dialogues==0）不缓存/不落库：空库查询本身毫秒级，且避免新数据入库后 TTL 内被旧空结果遮蔽。
+#
+# 落库持久化（2026-08-15）：分析结果写入 analysis_reports 表（按 days 参数每行一条，upsert 覆盖），
+# 服务重启后先查库秒回上次结果（cached=True），无结果/结果旧于阈值时后台触发重新分析
+# （独立 session 任务，不阻塞当前响应），完成后写库 + 填充进程内缓存。
 OVERVIEW_CACHE_TTL_SECONDS = 600  # 10 分钟（建议区间 10~30 分钟下沿，兼顾演示刷新感知）
 
 
@@ -67,9 +74,24 @@ _ai_overview_inflight: Dict[str, "asyncio.Task[AIOverviewResponse]"] = {}
 
 
 def reset_ai_overview_cache() -> None:
-    """清空 overview 结果缓存与 in-flight 任务（测试隔离用；生产无需调用）。"""
+    """清空 overview 进程内结果缓存与 in-flight 任务（测试隔离用；生产无需调用）。
+
+    落库记录（analysis_reports 表）清理见 clear_ai_overview_reports（异步，
+    需 db session）；conftest 的 _reset_ai_overview_cache autouse fixture
+    两者都会调用。
+    """
     _ai_overview_cache.clear()
     _ai_overview_inflight.clear()
+
+
+async def clear_ai_overview_reports(db: AsyncSession) -> None:
+    """清空 analysis_reports 落库记录（测试隔离用；生产无需调用）。
+
+    2026-08-15 落库持久化：库中记录会跨用例残留（同库场景），reset 扩展
+    连带清理，保证测试隔离与 reset_ai_overview_cache 语义一致。
+    """
+    await db.execute(delete(AnalysisReport))
+    await db.commit()
 
 # ── LangChain 初始化（延迟加载，避免启动时无网络/无 key 崩溃） ──
 
@@ -437,18 +459,24 @@ def _build_db_fallback_summary(
 async def get_ai_overview(
     db: AsyncSession, days: int = 30
 ) -> AIOverviewResponse:
-    """AI 运营概览（结果缓存 + 并发防抖）。
+    """AI 运营概览（落库持久化 + 进程内缓存 + 后台静默刷新）。
 
-    1. TTL 缓存命中：直接返回缓存结果（analysis_timestamp 为实际分析时间，cached=True）
-    2. 同键并发请求合并：in-flight 共享同一分析任务，刷新堆积不放大 LLM 成本
-    3. 未命中：执行 _compute_ai_overview（原分析流程），非空结果写入缓存
+    读取路径（船长 2026-08-15 需求）：
+    1. 进程内 TTL 缓存命中：直接秒回（analysis_timestamp 为实际分析时间，cached=True）
+    2. 查库命中最近一次落库结果：秒回（cached=True）；结果旧于阈值
+       （OVERVIEW_CACHE_TTL_SECONDS=600s）时后台触发重新分析，不阻塞当前响应
+    3. 库中无记录/记录损坏：先统计窗口内对话数——为 0 直接返回真实空态
+       （「暂无对话数据」，不触发后台任务、不写库）；有对话才返回待生成
+       空结果，后台触发首次分析
 
-    缓存行为对调用方透明：未命中时与旧版完全一致，仅在命中时秒回。
+    后台刷新任务（_background_refresh）完成后写库 + 填充进程内缓存；
+    同键 in-flight 合并防抖：并发请求/反复刷新只启动一个刷新任务，
+    不放大 LLM 分析成本。响应契约与旧版一致（字段不变，cached 语义保留）。
     """
     days = max(1, min(days, 365))  # 限制 1-365 天
     key = f"overview:{days}"
 
-    # 1. TTL 缓存命中：返回深拷贝快照（保留原 analysis_timestamp），避免调用方改动共享对象
+    # 1. 进程内 TTL 缓存命中：返回深拷贝快照（保留原 analysis_timestamp），避免调用方改动共享对象
     entry = _ai_overview_cache.get(key)
     if entry is not None and entry.expires_at > time.monotonic():
         logger.info("AI overview cache hit (days=%d)", days)
@@ -456,43 +484,240 @@ async def get_ai_overview(
         response.cached = True
         return response
 
-    # 2. 同键并发请求合并（in-flight 共享同一任务；调用方取消不中断任务）
+    # 2. 查库：最近一次落库结果（秒回，不阻塞当前响应）
+    report = await _load_latest_report(db, days)
+    if report is not None:
+        response = _report_to_response(report)
+        if response is not None:
+            response.cached = True
+            if not _is_report_stale(report):
+                # 结果新鲜：填充进程内缓存加速后续访问，直接秒回
+                cache_cold = key not in _ai_overview_cache
+                _ai_overview_cache[key] = _OverviewCacheEntry(
+                    expires_at=time.monotonic() + OVERVIEW_CACHE_TTL_SECONDS,
+                    response=response,
+                )
+                if cache_cold:
+                    # 冷启动（服务重启后首次访问）：秒回库中上次结果，后台静默刷新
+                    # （验收：重启后打开分析页第一次秒回，后台自动重新分析并更新库）
+                    logger.info(
+                        "AI overview cold start, background refresh (days=%d)",
+                        days,
+                    )
+                    _start_background_refresh(key, days)
+                # 深拷贝后返回：缓存中的快照不受调用方改动影响
+                return response.model_copy(deep=True)
+            # 结果旧于阈值：秒回旧结果，后台静默重新分析（完成后写库）
+            logger.info(
+                "AI overview report stale, background refresh (days=%d)", days
+            )
+            _start_background_refresh(key, days)
+            return response.model_copy(deep=True)
+        logger.warning(
+            "AI overview report corrupted, re-analyzing (days=%d)", days
+        )
+
+    # 3. 库中无记录（或记录损坏）：区分「库为空」与「计算中」——窗口内无对话
+    #    直接返回真实空态（不触发后台任务、不写库），有对话才返回待生成结果
+    if await _count_dialogues(db, days) == 0:
+        logger.info(
+            "AI overview no dialogues in last %d days, returning empty "
+            "(days=%d)",
+            days, days,
+        )
+        return _build_empty_response(days)
+    logger.info(
+        "AI overview no report found, background analyze (days=%d)", days
+    )
+    _start_background_refresh(key, days)
+    return _build_pending_response(days)
+
+
+# ── 落库持久化（analysis_reports 表） ──
+
+async def _load_latest_report(
+    db: AsyncSession, days: int
+) -> Optional[AnalysisReport]:
+    """按 days 参数读取最近一次落库报告（每 days 一行，upsert 语义）。"""
+    return await db.scalar(
+        select(AnalysisReport).where(AnalysisReport.days == days)
+    )
+
+
+def _report_to_response(
+    report: AnalysisReport,
+) -> Optional[AIOverviewResponse]:
+    """回放落库报告为响应对象；快照损坏（非法 JSON/字段）时返回 None（调用方重新分析）。"""
+    try:
+        return AIOverviewResponse.model_validate_json(report.response_json)
+    except Exception:
+        logger.exception(
+            "AI overview report snapshot invalid (days=%d), will re-analyze",
+            report.days,
+        )
+        return None
+
+
+def _is_report_stale(report: AnalysisReport) -> bool:
+    """报告是否旧于阈值（沿用进程内缓存 TTL 语义）。
+
+    以落库时间 updated_at 为基准；SQLite DateTime 读回为 naive，统一按 UTC 处理。
+    """
+    updated = report.updated_at
+    if updated is None:
+        return True
+    if updated.tzinfo is None:
+        updated = updated.replace(tzinfo=timezone.utc)
+    age = datetime.now(timezone.utc) - updated
+    return age.total_seconds() > OVERVIEW_CACHE_TTL_SECONDS
+
+
+def _parse_analysis_timestamp(ts: str) -> datetime:
+    """解析响应中的 analysis_timestamp（ISO 字符串）；异常回退当前时间。"""
+    try:
+        return datetime.fromisoformat(ts)
+    except (ValueError, TypeError):
+        return datetime.now(timezone.utc)
+
+
+async def _upsert_report(
+    db: AsyncSession, days: int, response: AIOverviewResponse
+) -> None:
+    """按 days 覆盖写入分析报告（每 days 一行，upsert 语义）。"""
+    report = await db.scalar(
+        select(AnalysisReport).where(AnalysisReport.days == days)
+    )
+    snapshot = response.model_dump_json()
+    analysis_ts = _parse_analysis_timestamp(response.analysis_timestamp)
+    now = datetime.now(timezone.utc)
+    if report is None:
+        db.add(AnalysisReport(
+            days=days,
+            response_json=snapshot,
+            analysis_timestamp=analysis_ts,
+            created_at=now,
+            updated_at=now,
+        ))
+    else:
+        report.response_json = snapshot
+        report.analysis_timestamp = analysis_ts
+        report.updated_at = now
+    await db.commit()
+
+
+async def _delete_report(db: AsyncSession, days: int) -> None:
+    """按 days 删除落库报告（窗口内无对话时清理陈旧报告，使 stale 报告收敛）。"""
+    await db.execute(delete(AnalysisReport).where(AnalysisReport.days == days))
+    await db.commit()
+
+
+def _build_empty_response(days: int) -> AIOverviewResponse:
+    """窗口内无对话时的真实空态响应（「暂无对话数据」文案；不缓存、不落库）。
+
+    由 _compute_ai_overview 与 get_ai_overview 共用（后者在库中无记录时先统计
+    窗口对话数，为 0 直接返回本响应，不触发后台分析任务）。
+    """
+    return AIOverviewResponse(
+        hot_questions=[],
+        satisfaction_trend=[],
+        satisfaction_direction="平稳",
+        satisfaction_summary="暂无足够数据进行分析",
+        unanswered_questions=[],
+        peak_hours=[],
+        suggestions=[],
+        ai_summary=f"最近 {days} 天内暂无对话数据。",
+        total_dialogues=0,
+        analysis_timestamp=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+def _build_pending_response(days: int) -> AIOverviewResponse:
+    """库中无落库结果时的待生成响应：空结构 + 提示文案（不阻塞当前请求）。
+
+    后台刷新任务完成后写库，用户下次访问即命中真实结果。
+    """
+    return AIOverviewResponse(
+        hot_questions=[],
+        satisfaction_trend=[],
+        satisfaction_direction="平稳",
+        satisfaction_summary="暂无足够数据进行分析",
+        unanswered_questions=[],
+        peak_hours=[],
+        suggestions=[],
+        ai_summary=(
+            f"分析结果尚未生成，正在后台计算（最近 {days} 天），请稍后刷新查看。"
+        ),
+        total_dialogues=0,
+        analysis_timestamp=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+# ── 后台刷新任务（不阻塞当前响应） ──
+
+def _start_background_refresh(key: str, days: int) -> None:
+    """启动后台刷新任务（同键 in-flight 合并：已有在跑任务则不重复启动）。
+
+    任务完成后自动清理 in-flight 登记；异常仅告警不扩散（下次访问重试）。
+    """
     task = _ai_overview_inflight.get(key)
     if task is not None and not task.done():
-        response = await asyncio.shield(task)
-        return response.model_copy(deep=True)
-
-    # 3. 未命中：执行分析并写缓存
-    task = asyncio.create_task(_compute_and_cache_ai_overview(db, key, days))
+        return
+    _ai_overview_inflight.pop(key, None)
+    task = asyncio.create_task(_background_refresh(key, days))
     _ai_overview_inflight[key] = task
-    try:
-        try:
-            response = await asyncio.shield(task)
-        except asyncio.CancelledError:
-            while not task.done():
-                try:
-                    await asyncio.shield(task)
-                except asyncio.CancelledError:
-                    continue
-                except Exception:
-                    break
-            raise
-        return response.model_copy(deep=True)
-    finally:
+
+    def _on_done(t: "asyncio.Task") -> None:
         _ai_overview_inflight.pop(key, None)
+        if t.cancelled():
+            return
+        exc = t.exception()
+        if exc is not None:
+            logger.error(
+                "AI overview background refresh task error (days=%d): %s",
+                days, exc,
+            )
+
+    task.add_done_callback(_on_done)
 
 
-async def _compute_and_cache_ai_overview(
+async def _background_refresh(key: str, days: int) -> None:
+    """后台重新分析并落库（独立 session，不阻塞当前响应）。
+
+    由 _start_background_refresh 调度为 in-flight 共享任务；内部异常仅告警
+    （下次访问重试），绝不扩散到调用方。
+    """
+    try:
+        async with _db_session_factory() as session:
+            await _compute_and_persist_ai_overview(session, key, days)
+        logger.info("AI overview background refresh done (days=%d)", days)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception(
+            "AI overview background refresh failed (days=%d)", days
+        )
+
+
+async def _compute_and_persist_ai_overview(
     db: AsyncSession, key: str, days: int
 ) -> AIOverviewResponse:
-    """执行分析并写入结果缓存（由 get_ai_overview 调度为共享后台任务）。"""
+    """执行分析并写入进程内缓存与持久化表（由后台刷新任务调度）。
+
+    空数据结果（total_dialogues==0）不缓存/不落库（见模块注释）：
+    避免新数据入库后 TTL 内被旧空结果遮蔽；若该 days 已有陈旧落库
+    报告（窗口内对话被删除或自然过期），一并删除使 stale 报告收敛——
+    后续请求走「无记录 + 窗口无对话 → 真实空态」路径，不再秒回过期数据。
+    """
     response = await _compute_ai_overview(db, days)
-    # 空数据结果不缓存（见模块注释）
     if response.total_dialogues > 0:
         _ai_overview_cache[key] = _OverviewCacheEntry(
             expires_at=time.monotonic() + OVERVIEW_CACHE_TTL_SECONDS,
             response=response,
         )
+        await _upsert_report(db, days, response)
+    else:
+        _ai_overview_cache.pop(key, None)
+        await _delete_report(db, days)
     return response
 
 
@@ -526,20 +751,11 @@ async def _compute_ai_overview(
     llm_analysis = False
 
     if total_dialogues == 0:
-        logger.info("No dialogues found in last %d days, returning empty overview", days)
-        # 即使没有对话，高峰时段也可以返回空
-        return AIOverviewResponse(
-            hot_questions=[],
-            satisfaction_trend=[],
-            satisfaction_direction=satisfaction_direction,
-            satisfaction_summary=satisfaction_summary,
-            unanswered_questions=[],
-            peak_hours=[],
-            suggestions=[],
-            ai_summary=f"最近 {days} 天内暂无对话数据。",
-            total_dialogues=0,
-            analysis_timestamp=datetime.now(timezone.utc).isoformat(),
+        logger.info(
+            "No dialogues found in last %d days, returning empty overview",
+            days,
         )
+        return _build_empty_response(days)
 
     # 尝试 LLM 分析
     ai_raw = None

@@ -29,6 +29,7 @@ MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 # 业务表集合（不含 alembic_version / sqlite_* 系统表）
 BUSINESS_TABLES = {
     "admin_audit_logs",
+    "analysis_reports",
     "announcements",
     "app_settings",
     "dialogues",
@@ -257,7 +258,7 @@ def test_announcements_migration_upgrade_downgrade(tmp_path):
     finally:
         conn.close()
 
-    # 回退到基线：仅删除 announcements / llm_usage / admin_audit_logs / app_settings
+    # 回退到基线：仅删除 announcements / llm_usage / admin_audit_logs / app_settings / analysis_reports
     #（均在基线之后引入，同被回退），其余早期表保留
     command.downgrade(cfg, "04436fda61c5")
     tables = _table_sql(db)["tables"]
@@ -265,11 +266,13 @@ def test_announcements_migration_upgrade_downgrade(tmp_path):
     assert "llm_usage" not in tables
     assert "admin_audit_logs" not in tables
     assert "app_settings" not in tables
+    assert "analysis_reports" not in tables
     assert set(tables) == BUSINESS_TABLES - {
         "announcements",
         "llm_usage",
         "admin_audit_logs",
         "app_settings",
+        "analysis_reports",
     }
 
     # 再次升级可重建
@@ -301,15 +304,59 @@ def test_app_settings_migration_upgrade_downgrade(tmp_path):
     finally:
         conn.close()
 
-    # 回退到审计表版本：仅删除 app_settings，其余表保留
+    # 回退到审计表版本：仅删除 app_settings / analysis_reports，其余表保留
     command.downgrade(cfg, "a9f0e1d2c3b4")
     tables = _table_sql(db)["tables"]
     assert "app_settings" not in tables
-    assert set(tables) == BUSINESS_TABLES - {"app_settings"}
+    assert "analysis_reports" not in tables
+    assert set(tables) == BUSINESS_TABLES - {"app_settings", "analysis_reports"}
 
     # 再次升级可重建
     command.upgrade(cfg, "head")
     assert "app_settings" in _table_sql(db)["tables"]
+    assert _current_revision(db) == _head_revision(cfg)
+
+
+# ---------- AI 运营概览落库持久化：analysis_reports 表迁移 ----------
+
+def test_analysis_reports_migration_upgrade_downgrade(tmp_path):
+    """analysis_reports 表迁移：upgrade 建表（days 唯一约束）→ downgrade 回退删表，其余表不受影响。"""
+    db = tmp_path / "reports.db"
+    cfg = _make_config(db)
+    command.upgrade(cfg, "head")
+
+    assert "analysis_reports" in _table_sql(db)["tables"]
+    # 新表可正常读写（每 days 一行，唯一约束防重复行）
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute(
+            "INSERT INTO analysis_reports (days, response_json, analysis_timestamp, created_at, updated_at) "
+            "VALUES (30, '{\"total_dialogues\": 1}', '2026-08-15 00:00:00', "
+            "'2026-08-15 00:00:00', '2026-08-15 00:00:00')"
+        )
+        conn.commit()
+        assert conn.execute(
+            "SELECT response_json FROM analysis_reports WHERE days=30"
+        ).fetchone()[0] == '{"total_dialogues": 1}'
+        # days 唯一约束：同 days 重复插入报错
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO analysis_reports (days, response_json, analysis_timestamp, created_at, updated_at) "
+                "VALUES (30, '{}', '2026-08-15 00:00:00', "
+                "'2026-08-15 00:00:00', '2026-08-15 00:00:00')"
+            )
+    finally:
+        conn.close()
+
+    # 回退到 app_settings 版本：仅删除 analysis_reports，其余表保留
+    command.downgrade(cfg, "d1e2f3a4b5c6")
+    tables = _table_sql(db)["tables"]
+    assert "analysis_reports" not in tables
+    assert set(tables) == BUSINESS_TABLES - {"analysis_reports"}
+
+    # 再次升级可重建
+    command.upgrade(cfg, "head")
+    assert "analysis_reports" in _table_sql(db)["tables"]
     assert _current_revision(db) == _head_revision(cfg)
 
 
@@ -338,13 +385,16 @@ def test_llm_usage_migration_upgrade_downgrade(tmp_path):
     finally:
         conn.close()
 
-    # 回退到公告表版本：仅删除 llm_usage / admin_audit_logs / app_settings，其余表保留
+    # 回退到公告表版本：仅删除 llm_usage / admin_audit_logs / app_settings / analysis_reports，其余表保留
     command.downgrade(cfg, "e06ede5acb5a")
     tables = _table_sql(db)["tables"]
     assert "llm_usage" not in tables
     assert "admin_audit_logs" not in tables
     assert "app_settings" not in tables
-    assert set(tables) == BUSINESS_TABLES - {"llm_usage", "admin_audit_logs", "app_settings"}
+    assert "analysis_reports" not in tables
+    assert set(tables) == BUSINESS_TABLES - {
+        "llm_usage", "admin_audit_logs", "app_settings", "analysis_reports"
+    }
 
     # 再次升级可重建
     command.upgrade(cfg, "head")

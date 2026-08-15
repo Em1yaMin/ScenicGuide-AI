@@ -76,10 +76,11 @@ alembic history               # 迁移历史
   `down_revision = None`）。
 - `app/core/migrations.py` — 程序化入口 `run_migrations()`（三态分流：空库 upgrade / 遗留库先幂等
   create_all 补缺表再 stamp 基线 + upgrade head 重放全部迁移 / 版本化库 upgrade；线程池执行，因 env.py 内部 `asyncio.run` 不能在运行中事件循环里直接调用）。
-- 测试 `tests/test_migrations.py`（14 用例） — 空库建齐 / DDL 与 ORM 等价 / 遗留库 stamp 后
+- 测试 `tests/test_migrations.py`（15 用例） — 空库建齐 / DDL 与 ORM 等价 / 遗留库 stamp 后
   upgrade 重放不丢数据 / **遗留库缺表场景（仅部分表的遗留库 stamp 前 create_all 补齐缺失表、数据不丢）** /
   版本化库幂等 / `run_migrations` 三态路径 / 公告表、llm_usage、users 加列（`b4c3d2e1f0a9`）、审计表
-  （`a9f0e1d2c3b4`）、app_settings（`d1e2f3a4b5c6`）升级回退 / **旧形状遗留库补列（仅部分表的旧形状库 upgrade 后补齐 users 新列）**
+  （`a9f0e1d2c3b4`）、app_settings（`d1e2f3a4b5c6`）、analysis_reports（`e7f8a9b0c1d2`，AI 运营概览
+  落库持久化）升级回退 / **旧形状遗留库补列（仅部分表的旧形状库 upgrade 后补齐 users 新列）**
   （全部用临时文件库，不触碰真实 digital_human.db）。
 
 ## 四、部署与升级（Docker）

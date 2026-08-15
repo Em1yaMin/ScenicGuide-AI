@@ -43,15 +43,36 @@ def _pin_embedding_api_key_off(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _reset_ai_overview_cache():
-    """每个测试重置 AI 运营概览结果缓存，避免跨测试污染。
+async def _reset_ai_overview_cache(db_session):
+    """每个测试重置 AI 运营概览结果缓存/落库记录，避免跨测试污染。
 
-    overview 提速：analytics_service 模块级 TTL 缓存 + in-flight 合并，
-    若不重置，前一个测试缓存的同 days 结果会泄漏到后一个测试（断言脏数据）。
+    overview 提速 + 落库持久化（2026-08-15）：analytics_service 模块级
+    TTL 缓存 + in-flight 合并 + analysis_reports 落库记录，若不重置，
+    前一个测试缓存/写入的同 days 结果会泄漏到后一个测试（断言脏数据）。
+    依赖 db_session（per-test 内存库）清理落库记录。
     """
     from app.services import analytics_service
 
     analytics_service.reset_ai_overview_cache()
+    await analytics_service.clear_ai_overview_reports(db_session)
+
+
+@pytest.fixture(autouse=True)
+def _pin_ai_overview_background_refresh(monkeypatch):
+    """每个测试固定 AI 概览后台刷新为 noop，避免写入真实文件库。
+
+    落库持久化（2026-08-15）：get_ai_overview 未命中时启动后台刷新任务
+    （_background_refresh 用 _db_session_factory 连 settings.DATABASE_URL，
+    测试环境未设置时默认 digital_human.db 文件库），不 patch 会污染真实库。
+    需要真实后台行为（落库/刷新链路）的测试显式 monkeypatch 覆盖该函数，
+    并注入指向测试 db_session 的 session 工厂。
+    """
+    from app.services import analytics_service
+
+    async def _noop(_key: str, _days: int) -> None:
+        pass
+
+    monkeypatch.setattr(analytics_service, "_background_refresh", _noop)
 
 
 @pytest.fixture(autouse=True)

@@ -10,6 +10,7 @@ from app.models.announcement import Announcement
 from app.models.usage import LLMUsage
 from app.models.admin_audit import AdminAuditLog
 from app.models.app_setting import AppSetting
+from app.models.analysis_report import AnalysisReport
 
 __all__ = [
     "Base",
@@ -23,4 +24,5 @@ __all__ = [
     "LLMUsage",
     "AdminAuditLog",
     "AppSetting",
+    "AnalysisReport",
 ]

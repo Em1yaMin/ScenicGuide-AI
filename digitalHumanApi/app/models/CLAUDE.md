@@ -23,6 +23,7 @@ models/
   usage.py            # LLMUsage — token 用量记账（C5）
   admin_audit.py      # AdminAudit — 管理员操作审计日志（operator/action/target/detail，账号管理 2026-08-13）
   app_setting.py      # AppSetting — 通用 key-value 配置表（key PK/value/updated_at）+ 数字人形象常量（DIGITAL_HUMAN_CHARACTERS 13 个，2026-08-14，见 AGENTS.md「数字人形象管理」专节）
+  analysis_report.py  # AnalysisReport — AI 运营分析概览报告持久化（days 唯一/response_json 快照/analysis_timestamp/created_at/updated_at，2026-08-15 落库持久化，见 AGENTS.md「AI 运营分析」专节）
   __init__.py         # 重导出 Base + 所有模型（使 autogenerate/Base.metadata 发现所有表）
 ```
 
