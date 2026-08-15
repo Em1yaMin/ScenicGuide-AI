@@ -464,7 +464,9 @@ async def get_ai_overview(
     1. 进程内 TTL 缓存命中：直接秒回（analysis_timestamp 为实际分析时间，cached=True）
     2. 查库命中最近一次落库结果：秒回（cached=True）；结果旧于阈值
        （OVERVIEW_CACHE_TTL_SECONDS=600s）时后台触发重新分析，不阻塞当前响应
-    3. 库中无记录/记录损坏：返回待生成空结果，后台触发首次分析
+    3. 库中无记录/记录损坏：先统计窗口内对话数——为 0 直接返回真实空态
+       （「暂无对话数据」，不触发后台任务、不写库）；有对话才返回待生成
+       空结果，后台触发首次分析
 
     后台刷新任务（_background_refresh）完成后写库 + 填充进程内缓存；
     同键 in-flight 合并防抖：并发请求/反复刷新只启动一个刷新任务，
@@ -514,7 +516,15 @@ async def get_ai_overview(
             "AI overview report corrupted, re-analyzing (days=%d)", days
         )
 
-    # 3. 库中无记录（或记录损坏）：返回待生成空结果，后台触发分析
+    # 3. 库中无记录（或记录损坏）：区分「库为空」与「计算中」——窗口内无对话
+    #    直接返回真实空态（不触发后台任务、不写库），有对话才返回待生成结果
+    if await _count_dialogues(db, days) == 0:
+        logger.info(
+            "AI overview no dialogues in last %d days, returning empty "
+            "(days=%d)",
+            days, days,
+        )
+        return _build_empty_response(days)
     logger.info(
         "AI overview no report found, background analyze (days=%d)", days
     )
@@ -592,6 +602,26 @@ async def _upsert_report(
         report.analysis_timestamp = analysis_ts
         report.updated_at = now
     await db.commit()
+
+
+def _build_empty_response(days: int) -> AIOverviewResponse:
+    """窗口内无对话时的真实空态响应（「暂无对话数据」文案；不缓存、不落库）。
+
+    由 _compute_ai_overview 与 get_ai_overview 共用（后者在库中无记录时先统计
+    窗口对话数，为 0 直接返回本响应，不触发后台分析任务）。
+    """
+    return AIOverviewResponse(
+        hot_questions=[],
+        satisfaction_trend=[],
+        satisfaction_direction="平稳",
+        satisfaction_summary="暂无足够数据进行分析",
+        unanswered_questions=[],
+        peak_hours=[],
+        suggestions=[],
+        ai_summary=f"最近 {days} 天内暂无对话数据。",
+        total_dialogues=0,
+        analysis_timestamp=datetime.now(timezone.utc).isoformat(),
+    )
 
 
 def _build_pending_response(days: int) -> AIOverviewResponse:
@@ -709,20 +739,11 @@ async def _compute_ai_overview(
     llm_analysis = False
 
     if total_dialogues == 0:
-        logger.info("No dialogues found in last %d days, returning empty overview", days)
-        # 即使没有对话，高峰时段也可以返回空
-        return AIOverviewResponse(
-            hot_questions=[],
-            satisfaction_trend=[],
-            satisfaction_direction=satisfaction_direction,
-            satisfaction_summary=satisfaction_summary,
-            unanswered_questions=[],
-            peak_hours=[],
-            suggestions=[],
-            ai_summary=f"最近 {days} 天内暂无对话数据。",
-            total_dialogues=0,
-            analysis_timestamp=datetime.now(timezone.utc).isoformat(),
+        logger.info(
+            "No dialogues found in last %d days, returning empty overview",
+            days,
         )
+        return _build_empty_response(days)
 
     # 尝试 LLM 分析
     ai_raw = None

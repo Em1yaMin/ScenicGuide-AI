@@ -707,6 +707,33 @@ async def test_overview_without_key_uses_db_fallback(db_session):
 # ── 本地 LLM 量化评估（阶段4：Dify Workflow 评估本地化） ──
 
 
+@pytest.mark.anyio
+async def test_analysis_loop_survives_batch_failure(monkeypatch):
+    """分析定时任务在 batch_evaluate 异常时记录日志并继续下一轮，不中断。"""
+    calls = {"n": 0}
+
+    async def flaky_batch() -> int:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("simulated local LLM evaluation outage")
+        return 0
+
+    sleeps = {"n": 0}
+
+    async def scripted_sleep(_seconds: float) -> None:
+        sleeps["n"] += 1
+        if sleeps["n"] >= 2:
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr(analysis_mod, "batch_evaluate", flaky_batch)
+    monkeypatch.setattr(asyncio, "sleep", scripted_sleep)
+
+    await analysis_loop()
+
+    # 第一轮失败后循环继续执行了后续轮次；CancelledError 被循环捕获后正常退出
+    assert calls["n"] == 2
+
+
 def _make_session_factory(db_session):
     """构造 yield 指定 db_session 的零参 asynccontextmanager 工厂（供 monkeypatch）。"""
 
