@@ -649,9 +649,17 @@ const hasAIData = computed(
           </div>
         </template>
 
-        <!-- AI 空态 -->
-        <div v-else-if="!aiLoading && !aiError" class="ai-empty">
-          <p>AI 分析暂无数据，请先积累对话记录</p>
+        <!-- AI 空态（卡片化） -->
+        <div v-else-if="!aiLoading && !aiError" class="ai-suggestions-card">
+          <div class="chart-header">
+            <h3>💡 运营优化建议</h3>
+            <p class="chart-annotation">基于 AI 分析生成的建议</p>
+          </div>
+          <div class="suggestions-list">
+            <div class="suggestion-item">
+              <span class="suggestion-text">AI 分析暂无数据，请先积累对话记录</span>
+            </div>
+          </div>
         </div>
       </div>
     </template>
@@ -1097,13 +1105,6 @@ const hasAIData = computed(
   color: var(--ink);
   line-height: 1.5;
   padding-top: 2px;
-}
-
-.ai-empty {
-  padding: var(--space-3xl);
-  text-align: center;
-  color: var(--slate);
-  font-size: var(--text-body);
 }
 
 /* ── Responsive ── */
