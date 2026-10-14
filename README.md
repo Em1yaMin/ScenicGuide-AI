@@ -26,6 +26,7 @@
 - [文档索引](#文档索引)
 - [测试与质量门](#测试与质量门)
 - [常见问题](#常见问题)
+- [致谢](#致谢)
 - [许可证](#许可证)
 
 ## 功能清单
@@ -113,7 +114,7 @@
 
 - **访客端**：首页（公告 + 热门景点 + 推荐问句）+ 数字人对话页（iframe 嵌入 ADH，内置完整对话/语音功能）
 - **管理后台**：数据大屏、分析报告、知识库管理、公告管理、记忆管理、管理员 Agent、成本仪表盘、账号管理（含操作审计）、数字人形象管理
-- **ADH 本地数字人**：基于 awesome-digital-human-live2d 定制，引擎化架构（Registry + Factory + Pool），LangChainAgent 默认引擎直连本后端对话接口
+- **ADH 本地数字人**：基于 [awesome-digital-human-live2d](https://github.com/wan-h/awesome-digital-human-live2d)（[致谢](#致谢)）定制，引擎化架构（Registry + Factory + Pool），LangChainAgent 默认引擎直连本后端对话接口
 
 ### 技术栈
 
@@ -442,6 +443,18 @@ A: 开发环境由 Vite 代理转发（无跨域）；直接跨端口访问需�
 ---
 
 更多实现细节与坑位见 **`AGENTS.md`**（项目记忆，唯一权威源，随项目持续更新）。
+
+---
+
+## 致谢
+
+本项目的数字人交互部分（`live2d-frontend/`）是在开源项目 **AWESOME-DIGITAL-HUMAN** 的基础上定制而来的，在此向原作者与社区致以诚挚的感谢。
+
+- **[wan-h/awesome-digital-human-live2d](https://github.com/wan-h/awesome-digital-human-live2d)**（作者 [wan-h](https://github.com/wan-h)，MIT License, Copyright (c) 2023 wan-h）：本项目的 Live2D 数字人前端、Live2D 控制器与引擎化架构（Registry + Factory + Pool）借鉴并派生自该项目，`live2d-frontend/` 目录保留其原始 `LICENSE`，本项目的改动集中在接入自己的对话链路与业务需求。感谢作者与「沐光而行」开源社区的持续投入。
+- **[Live2D Cubism](https://github.com/Live2D)**（Live2D Inc.）：`live2d-frontend/web/app/lib/live2d/` 下的 Cubism Core / Framework，以及 13 个 Live2D 官方示例模型（Hiyori、Mao、Miara、Tsumiki、Chitose、Haru、Hibiki、Izumi、Kei、Shizuku、Epsilon、Rice）均来自 Live2D，版权与使用条款归 Live2D Inc. 所有，详见各目录内的 `LICENSE.md` 与 Live2D 官方条款。
+- **[Dify](https://github.com/langgenius/dify)**：本项目的工作流编排与「演示兜底」链路搭建在 Dify 之上，`doc/dify配置/` 下的提示词与工作流规范均针对 Dify 编写。
+- 也感谢腾讯云语音识别、阿里云 DashScope（Qwen TTS / Embedding）与高德开放平台提供的语音与地图能力。
+- 以及本项目直接或间接依赖的所有开源库作者：FastAPI、Vue 3、LangChain / LangGraph、deepagents、SQLAlchemy、Alembic、Playwright 等。
 
 ---
 
